@@ -35,10 +35,18 @@ other concurrency levels, BF16 and TensorRT-LLM results.
 
 On one B200, the benchmark overlay kept SGLang's recurrent DFlash2
 verification and replayed each accepted prefix into the FP32 state. The
-reverse-order NVFP4 chat test at concurrency 16 measured 2,957 tok/s with
-the overlay and 2,686 tok/s with stock DFlash2, a 10.1% gain. The two paths
-matched all 64 greedy sequences in a separate 256-token check. This
-measurement applies to the stock DFlash2 benchmark overlay.
+reverse-order run measured width-8 DFlash2 at concurrency 16 with 32
+request slots, 64 greedy NVFP4 chat prompts and a 1,024-token output limit.
+
+![B200 NVFP4 chat at concurrency 16. Stock DFlash2 reached 2,685.6 output tok/s and the recurrent GDN replay overlay reached 2,957.3 output tok/s.](figures/b200-dflash2-recurrent-replay-throughput.svg)
+
+| DFlash2 configuration | Output tok/s | Median decode tok/s per request | Median time to first token |
+|---|---:|---:|---:|
+| Stock GDN snapshots | 2,685.6 | 190.2 | 130 ms |
+| Recurrent GDN replay overlay | 2,957.3 | 210.5 | 129 ms |
+
+Replay raised aggregate throughput by **10.1%**. A separate 256-token
+check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
 ## RTX PRO 6000 · Qwen3.8-27B NVFP4

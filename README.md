@@ -59,9 +59,8 @@ request returned 32 tokens and the trace contained six DFlash2 tree rounds.
   explicit settings against the target and drafter checkpoints.
 - DFlash2 lattice rounds skip predecessor-token bookkeeping used by n-gram
   drafting. The B200 measurements include greedy token checks.
-- The recurrent GDN replay benchmark overlay improved stock DFlash2 NVFP4
-  chat throughput by 10.1% at concurrency 16 and matched all 64 greedy
-  sequences in the reverse-order test. The overlay is a separate benchmark.
+- The [recurrent GDN replay benchmark](#experimental-recurrent-gdn-replay)
+  measures accepted-prefix replay with stock DFlash2.
 
 [Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.3.0) · [B200 replay results](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
@@ -136,6 +135,23 @@ code / math / chat order.
 The paired dense-model run compared the two speculative routes. The B200
 Flash Next chart and table include a matched stock SGLang AR lane and use
 MTP as the speculative baseline. [Dense 27B benchmark](docs/performance.md#b200--qwen38-27b) · [Flash Next chart and table](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
+
+#### Experimental recurrent GDN replay
+
+The benchmark overlay used width-8 stock DFlash2 on one B200 with SGLang
+0.5.23 and 32 request slots. Both timed runs used the same 64 greedy NVFP4
+chat prompts at concurrency 16 and a 1,024-token output limit.
+
+![B200 NVFP4 chat at concurrency 16. Stock DFlash2 reached 2,685.6 output tok/s and the recurrent GDN replay overlay reached 2,957.3 output tok/s.](docs/figures/b200-dflash2-recurrent-replay-throughput.svg)
+
+| DFlash2 configuration | Output tok/s | Median decode tok/s per request | Median time to first token |
+|---|---:|---:|---:|
+| Stock GDN snapshots | 2,685.6 | 190.2 | 130 ms |
+| Recurrent GDN replay overlay | **2,957.3** | **210.5** | 129 ms |
+
+Replay raised aggregate throughput by **10.1%**. A separate 256-token
+check matched all **64 of 64** stock greedy sequences.
+[Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
 ### RTX PRO 6000 · Qwen3.8-27B NVFP4
 
