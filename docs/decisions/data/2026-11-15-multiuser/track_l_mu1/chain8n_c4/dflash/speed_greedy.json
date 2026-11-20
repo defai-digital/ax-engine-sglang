@@ -1,0 +1,72 @@
+{
+  "mode": "dflash",
+  "preset": "greedy",
+  "thinking": false,
+  "max_tokens": 1024,
+  "n_requests": 64,
+  "results": [
+    {
+      "concurrency": 4,
+      "n_requests": 64,
+      "wall_s": 9.906378229148686,
+      "output_tokens": 10377,
+      "output_tok_s": 1047.5069455218809,
+      "per_req_decode_tok_s_p50": 324.5814745858262,
+      "per_req_decode_tok_s_p10": 292.95393026819096,
+      "ttft_s_p50": 0.09323186241090298,
+      "ttft_s_p90": 0.11572167975828052,
+      "mean_completion_tokens": 162.140625,
+      "truncated_frac": 0.0,
+      "prompt_set": "code",
+      "spec": {
+        "raw_delta": {
+          "sglang:generation_tokens_total": 10377.0,
+          "sglang:spec_verify_calls_total": 1374.0
+        },
+        "mean_acceptance_length": 7.5524017467248905
+      }
+    },
+    {
+      "concurrency": 4,
+      "n_requests": 64,
+      "wall_s": 26.003950478043407,
+      "output_tokens": 27060,
+      "output_tok_s": 1040.6111187932108,
+      "per_req_decode_tok_s_p50": 306.39575314933734,
+      "per_req_decode_tok_s_p10": 274.98549906585174,
+      "ttft_s_p50": 0.092047467129305,
+      "ttft_s_p90": 0.10472600208595395,
+      "mean_completion_tokens": 422.8125,
+      "truncated_frac": 0.03125,
+      "prompt_set": "math",
+      "spec": {
+        "raw_delta": {
+          "sglang:generation_tokens_total": 27060.0,
+          "sglang:spec_verify_calls_total": 4369.0
+        },
+        "mean_acceptance_length": 6.193636987869078
+      }
+    },
+    {
+      "concurrency": 4,
+      "n_requests": 64,
+      "wall_s": 78.16243650577962,
+      "output_tokens": 50146,
+      "output_tok_s": 641.5613719550824,
+      "per_req_decode_tok_s_p50": 171.119649445256,
+      "per_req_decode_tok_s_p10": 136.12791981454143,
+      "ttft_s_p50": 0.09096902585588396,
+      "ttft_s_p90": 0.10191551316529512,
+      "mean_completion_tokens": 783.53125,
+      "truncated_frac": 0.53125,
+      "prompt_set": "chat",
+      "spec": {
+        "raw_delta": {
+          "sglang:generation_tokens_total": 50146.0,
+          "sglang:spec_verify_calls_total": 15485.0
+        },
+        "mean_acceptance_length": 3.2383597029383275
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+ax-engine-sglang (SGLang plugin for NVIDIA GPUs)
+Copyright 2026 ax-engine-sglang contributors.
+
+Distribution `ax-engine-sglang`, import package `ax_engine_sglang`, SGLang plugin name `ax-engine`
+(`SGLANG_PLUGINS=ax-engine`). `ax-engine` / `ax_engine` is the AX Engine Apple Silicon runtime,
+a separate package; the two can be installed side by side.
+
+This package is a derivative of DForkTree v0.1.0 (commit eeed8b6),
+Copyright 2026 Zhicheng Zheng, Cheng Zhang, and Chenkai Tang, licensed under Apache-2.0.
+Files taken from it and modified: plugin.py (from fc1_plugin.py), fc1_branch64.py, fc1_fused.py,
+fc1_conv.py, tree_kernels.py, tree_ops.py. Files taken unchanged: fc1_block_inverse.py,
+fc1_builder.py, fc1_plan.py, fc1_verify.py, ngram_gpu.py.
+
+Changes made here (see benchmarks/sglang/patch_dforktree.py for each one as a text patch, and
+results/track_l_l0/REPORT.md for the measurements):
+- tree_ops.ngram_path_fn: the scoring closure that the release returns but never defines,
+  reconstructed from the paper and the README defaults (not the authors' code).
+- fc1_branch64: prefix length when the scheduler's host mirror is absent; optional overhead fixes
+  (ax_fast.py, AX_FAST=1); DFlash2 lattice trees (ax_lattice.py, AX_LATTICE=1).
+- fc1_fused: target sizes other than Qwen3.5-9B (AX_GDN_LAYERS / AX_GDN_HEADS); 64-bit layer, slot
+  and intermediate-slot offsets in the state-commit kernel (the 32-bit layer offset wrote outside
+  the state buffer on Qwen3.8-27B); optional diagnostics (AX_GDN_DEBUG=1).
+- Several running requests (ax_chain.py, new): chain rounds on SGLang's own DFlash verify next to
+  the one-request tree; the fused tree hooks in fc1_fused.py and fc1_conv.py run only in tree
+  rounds; 64-bit slot offsets in fc1_conv.py and tree_kernels.py.
+- The release's copy of SGLang 0.5.22's dflash_worker_v2.py is not included: worker_gen.py builds
+  the tree worker from the installed SGLang at start-up.
+
+DForkTree's own notice:
+  The SGLang worker integration is adapted from SGLang 0.5.22
+  (https://github.com/sgl-project/sglang), licensed under Apache-2.0.
+  The implementation uses the native SGLang speculative verification API.
+  The diagonal triangular recurrence in fc1_block_inverse.py is adapted from Flash Linear
+  Attention's solve_tril implementation (MIT license). Its license is reproduced in
+  licenses/FLASH_LINEAR_ATTENTION-LICENSE.

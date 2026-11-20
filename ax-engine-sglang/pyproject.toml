@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ax-engine-sglang"
+version = "0.2.0"
+description = "AX Engine for SGLang: speculative decoding and inference acceleration on Linux NVIDIA CUDA"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "licenses/*"]
+dependencies = ["sglang==0.5.23", "numpy"]
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/defai-digital/ax-engine-sglang"
+Documentation = "https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md"
+Changelog = "https://github.com/defai-digital/ax-engine-sglang/releases"
+
+[project.scripts]
+ax-engine-sglang = "ax_engine_sglang.cli:main"
+
+[project.entry-points."sglang.srt.plugins"]
+ax-engine = "ax_engine_sglang.plugin:register"
+
+[tool.setuptools.packages.find]
+include = ["ax_engine_sglang*"]

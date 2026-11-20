@@ -1,0 +1,27 @@
+{
+  "sync": true,
+  "pid": 290689,
+  "rounds": 3000,
+  "phases": {
+    "fwd.draft.TARGET_VERIFY": {
+      "calls": 2834,
+      "mean_ms": 1.7016171285489556
+    },
+    "fwd.target.EXTEND": {
+      "calls": 166,
+      "mean_ms": 34.2176147394376
+    },
+    "fwd.target.TARGET_VERIFY": {
+      "calls": 2834,
+      "mean_ms": 14.840970625745983
+    },
+    "interval": {
+      "calls": 2990,
+      "mean_ms": 21.392030009289698
+    },
+    "round": {
+      "calls": 3000,
+      "mean_ms": 20.056883573687326
+    }
+  }
+}
