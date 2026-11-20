@@ -4,6 +4,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ax_engine_sglang.defaults import LaunchConfigError, plan, resolve
@@ -152,6 +153,37 @@ class StockRouteDefaultsTests(unittest.TestCase):
 
 
 class ResolveTests(unittest.TestCase):
+    def test_resolve_uses_the_selected_cuda_device_for_moe_defaults(self):
+        cutlass = {"moe_runner_backend": "flashinfer_cutlass",
+                   "speculative_moe_runner_backend": "flashinfer_cutlass"}
+        for device, gpu_id, capabilities, expected in (
+            ("cuda", 1, [(10, 0), (12, 0)], cutlass),
+            ("cuda", 1, [(12, 0), (10, 0)], {}),
+            (None, None, [(11, 0)], cutlass),
+        ):
+            with self.subTest(gpu_id=gpu_id, capabilities=capabilities):
+                probe = Mock(side_effect=lambda gpu_id=0: capabilities[gpu_id])
+                cuda = SimpleNamespace(is_available=lambda: True, get_device_capability=probe)
+                declared = {}
+                server_args = args("EAGLE", device=device, base_gpu_id=gpu_id, model_path="target")
+                with patch.dict(sys.modules, {"torch": SimpleNamespace(cuda=cuda)}):
+                    resolve(server_args, environ={},
+                            load=lambda path, name, revision: FLASH_NEXT if name == "config.json" else None,
+                            declare=lambda a, source, **flags: declared.update(flags))
+                self.assertEqual(declared, expected)
+                probe.assert_called_once_with(0 if gpu_id is None else gpu_id)
+
+    def test_resolve_skips_cuda_on_an_explicit_cpu_launch(self):
+        cuda_available = Mock(return_value=True)
+        probe = Mock(return_value=(12, 0))
+        cuda = SimpleNamespace(is_available=cuda_available, get_device_capability=probe)
+        with patch.dict(sys.modules, {"torch": SimpleNamespace(cuda=cuda)}):
+            result = resolve(args("EAGLE", device="cpu", model_path="target"), environ={},
+                             load=lambda path, name, revision: FLASH_NEXT if name == "config.json" else None)
+        self.assertEqual(result.args, {})
+        cuda_available.assert_not_called()
+        probe.assert_not_called()
+
     def test_resolve_writes_env_declares_args_once(self):
         configs = {("target", "config.json"): QWEN38_27B, ("draft", "config.json"): DFLASH2}
         declared, cleared, environ = [], [], {}

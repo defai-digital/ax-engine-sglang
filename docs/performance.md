@@ -31,6 +31,16 @@ paired the stock and add-on speculative routes. The study also records
 other concurrency levels, BF16 and TensorRT-LLM results.
 [B200 dense-model study](decisions/2026-11-16-dual-attention-backend.md)
 
+### Experimental recurrent GDN replay
+
+On one B200, the benchmark overlay kept SGLang's recurrent DFlash2
+verification and replayed each accepted prefix into the FP32 state. The
+reverse-order NVFP4 chat test at concurrency 16 measured 2,957 tok/s with
+the overlay and 2,686 tok/s with stock DFlash2, a 10.1% gain. The two paths
+matched all 64 greedy sequences in a separate 256-token check. This
+measurement applies to the stock DFlash2 benchmark overlay.
+[Benchmark data and reproduction](decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
+
 ## RTX PRO 6000 · Qwen3.8-27B NVFP4
 
 All lanes used SGLang 0.5.23, a fixed 128-token greedy output, FlashInfer
@@ -62,6 +72,22 @@ each matched that reference on all ten prompts. The independent AR and
 DFlash2 cohorts passed all 28 checks in the recorded sampling comparison.
 Parity AR reached 47.93 tok/s, parity chain 21.68 tok/s and parity tree
 14.65 tok/s on that shorter workload. [Parity protocol and results](reports/2026-11-19-rtx-nvfp4-parity.md)
+
+That first profile ran each target projection once per candidate. The current
+profile pads AR decode and verification to groups of 16 projection rows. On
+the same ten inputs, tree and chain again matched the AR reference on all ten
+prompts and the sampling comparison passed all 28 checks.
+
+| RTX PRO 6000 parity profile, 32-token budget, concurrency one | Output tok/s | Relative to AR |
+|---|---:|---:|
+| Parity AR | 46.34 | 1.00× |
+| Parity DFlash2 tree, 16 nodes | 86.77 | 1.87× |
+| Parity DFlash2 chain, width 8 | 88.24 | 1.90× |
+
+With a 128-token budget, tree and chain matched AR on all ten complete
+sequences. Tree reached 123.64 tok/s and chain 122.88 tok/s against 49.09
+tok/s for parity AR.
+[Row group measurements and limits](reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
 ## Jetson Thor · Qwen3.8-27B
 

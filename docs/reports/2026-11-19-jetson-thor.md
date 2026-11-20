@@ -15,10 +15,10 @@ greedy, thinking off. Nothing in this report is projected.
 
 | Item | Value |
 |---|---|
-| Hosts | Two Jetson Thor hosts, Thor A and Thor B |
+| Hosts | `df-thor-01` (192.168.2.61), `df-thor-02` (192.168.2.62) |
 | GPU | NVIDIA Thor, SM 11.0, aarch64, 122 GB unified LPDDR5X (~273 GB/s) |
 | OS / driver | L4T R39.2.0, kernel 6.8.12-1021-tegra, driver 595.78 |
-| Link | 2.5 GbE over TCP/IP |
+| Link | 2.5 GbE (`enP2p1s0`), no InfiniBand / RoCE |
 | SGLang | `lmsysorg/sglang:v0.5.23-cu130` (torch 2.14.1+cu130, Triton 3.8, FlashInfer 0.7.2, sgl_kernel 0.4.10) |
 | vLLM | `nvcr.io/nvidia/vllm:26.11-py3` |
 | ax-engine-sglang | working tree at `fcc5ee2` (ax-engine-sglang sources identical to `dec7f17`); section 9 re-checks `6b0df5d` and the fixes made after it |
@@ -141,15 +141,15 @@ PLE n-gram table in layer 1, 68 GB NVFP4 experts, 16 GB bf16 dense), so it
 was served with SGLang pipeline parallelism over the two hosts:
 
 ```text
---pp-size 2 --nnodes 2 --dist-init-addr <rank-0-host>:29500 --node-rank {0,1}
+--pp-size 2 --nnodes 2 --dist-init-addr 192.168.2.62:29500 --node-rank {0,1}
 --max-running-requests 4 --chunked-prefill-size 2048 --mem-fraction-static 0.90
 --moe-runner-backend flashinfer_cutlass --speculative-moe-runner-backend flashinfer_cutlass
-SGLANG_PP_LAYER_PARTITION=4,44  NCCL_SOCKET_IFNAME=<ethernet-interface>  GLOO_SOCKET_IFNAME=<ethernet-interface>  NCCL_IB_DISABLE=1
+SGLANG_PP_LAYER_PARTITION=4,44  NCCL_SOCKET_IFNAME=GLOO_SOCKET_IFNAME=enP2p1s0  NCCL_IB_DISABLE=1
 SGLANG_ENABLE_PP_SPEC=1   # MTP lanes only
 ```
 
-Stage 0 (Thor B, layers 0–3 with the PLE table) and stage 1
-(Thor A, layers 4–47, MTP head, LM head) each hold 74.0 GB of weights.
+Stage 0 (`df-thor-02`, layers 0–3 with the PLE table) and stage 1
+(`df-thor-01`, layers 4–47, MTP head, LM head) each hold 74.0 GB of weights.
 The first split, 10/38, left stage 0 only 6 GB and no KV cache. The ax-engine-sglang
 lanes add `SGLANG_PLUGINS=ax-engine AX_QSA_RING=16` on both stages.
 Coordinator: `results/thor_2026-11-19/sglang/scripts/run_fn_pp.sh`.
@@ -284,13 +284,13 @@ the 9B FlashInfer row.
 
 | Check | Host | Result |
 |---|---|---|
-| CPU test suite (`ax-engine-sglang/tests`, aarch64 container) | Thor B, Thor A | `6b0df5d`: 105 passed; with fixes: 107 passed |
-| All nine `tests/gpu_*.py` checks (no model weights) | Thor A | pass at `6b0df5d` and with fixes; NVFP4 CUTLASS maximum relative error 1.5e-4 |
-| Launch-default resolution (27B NVFP4, 27B bf16, 9B, Flash-Next MTP) | Thor B | GDN shape 48 / 48 and 24 / 32, lattice for DFlash2, CUTLASS MoE and `AX_QSA_RING=16` for Flash-Next on SM110; an unreadable drafter config stops the launch |
-| 27B NVFP4 tree, minimal command, `6b0df5d` | Thor B | 107.6 / 93.3 / 43.7 tok/s; 36 of 36 outputs token-identical to the `eb6e15a` run |
-| 27B NVFP4 tree, with fixes, `AX_LATTICE=1` set by hand | Thor B | 109.1 / 94.5 / 44.3 tok/s; 36 of 36 identical |
-| 9B tree on FlashInfer, minimal command, `6b0df5d` | Thor B | 125.5 / 98.2 / 46.2 tok/s; teacher check passed (section 2) |
-| 9B tree on FlashInfer, with fixes | Thor B | 127.3 / 99.3 / 46.7 tok/s; 36 of 36 identical to the `6b0df5d` run |
+| CPU test suite (`ax-engine-sglang/tests`, aarch64 container) | `df-thor-02`, `df-thor-01` | `6b0df5d`: 105 passed; with fixes: 107 passed |
+| All nine `tests/gpu_*.py` checks (no model weights) | `df-thor-01` | pass at `6b0df5d` and with fixes; NVFP4 CUTLASS maximum relative error 1.5e-4 |
+| Launch-default resolution (27B NVFP4, 27B bf16, 9B, Flash-Next MTP) | `df-thor-02` | GDN shape 48 / 48 and 24 / 32, lattice for DFlash2, CUTLASS MoE and `AX_QSA_RING=16` for Flash-Next on SM110; an unreadable drafter config stops the launch |
+| 27B NVFP4 tree, minimal command, `6b0df5d` | `df-thor-02` | 107.6 / 93.3 / 43.7 tok/s; 36 of 36 outputs token-identical to the `eb6e15a` run |
+| 27B NVFP4 tree, with fixes, `AX_LATTICE=1` set by hand | `df-thor-02` | 109.1 / 94.5 / 44.3 tok/s; 36 of 36 identical |
+| 9B tree on FlashInfer, minimal command, `6b0df5d` | `df-thor-02` | 125.5 / 98.2 / 46.2 tok/s; teacher check passed (section 2) |
+| 9B tree on FlashInfer, with fixes | `df-thor-02` | 127.3 / 99.3 / 46.7 tok/s; 36 of 36 identical to the `6b0df5d` run |
 
 With `--mem-fraction-static 0.70` of 59 GB free, the 27B NVFP4 tree server keeps
 87,110 KV tokens and about 11 GB of headroom; the three document-labelling
@@ -308,3 +308,55 @@ are corrected above.
 
 Raw results: `results/thor_2026-11-19/sglang/{thor_27b_nvfp4_head,thor_27b_nvfp4_fix1,thor_9b_fi_head,thor_9b_fi_head_teacher,thor_9b_fi_fix1}`
 and `results/thor_2026-11-19/sglang/followup` (scripts and logs).
+
+## 10. HEAD `88baa07`: sampled decoding and several running requests
+
+On 2026-11-20 `88baa07` ran on both hosts, again with the three document-labelling
+services active (about 59 GB free at each server start). All lanes use the 9B
+(`z-lab/Qwen3.5-9B-DFlash`, n-gram table, FlashInfer) unless noted, 12 prompts
+per family, 512 tokens, greedy, minimal launch command plus the flags listed.
+
+| Check | Result |
+|---|---|
+| CPU test suite, `df-thor-01` | 109 passed at `88baa07`; 128 passed with the start-up fix below |
+| `tests/gpu_*.py`, `df-thor-01` | all ten pass; `gpu_nvfp4_parity_check.py` is SM120 only and skips on SM110 |
+| 27B NVFP4 tree | 109.0 / 94.3 / 44.3 tok/s; 36 of 36 outputs identical to the section 9 run; mixed requests passed |
+| 9B tree | 128.0 / 100.0 / 47.1 tok/s; 36 of 36 identical; mixed requests passed |
+| Sampled tree verify, `AX_TREE_SAMPLING=1`, against stock AR with `--random-seed 1` | 4 prompts x 300 samples; 28 tests, none below p = 0.01 (0.3 expected by chance): `DIST_PASS` |
+| `--max-running-requests 4`, default chain rounds | mixed requests passed; stress passed (2,000 requests, 178 cancelled, all seen as aborted, token and GDN-state pools back to idle, 24 reference outputs unchanged) |
+
+Aggregate output tok/s for code / math / chat with `--max-running-requests 4`:
+
+| Server | c = 1 | c = 2 | c = 4 |
+|---|---|---|---|
+| Plugin, default chain rounds | 124.1 / 99.2 / 46.7 | 190.7 / 138.5 / 58.2 | 297.3 / 232.8 / 93.0 |
+| Plugin, width-8 chain rounds (`AX_CHAIN_WIDTH=8 AX_CHAIN_GRAPH_WIDTHS=8 AX_CHAIN_DRAFT_WIDTHS=8 AX_SSM_POSITIONS=8`) | 126.8 / 100.1 / 47.1 | 139.7 / 118.2 / 60.3 | 217.7 / 209.0 / 105.4 |
+| Stock DFlash, block 16 | 117.1 / 78.5 / 32.8 | 193.5 / 141.6 / 57.6 | 300.9 / 234.5 / 91.9 |
+
+With several requests the default plugin server runs at the stock DFlash rate
+(within 3%); the tree's gain is at one request. Width-8 chain rounds lose 10–27%
+on code and math at c = 2–4 and gain 13% on chat at c = 4, so the default
+(chain rounds at the drafted block) is the better Thor setting for this model.
+
+At c = 1 every multi-slot server produced the same 36 outputs as the
+single-slot tree server. At c = 4, 19 of 36 (default chain) and 18 of 36
+(width 8) outputs matched their own c = 1 outputs; stock DFlash matched 22 of
+36. Batched rounds resolve greedy near-ties differently for stock SGLang as
+well, so these divergences are not attributed to the plugin.
+
+**Problem found and fixed.** The width-8 settings above stopped the launch at
+`88baa07` with `AX_SSM_POSITIONS needs FC1_FUSED=1, AX_TREE=1 and AX_CHAIN_WIDTH`
+unless `FC1_FUSED=1` was set by hand: the plugin validated the environment when
+it loaded, before the launch-default resolver writes `FC1_FUSED=1`. The plugin
+now validates a launcher configuration that requests the tree against the tree
+defaults, marks it provisional, installs the tree hooks only after resolution,
+and re-reads the environment after every resolution (`config.startup_config`,
+`tests/test_startup_config.py`). Explicit settings still win, and without
+resolution hooks (SGLang 0.5.22) or with `AX_AUTO_DEFAULTS=0` the settings must
+be explicit as before. A launch that relies on a checkpoint-derived value at
+start-up, such as `AX_CHAIN_WIDTH=32` with `--speculative-num-draft-tokens 32`
+and no `FC1_DRAFT_BLOCK`, is still refused, as it was before the change. With
+the fix the width-8 server started with `FC1_FUSED=1 [auto]` and gave the
+results above.
+
+Raw results: `results/thor_2026-11-19/sglang/head_88baa07`.

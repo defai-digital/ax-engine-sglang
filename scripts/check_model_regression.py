@@ -253,6 +253,7 @@ def run_lane(args, name, repo, encoded):
     if getattr(args, "nvfp4_verify_parity", False):
         env.update(AX_NVFP4_VERIFY_PARITY="1", SGLANG_ENABLE_GDN_DECODE_FUSED_PROJ_CONV="0",
                    SGLANG_DISABLE_SILU_FP4_QUANT_FUSION="1", SGLANG_FLASHINFER_USE_PAGED="1")
+        env["AX_NVFP4_PARITY_ROWS"] = str(args.nvfp4_parity_rows)
     if args.gdn_unpacked_decode:
         env["AX_GDN_UNPACKED_DECODE"] = "1"
     command = launch_command(args, name)
@@ -357,7 +358,10 @@ def main():
     parser.add_argument("--server-seed", type=int, default=0,
                         help="baseline --random-seed; the candidate uses the next seed for server RNG cohorts")
     parser.add_argument("--nvfp4-verify-parity", action="store_true",
-                        help="use the RTX dense NVFP4 single-token projection and attention profile")
+                        help="use the RTX dense NVFP4 matched projection and attention profile")
+    parser.add_argument("--nvfp4-parity-rows", type=int, choices=range(1, 65), metavar="1..64",
+                        help="rows per target projection call in AR decode and verification (default 16); "
+                             "1 keeps single-row kernels and runs verification one row at a time")
     parser.add_argument("--enable-deterministic-inference", action="store_true")
     parser.add_argument("--candidate-only", action="store_true")
     parser.add_argument("--route", choices=ROUTES, default="tree")
@@ -416,6 +420,9 @@ def main():
     lanes = ("candidate",) if args.candidate_only else ("baseline", "candidate")
     uses_dflash = any(lane_route(args, name) in DFLASH_ROUTES for name in lanes)
     model_config = json.loads((args.model / "config.json").read_text())
+    if args.nvfp4_parity_rows and not args.nvfp4_verify_parity:
+        parser.error("--nvfp4-parity-rows requires --nvfp4-verify-parity")
+    args.nvfp4_parity_rows = args.nvfp4_parity_rows or 16
     if args.nvfp4_verify_parity:
         if any(lane_route(args, name) not in (*DFLASH_ROUTES, "ar") for name in lanes):
             parser.error("--nvfp4-verify-parity supports the dense AR, tree and chain routes")

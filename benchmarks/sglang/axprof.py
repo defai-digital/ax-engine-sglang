@@ -12,9 +12,11 @@ benchmarks/sglang/run_tree_plugin.sh (PROFILE=1). It wraps the phases of one spe
   eagle_verify     run_eagle_verify inside it
   draft_kv_append  writing the accepted target hidden states into the drafter's cache
 
-With AXPROF_SYNC=1 every timer is bracketed by torch.cuda.synchronize(), which attributes GPU time
+With AXPROF_SYNC=1 (default) every timer is bracketed by torch.cuda.synchronize(), which attributes GPU time
 to the right phase but removes any overlap between phases, so the phase sums are an upper bound
-and tok/s measured with profiling on must not be reported as speed. Means are written to
+and tok/s measured with profiling on must not be reported as speed. Use AXPROF_SYNC=0 and AXPROF_NVTX=1
+to mark host ranges for Nsight Systems without synchronization. With sync disabled the JSON timings
+are host wall times, including any time the engine itself spends waiting. Means are written to
 AXPROF_OUT (JSON) every AXPROF_EVERY rounds.
 """
 import atexit
@@ -23,8 +25,10 @@ import json
 import os
 import time
 from collections import defaultdict
+from contextlib import nullcontext
 
 SYNC = os.environ.get("AXPROF_SYNC", "1") == "1"
+NVTX = os.environ.get("AXPROF_NVTX", "0") == "1"
 OUT = os.environ.get("AXPROF_OUT", "/tmp/axprof.json")
 EVERY = int(os.environ.get("AXPROF_EVERY", "500"))
 acc = defaultdict(lambda: [0, 0.0])
@@ -39,6 +43,11 @@ def _sync():
 
 
 def timed(label_fn):
+    if NVTX:
+        from torch.cuda.nvtx import range as phase_range
+    else:
+        phase_range = nullcontext
+
     def deco(f):
         @functools.wraps(f)
         def wrapper(*a, **kw):
@@ -46,7 +55,8 @@ def timed(label_fn):
             _sync()
             t = time.perf_counter()
             try:
-                return f(*a, **kw)
+                with phase_range(label):
+                    return f(*a, **kw)
             finally:
                 _sync()
                 rec = acc[label]
@@ -60,7 +70,7 @@ def dump():
     tmp = OUT + ".tmp"
     with open(tmp, "w") as fh:
         state["last_dump"] = time.perf_counter()
-        json.dump({"sync": SYNC, "pid": os.getpid(), "rounds": state["rounds"],
+        json.dump({"sync": SYNC, "nvtx": NVTX, "pid": os.getpid(), "rounds": state["rounds"],
                    "phases": {k: {"calls": n, "mean_ms": 1e3 * s / max(n, 1)} for k, (n, s) in sorted(acc.items())}},
                   fh, indent=2)
     os.replace(tmp, OUT)
@@ -118,6 +128,9 @@ def register():
 
     from sglang.srt.speculative.dflash_worker_v2 import DFlashWorkerV2
     wrap_round(DFlashWorkerV2)
+    append = getattr(DFlashWorkerV2, "_append_target_hidden_to_draft_kv_by_loc", None)
+    if append is not None:
+        DFlashWorkerV2._append_target_hidden_to_draft_kv_by_loc = timed("draft_kv_append")(append)
     plugins = os.environ.get("SGLANG_PLUGINS", "")
     if "ax-engine" in plugins:
         # ax-engine-sglang registers first (SGLANG_PLUGINS=ax-engine,axprof): its generated worker

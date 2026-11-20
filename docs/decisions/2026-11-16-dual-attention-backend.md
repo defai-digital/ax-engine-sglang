@@ -1192,3 +1192,262 @@ per-iteration stats, chat, c = 1 and 16; the pod rebooted during the first attem
   between them), not in the tree; TensorRT-LLM's `iterLatencyMS` overlaps under its overlap scheduler
   and cannot split it. Locating it needs a kernel-level profile of both engines at batch 16 (next
   step, not started; estimate 2-4 GPU hours).
+
+### Batch-16 profiling and acceptance
+
+Capture stock SGLang, AX Engine, and TensorRT-LLM DFlash2 on one B200, in that
+order for the first pass. Use the same target and drafter checkpoint revisions,
+ordered prompts, greedy decoding, 64 requests, a 1,024-token limit, and GPU. Start with
+NVFP4, then repeat with BF16. Keep graph replay and overlap scheduling enabled.
+Use a separate output directory for each pass.
+
+Export `PROMPT_FILE` with the shared prompt snapshot and set `OUT` to the root
+for this pass. Point `HF_HOME` to a complete cache containing only the pinned
+snapshot of each model used by the run, and set `HF_HUB_OFFLINE=1`.
+[Checkpoint revisions](2026-11-17-rtx-development-validation.md#checkpoint-identities)
+
+Run the SGLang lanes with SGLang 0.5.23 and the AX package in `AXSITE`:
+
+```bash
+MODEL=RadixArk/Qwen3.8-27B-NVFP4
+DRAFT=incoai/Qwen3.8-27B-DFlash2
+capacity="--max-running-requests 32 --cuda-graph-max-bs-decode 32"
+export N_REQUESTS=64 MAX_TOKENS=1024
+
+MODEL="$MODEL" DRAFT="$DRAFT" OUT="$OUT/sglang" SETS=chat TREE_CONCURRENCY=16 \
+LANES="chain8n axtree16cfl_b16" CHAIN_ARGS="$capacity --attention-backend trtllm_mha" \
+TREE_ARGS="$capacity --speculative-draft-attention-backend trtllm_mha --prefill-attention-backend trtllm_mha --decode-attention-backend triton --speculative-attention-mode decode" \
+AX_CHAIN_WIDTH=8 AX_CHAIN_GRAPH_WIDTHS="16 8" AX_CHAIN_DRAFT_WIDTHS=8 AX_CHAIN_ATTN=trtllm_mha \
+PROFILE=1 AXPROF_SYNC=0 AXPROF_NVTX=1 NSYS_TRACE=1 bash benchmarks/sglang/run_tree_plugin.sh
+
+OUT="$OUT/trt" DRAFT="$DRAFT" MODELS=nvfp4 TRT_LANES=trt_dflash2 \
+SETS=chat CONCURRENCY=16 NSYS_TRACE=1 bash benchmarks/sglang/run_trtllm_dflash2.sh
+```
+
+For BF16, use `MODEL=Qwen/Qwen3.8-27B` and `MODELS=bf16`. Both launchers
+start capture after the server is ready and write one `decode.nsys-rep` per
+lane. Check that each report contains the GPU work of the decode worker.
+Inspect the steady-state decode window at 16 running requests. Compare draft
+and verify, the KV commit, host API calls, synchronization, and gaps on the
+GPU critical path. Use `NSYS_GRAPH_TRACE=node` on a separate pass if the
+graph-level capture shows that time is inside a graph. In the SGLang runs
+`axprof.json` records host wall time in this configuration. The Nsight
+timeline identifies which host work overlaps the GPU.
+
+Use the trace to choose the smallest change to the DFlash2 worker or the
+backend. Measure throughput on separate unprofiled runs (`PROFILE=0`,
+`NSYS_TRACE=0`, and iteration polling off), with the original and candidate
+builds interleaved. The targets are NVFP4 chat c=16 at least 1.05× the matched
+TensorRT-LLM run and BF16 chat c=16 at least 1.00×. Check greedy token IDs
+against the original AX build and verify that single-request NVFP4 code
+throughput and chat latency stay within the measured baseline variation.
+
+### Lattice predecessor bookkeeping (2026-11-20)
+
+DFlash2 lattice scoring uses the drafter's transition table. Only the n-gram
+builder reads the token before the anchor. AX skips the index conversion,
+gather and per-request storage on DFlash2 lattice chain rounds, and skips
+the corresponding copy and lookup on lattice tree rounds.
+
+On one B200 (driver 595.112.07, Python 3.12.3, SGLang 0.5.23,
+PyTorch 2.14.1+cu130, FlashInfer 0.7.2), the isolated width-8 chain helper
+at batch 16 took a median 55.34 µs before and 0.16 µs after across six
+alternating 1,000-call measurements per build. The CUDA check matched
+all six lattice outputs for three anchor IDs and verified that n-gram
+chain rounds still saved the expected predecessor for every request.
+
+The unprofiled serving comparison used `d899260` and `187f430`, the
+same ordered prompts, 64 requests per row, greedy decoding, a 1,024-token
+limit, and tree width 16 / chain width 8. The first pass ran the original
+build first. The second ran the candidate first and warmed up each
+workload at its measured concurrency before timing.
+
+| NVFP4 workload | Pass | Aggregate tok/s, original → candidate | Median decode tok/s per request, original → candidate |
+|---|---:|---:|---:|
+| Chat, c=16 | 1 | 2,420.1 → 2,756.9 | 192.2 → 196.6 |
+| Chat, c=16 | 2 | 2,697.8 → 2,769.0 | 194.5 → 191.6 |
+| Code, c=1 | 1 | 884.3 → 1,010.4 | 1,727.3 → 1,698.2 |
+| Code, c=1 | 2 | 927.9 → 1,015.4 | 1,716.5 → 1,697.5 |
+
+The first 16 chat requests had median TTFT of 1.940 s on the original
+build and 0.264 s on the candidate. For the 42 of 64 prompts with equal
+output length, the median paired decode rate ratio was 1.011×. That
+ratio was 1.003× across 48 of 64 chat prompts in the warmed pass.
+The aggregate chat gain fell from 13.9% to 2.6% between passes. The two
+passes do not establish a repeatable per-request decode improvement.
+The greedy token-ID check matched 16/16 chat sequences and 1/1 code
+sequence at a 128-token limit in each pass.
+
+The stock SGLang CUDA-graph node trace recorded CUDA kernels and
+draft, target verify and KV-append NVTX ranges during the client warm-up.
+The scheduler stopped responding before the measured c=16 workload.
+TensorRT-LLM 1.4.0rc3 loaded the same checkpoints and stalled during
+autotuning at startup, before any timed requests. No new TensorRT-LLM
+throughput or batch-16 engine trace was collected.
+
+### B200 baseline recovery and GDN replay (2026-11-20)
+
+The `track_l_attn/trtllm_mha/chain16` speed artifact is a single-request
+SGLang 0.5.22 run with Qwen3.5-9B BF16 and a width-16 DFlash block. Its
+`trtllm_mha` setting selects the SGLang attention backend. The historical
+TensorRT-LLM target for this work is the Qwen3.8-27B result in section 17.
+
+TensorRT-LLM 1.4.0rc3 completed the Qwen3.8-27B NVFP4 benchmark with
+`TRT_AUTOTUNE=0` and eight HTTP frontends. The client measured 1,785.4
+tok/s aggregate, 134.7 tok/s median decode per request and 413 ms median
+TTFT. This run used one B200 (driver 595.112.07), DFlash2 width 8, 64
+ordered chat prompts, c=16, greedy decoding, and a 1,024-token limit.
+
+A second run completed TensorRT-LLM autotuning and served the historical
+c=1, c=4, c=16 sequence. The autotuner took 183.7 s for its first prefill
+shape and 606.2 s for its first decode shape. All 192 measured requests
+completed and the client wrote all three rows before the timeout fired
+during teardown.
+
+| NVFP4 chat, c=16 | Aggregate tok/s | Median decode tok/s per request | Median TTFT |
+|---|---:|---:|---:|
+| TensorRT-LLM, untuned | 1,785.4 | 134.7 | 413 ms |
+| TensorRT-LLM, tuned | 2,205.6 | 153.6 | 351 ms |
+| Stock SGLang, GDN snapshots | 2,618.7 | 189.1 | 116 ms |
+| AX Engine, warmed lattice change | 2,769.0 | 191.6 | 114 ms |
+| Stock SGLang with experimental GDN replay | 3,219.1 | 233.4 | 134 ms |
+| Stock SGLang with experimental GDN replay, TF32x3 | 2,704.3 | 191.6 | 95 ms |
+
+The AX and tuned TensorRT-LLM prompt digests match. For the 33 of 64
+requests with the same completion length, the median paired decode rate
+ratio was 1.253×. The same-pod measurements put AX 25.5% ahead in
+aggregate. The new TensorRT-LLM run is 34.9% below its historical 3,385.9
+tok/s record. The source of that cross-session difference is unresolved,
+and the historical result remains the original performance target.
+
+Stock SGLang 0.5.23 with GDN snapshots reached 2,618.7 tok/s aggregate and
+189.1 tok/s median decode per request on the same B200 and ordered prompts.
+It averaged 3.19 output tokens per verify call and allocated 37.12 GB for
+intermediate SSM states at 32 request slots. SGLang explicitly rejected
+`--enable-linear-replayssm-spec` with DFlash on this GDN model. The
+installed DFlash worker commits through a backend hook that supports KDA
+replay and GDN snapshots. The generic commit path already supports GDN
+replay for verified linear chains.
+
+In an isolated SGLang 0.5.23 copy, DFlash reused that GDN commit for a
+single-GPU, width-8 chain with radix caching disabled. The worker selected
+the replay path, allocated no intermediate SSM snapshots, and allocated
+about 0.78 GB for the replay ring. The warmed serving run gained 22.9%
+aggregate throughput over stock. For the 31 of 64 requests with equal
+completion length, median paired decode throughput rose 24.3%.
+
+Replay matched 0/16 full greedy sequences from stock at a 128-token limit.
+The earliest difference was the second generated token. Following AX Code
+Qwen 4 Max's review, the parity check repeated the same c=16 request batch
+on the replay worker after the first batch finished. The replay runs
+matched 16/16 sequences. This candidate fails the stock parity gate and
+remains an isolated experiment. The patch, raw timings, token IDs, and QA
+are retained locally under `results/b200-dflash-hotpath/replayssm/`.
+
+Two c=1 probes on fresh workers reproduced the second-token difference.
+Both variants agreed on the first token and its log probability. On the
+second token, stock favored its chosen token over the replay choice by
+0.875 and 0.375 log-probability units. Replay reversed those preferences
+by 0.125 and 0.375. Repeating the first probe in each worker gave the same
+output and token scores. The discrepancy reproduces at c=1 with stable
+inputs, before a saturated batch or repeated slot churn is required.
+
+Increasing only the replay verify kernel's dot-product precision from
+TF32 to TF32x3 brought throughput to 2,704.3 tok/s, 3.3% above the
+snapshot baseline. It still matched 0/16 stock sequences and repeated
+16/16 of its own sequences. Higher dot-product precision alone did not
+recover the stock output.
+
+### First DFlash verify comparison (2026-11-20)
+
+Following the Claude Code Opus 5.5 review, we instrumented separate stock and
+replay SGLang 0.5.23 workers on the same B200. The workers ran the same NVFP4
+Qwen3.8-27B target and width-8 DFlash2 checkpoint with one live request and
+CUDA graphs disabled. Both monitored prompts reproduced the second-token
+divergence. The worker runs target verify and selects tokens before calling
+the GDN commit.
+
+For the first GDN layer, the eight verify token IDs, convolution state,
+FP32 SSM checkpoint, post-convolution q/k/v, and gate inputs were bitwise
+equal. The replay history was empty, with `write_pos`, `cache_base`, and
+`is_flush` all zero. Reinvoking each SGLang kernel with the captured
+stock tensors reproduced all 49,152 elements of its respective serving
+output bitwise. The difference therefore appears in the verify calculation
+on matching prefill inputs, before a replay commit or slot reuse is needed.
+
+| First GDN layer, first verify position | Max absolute difference from stock | Max absolute error vs sequential FP64 reference |
+|---|---:|---:|
+| Stock recurrent verify | 0 | 0.0035424 |
+| Replay TF32 | 0.0078125 | 0.0042701 |
+| Replay TF32x3 | 0 | 0.0035424 |
+
+In a separate TF32x3 serving trace, all 48 GDN layers had bitwise-equal
+prefill checkpoints and convolution states. At verify position zero, layer
+0 matched stock. Layer 1 used matching inputs and differed in 2 of 6,144
+outputs, with a maximum absolute difference of 5.96 × 10⁻⁸. Position-zero
+GDN inputs first differed at layer 10. The maximum position-zero output
+difference across the trace was 0.0058594 at layer 56. TF32x3 matched the
+generated tokens on the two short c=1 prompts while changing their scores.
+Its c=16 parity failure still stands.
+
+### Recurrent verification with accepted-prefix replay (2026-11-20)
+
+The second prototype keeps SGLang's recurrent Triton GDN verifier and writes
+compact inputs for each draft step. After acceptance, one all-layer kernel
+replays the accepted prefix into the FP32 checkpoints. This uses the existing
+SGLang fold-every-commit verifier and commit kernel. At 32 request slots,
+intermediate SSM snapshots went from 37.12 GB to zero and the raw replay
+windows occupied approximately 0.197 GB.
+
+The captured layer fixture matched stock bitwise for all verify outputs
+at batches 1 and 16. At batch 1, the committed FP32 state matched the
+corresponding stock snapshot for every accepted length from 1 through 8.
+At batch 16, all eight tests combined different accepted lengths across
+requests and matched every state element.
+
+The first unprofiled NVFP4 chat c=16 run reached 2,982.0 tok/s, 13.9% above
+the earlier stock run. Median paired decode throughput increased 11.5%
+across the 43 of 64 requests with matching completion lengths. It matched
+all 16 stock greedy sequences and all 16 repeated sequences at a 128-token
+limit.
+
+The reverse-order pair ran replay first and warmed each worker with 16
+concurrent requests. Both timed rows used the same ordered 64 prompts,
+greedy decoding, and a 1,024-token limit. Replay reached 2,957.3 tok/s
+versus stock's 2,685.6 tok/s, a 10.1% gain. Median paired decode throughput
+rose 12.0% across the 43 equal-length requests. A separate 256-token check
+matched all 64 stock sequences, and both workers repeated all 64 of their
+own sequences. This covers the single-B200 NVFP4 stock-chain lane. The
+historical 3,385.9 tok/s TensorRT-LLM target, BF16, and AX tree integration
+remain outside the demonstrated result.
+
+Apply the benchmark patch to a copy of the SGLang 0.5.23 build used in
+this comparison. Use this overlay only for the tested stock width-8
+DFlash2 setup with an FP32 GDN state, TP1/PP1, and radix cache off. The
+overlay selects recurrent folding for replay-enabled GDN pools.
+The following commands use the same serving entry point as the measurements.
+
+```bash
+(
+set -euo pipefail
+overlay=$(mktemp -d)
+python - "$overlay" <<'PY'
+from importlib.metadata import version
+from importlib.util import find_spec
+from pathlib import Path
+import shutil
+import sys
+
+assert version("sglang") == "0.5.23"
+source, = find_spec("sglang").submodule_search_locations
+shutil.copytree(source, Path(sys.argv[1]) / "sglang", ignore=shutil.ignore_patterns("__pycache__"))
+PY
+patch="$PWD/benchmarks/sglang/sglang-0.5.23-dflash-recurrent-replay.patch"
+git -C "$overlay" apply --check "$patch"
+git -C "$overlay" apply "$patch"
+MODEL=RadixArk/Qwen3.8-27B-NVFP4 DRAFT=incoai/Qwen3.8-27B-DFlash2 \
+  PYTHONPATH="$overlay" SGLANG_PLUGINS=none BLOCK=8 RADIX_CACHE=0 \
+  EXTRA_ARGS="--attention-backend trtllm_mha --max-running-requests 32 --cuda-graph-max-bs-decode 32 --enable-linear-replayssm-spec" \
+  bash benchmarks/sglang/serve_sglang.sh dflash
+)
+```

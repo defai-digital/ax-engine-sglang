@@ -37,6 +37,7 @@ class PluginConfig:
     gdn_unpacked_decode: bool = False
     gdn_recurrent_verify: bool = False
     nvfp4_verify_parity: bool = False
+    nvfp4_parity_rows: int = 16
 
     @property
     def tree_requested(self) -> bool:
@@ -45,7 +46,7 @@ class PluginConfig:
                     or self.draft_widths or self.chain_attention or self.ssm_positions)
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> PluginConfig:
+    def from_env(cls, env: Mapping[str, str] | None = None, *, validate: bool = True) -> PluginConfig:
         env = os.environ if env is None else env
 
         def flag(name, default=False):
@@ -103,14 +104,20 @@ class PluginConfig:
             gdn_unpacked_decode=flag("AX_GDN_UNPACKED_DECODE"),
             gdn_recurrent_verify=flag("AX_GDN_RECURRENT_VERIFY"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
+            nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 16),
         )
-        config.validate()
+        if validate:
+            if env.get("AX_NVFP4_PARITY_ROWS") and not config.nvfp4_verify_parity:
+                raise ValueError("AX_NVFP4_PARITY_ROWS needs AX_NVFP4_VERIFY_PARITY=1")
+            config.validate()
         return config
 
     def validate(self):
         if self.nvfp4_verify_parity and (not self.gdn_unpacked_decode
                 or (self.tree_requested and not self.gdn_recurrent_verify)):
             raise ValueError("AX_NVFP4_VERIFY_PARITY requires unpacked GDN decode and recurrent DFlash2 verify")
+        if not 1 <= self.nvfp4_parity_rows <= 64:
+            raise ValueError("AX_NVFP4_PARITY_ROWS must be between 1 and 64")
         if self.gdn_recurrent_verify and self.fused:
             raise ValueError("AX_GDN_RECURRENT_VERIFY requires FC1_FUSED=0 for native convolution and state commit")
         for name, value, minimum in (
@@ -145,6 +152,37 @@ class PluginConfig:
                 raise ValueError("chain graph widths exceed AX_SSM_POSITIONS")
 
 
-@lru_cache(maxsize=1)
 def get_config() -> PluginConfig:
-    return PluginConfig.from_env()
+    return _loaded()[0]
+
+
+def startup_config(environ=None, hooks_available=None):
+    """The configuration to validate when the plugin loads, and whether it is provisional.
+
+    In the launcher the tree defaults (FC1_FUSED=1 and the rest of TREE_ENV) are filled in later,
+    while SGLang resolves the server arguments. A tree setting that depends on them, such as
+    AX_SSM_POSITIONS, is checked against those defaults instead of being refused. The resolver
+    clears the cache once it has written the defaults, so the next get_config() is final."""
+    if environ is None:
+        return _loaded()
+    from .defaults import TREE_ENV, resolution_hooks_available
+
+    try:
+        return PluginConfig.from_env(environ), False
+    except ValueError:
+        if hooks_available is None:
+            hooks_available = resolution_hooks_available()
+        if not hooks_available or environ.get("AX_AUTO_DEFAULTS", "1") == "0":
+            raise
+        if not PluginConfig.from_env(environ, validate=False).tree_requested:
+            raise
+        merged = {**TREE_ENV, **{name: value for name, value in environ.items() if value != ""}}
+        return PluginConfig.from_env(merged), True
+
+
+@lru_cache(maxsize=1)
+def _loaded() -> tuple[PluginConfig, bool]:
+    return startup_config(os.environ)
+
+
+get_config.cache_clear = _loaded.cache_clear

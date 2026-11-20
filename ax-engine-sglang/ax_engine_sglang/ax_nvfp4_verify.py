@@ -1,11 +1,31 @@
-"""Use single-token projection arithmetic during dense Qwen NVFP4 target verification."""
+"""Give dense Qwen NVFP4 decode and target verification the same projection arithmetic.
+
+SGLang selects a different FP8 or NVFP4 kernel for each row count. With one row
+per call, verification repeats the kernels of single-request AR. With a wider
+group, AR decode and verification both pad to that row count, so each call
+selects the same kernel and reads the weights once per group.
+"""
 from contextvars import ContextVar
 from functools import wraps
 
 from .compat import patch_attribute
 
 
-def install():
+def grouped(project, x, rows):
+    """Apply project to fixed groups of rows, padding the last group with zeros."""
+    import torch
+
+    count = x.shape[0]
+    if not count:
+        return project(x)
+    if count % rows:
+        x = torch.cat([x, x.new_zeros(-count % rows, *x.shape[1:])])
+    if x.shape[0] == rows:
+        return project(x.contiguous())[:count]
+    return torch.cat([project(group.contiguous()) for group in x.split(rows)])[:count]
+
+
+def install(rows=16):
     import torch
     from sglang.srt.batch_invariant_ops import enable_batch_invariant_mode
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -39,23 +59,28 @@ def install():
         enable_batch_invariant_mode()
 
     patch_attribute(ModelRunner, "maybe_enable_batch_invariant_mode", enable_invariant)
-    verifying = ContextVar("ax_nvfp4_target_verify", default=False)
+    # One row per call leaves AR decode on its native single-row kernels.
+    # A wider group has to cover decode as well, or AR would select other kernels.
+    regrouping = ContextVar("ax_nvfp4_regroup_rows", default=False)
     forward = Qwen3_5ForConditionalGeneration.forward
 
     @wraps(forward)
     def forward_target(self, input_ids, positions, forward_batch, *args, **kwargs):
-        scope = verifying.set(forward_batch.forward_mode.is_target_verify())
+        mode = forward_batch.forward_mode
+        scope = regrouping.set(mode.is_target_verify() or (rows > 1 and mode.is_decode()))
         try:
             return forward(self, input_ids, positions, forward_batch, *args, **kwargs)
         finally:
-            verifying.reset(scope)
+            regrouping.reset(scope)
 
     def wrap_linear(apply):
         @wraps(apply)
         def project(self, layer, x, *args, **kwargs):
-            if verifying.get() and isinstance(x, torch.Tensor) and x.ndim == 2 and x.shape[0] > 1:
-                return torch.cat([apply(self, layer, row.contiguous(), *args, **kwargs)
-                                  for row in x.split(1)])
+            # A full group still goes through grouped(): the SM120 dispatchers fall
+            # back to another kernel for a non-contiguous input.
+            if (regrouping.get() and isinstance(x, torch.Tensor) and x.ndim == 2
+                    and (rows > 1 or x.shape[0] > 1)):
+                return grouped(lambda group: apply(self, layer, group, *args, **kwargs), x, rows)
             return apply(self, layer, x, *args, **kwargs)
         return project
 
@@ -67,9 +92,9 @@ def install():
 
     @wraps(compute_head)
     def project_head(self, hidden_states, lm_head, embedding_bias=None, *, out=None):
-        if verifying.get() and hidden_states.shape[0] > 1:
-            rows = [compute_head(self, row, lm_head, embedding_bias) for row in hidden_states.split(1)]
-            logits = torch.cat(rows)
+        if regrouping.get() and hidden_states.ndim == 2 and (rows > 1 or hidden_states.shape[0] > 1):
+            logits = grouped(lambda group: compute_head(self, group, lm_head, embedding_bias),
+                             hidden_states, rows)
             if out is not None and out.shape == logits.shape and out.dtype == logits.dtype:
                 return out.copy_(logits)
             return logits

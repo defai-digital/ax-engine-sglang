@@ -17,7 +17,8 @@
 # (AXSITE, `uv pip install --no-deps --target $AXSITE ax-engine-sglang/`): axotree on the 0.5.22
 # overlay (parity with the patched DForkTree plugin), axtree on the venv's own SGLang, no overlay.
 # PROFILE=1 also loads benchmarks/sglang/axprof.py (round-time breakdown, written to <lane>/axprof.json);
-# profiled runs synchronise the GPU around every phase, so their tok/s is not a speed result.
+# AXPROF_SYNC=0 preserves overlap. AXPROF_NVTX=1 adds ranges to an Nsight Systems capture.
+# Profiled runs are diagnostic. NSYS_TRACE=1 enables capture in run_baselines.sh.
 # The plugin's fused verifier asserts one request per batch even while SGLang captures its CUDA
 # graphs, so the tree lanes are limited to one running request (TREE_ARGS).
 # Env: GPU, PORT, OUT, SITE, NGRAM (n-gram table from the plugin's v0.1.0 release), LANES, PRESETS,
@@ -58,7 +59,7 @@ if [[ "$use_dforktree" == 1 ]]; then
   python benchmarks/sglang/patch_dforktree.py "$SITE/dforktree" --release "$RELEASE"
 fi
 {
-  sha256sum benchmarks/sglang/patch_dforktree.py ax-engine-sglang/ax_engine_sglang/ax_fast.py ax-engine-sglang/ax_engine_sglang/ax_lattice.py benchmarks/sglang/run_tree_plugin.sh benchmarks/sglang/run_baselines.sh benchmarks/sglang/serve_sglang.sh
+  sha256sum benchmarks/sglang/patch_dforktree.py ax-engine-sglang/ax_engine_sglang/ax_fast.py ax-engine-sglang/ax_engine_sglang/ax_lattice.py benchmarks/sglang/run_tree_plugin.sh benchmarks/sglang/run_baselines.sh benchmarks/sglang/serve_sglang.sh benchmarks/sglang/axprof.py benchmarks/sglang/nsys_trace.sh
   echo "git $(git rev-parse HEAD 2>/dev/null || echo none) $(date -u +%FT%TZ)"; } | tee -a "$OUT/plugin_patch.txt"
 # identity of the overlay's code (patched plugin + SGLang version), recorded in every lane's
 # metadata: two GPUs use two overlay directories, and paired_ci.py compares this instead of the path
@@ -75,6 +76,9 @@ esac
 PROF=""
 if [[ "${PROFILE:-0}" == "1" ]]; then
   PROF=",axprof"
+  if [[ "${NSYS_TRACE:-0}" == 1 ]]; then
+    export AXPROF_SYNC=${AXPROF_SYNC:-0} AXPROF_NVTX=${AXPROF_NVTX:-1}
+  fi
 fi
 install_profiler() {
   [[ -n "$PROF" ]] || return 0
@@ -89,7 +93,7 @@ install_profiler() {
 GDN_DEBUG=${GDN_DEBUG:-0}; LATTICE_DEBUG=${LATTICE_DEBUG:-0}
 [[ "$GDN_DEBUG" == "0" || "$GDN_DEBUG" == "1" ]] || { echo "GDN_DEBUG must be 0 or 1" >&2; exit 2; }
 [[ "$LATTICE_DEBUG" =~ ^[0-9]+$ ]] || { echo "LATTICE_DEBUG must be a number of rounds" >&2; exit 2; }
-[[ "${CHECK:-0}" == "1" || "${PROFILE:-0}" == "1" || "$GDN_DEBUG" == "1" || "$LATTICE_DEBUG" != "0" ]] \
+[[ "${CHECK:-0}" == "1" || "${PROFILE:-0}" == "1" || "${NSYS_TRACE:-0}" == "1" || "$GDN_DEBUG" == "1" || "$LATTICE_DEBUG" != "0" ]] \
   && echo "NOTE: CHECK/PROFILE/DEBUG run, tok/s of these lanes is not a speed result"
 failed=0
 for lane in $LANES; do
@@ -107,7 +111,14 @@ for lane in $LANES; do
       # CHAIN_ARGS: extra server flags for these lanes, e.g. --max-running-requests 8 (27B DFlash2 at
       # block >= 16 reserves per-draft-token recurrent state for every request slot and otherwise
       # finds no room for the KV cache)
-      env -u PYTHONPATH SGLANG_PLUGINS=none EXTRA_ARGS="${CHAIN_ARGS:-} $ATTN_ARGS" MODES=dflash BLOCK="$b" OUT="$OUT/$lane" \
+      stock_env=(env -u PYTHONPATH)
+      if [[ -n "$PROF" ]]; then
+        # Load only the profiler, never the SGLang version in SITE.
+        profiler_dir="$OUT/$lane/profiler"
+        install_profiler "$profiler_dir"
+        stock_env+=("PYTHONPATH=$profiler_dir")
+      fi
+      "${stock_env[@]}" AX_SITE_SHA= SGLANG_PLUGINS="none$PROF" AXPROF_OUT="$OUT/$lane/axprof.json" EXTRA_ARGS="${CHAIN_ARGS:-} $ATTN_ARGS" MODES=dflash BLOCK="$b" OUT="$OUT/$lane" \
         bash benchmarks/sglang/run_baselines.sh || failed=1
       ;;
     chain*)

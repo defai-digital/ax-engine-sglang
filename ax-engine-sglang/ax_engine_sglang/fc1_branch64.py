@@ -15,17 +15,20 @@ def verify_branch(w, batch, tokens, prefix, positions, plan, cache2d, on_publish
     dev = tokens.device
     import os
     import ax_lattice   # ax-engine-sglang: DFlash2 lattice trees, AX_LATTICE=1
-    logits = None if ax_lattice.enabled() else w._draft_sampler.fc1_logits.view(bs, w.block_size - 1, -1)[0]
+    use_lattice = ax_lattice.enabled()
+    logits = None if use_lattice else w._draft_sampler.fc1_logits.view(bs, w.block_size - 1, -1)[0]
     ours = os.environ.get('FC1_OURS') == '1'
     from fc1_builder import Builder
     if not hasattr(w, 'fc1_builder'):
         w.fc1_builder = (ax_lattice.LatticeBuilder(w._draft_sampler, compile_build=os.environ.get('FC1_COMPILE_BUILD') == '1')
-                         if ax_lattice.enabled() else Builder(logits, compile_build=os.environ.get('FC1_COMPILE_BUILD') == '1'))
+                         if use_lattice else Builder(logits, compile_build=os.environ.get('FC1_COMPILE_BUILD') == '1'))
     import ax_chain   # ax-engine-sglang: token before the anchor, kept per request across tree and chain rounds
-    w.fc1_pre1 = ax_chain.pre1_for(batch.reqs[0])
-    if w.fc1_pre1 is None:
-        w.fc1_pre1 = torch.tensor([batch.reqs[0].origin_input_ids[-1]], device=dev)
-    tree, depth, parent, anc, nxt, sib = w.fc1_builder(logits, tokens[:, 0], w.fc1_pre1)
+    pre1 = None
+    if not use_lattice:
+        pre1 = ax_chain.pre1_for(batch.reqs[0])
+        if pre1 is None:
+            pre1 = torch.tensor([batch.reqs[0].origin_input_ids[-1]], device=dev)
+    tree, depth, parent, anc, nxt, sib = w.fc1_builder(logits, tokens[:, 0], pre1)
     if os.environ.get('FC1_FUSED') == '1':
         import fc1_fused
         assert fc1_fused.context() is not None
@@ -59,9 +62,10 @@ def verify_branch(w, batch, tokens, prefix, positions, plan, cache2d, on_publish
         result = run_eagle_verify(batch, target_worker=target, req_to_token_pool=target.model_runner.req_to_token_pool, token_to_kv_pool_allocator=target.model_runner.token_to_kv_pool_allocator, plan_stream=None, plan_stream_ctx=nullcontext(), topk=2, num_draft_tokens=n, device=str(dev), metadata_ready_pre_pad=False, finalize_tree_path=True)
     finally:
         current_runtime().host_kv_len = None   # only this verify's plan may use the host length
-    last = result.accept_index.gather(1, (result.accept_lens.long() - 1)[:, None])
-    w.fc1_pre1 = tree.gather(1, last.long()).flatten()
-    ax_chain.record_tree(batch, w.fc1_pre1, tree, result.accept_index, result.accept_lens)
+    if not use_lattice:
+        last = result.accept_index.gather(1, (result.accept_lens.long() - 1)[:, None])
+        pre1 = tree.gather(1, last.long()).flatten()
+    ax_chain.record_tree(batch, pre1, tree, result.accept_index, result.accept_lens)
     bonus = result.next_draft_input.bonus_tokens
     hidden = result.logits_output.hidden_states
     assert hidden is not None

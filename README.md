@@ -10,21 +10,32 @@ verification and model-specific attention behavior.
 The Apple Silicon edition runs on MLX. The two editions share speculative
 acceptance rules and benchmark evidence contracts, with serving paths and
 checkpoint formats specific to each runtime.
-[AX Engine](https://github.com/defai-digital/ax-engine) · [Architecture and support](docs/README.md)
+[Documentation](docs/README.md) · [Benchmarks](docs/performance.md) · [AX Engine](https://github.com/defai-digital/ax-engine)
+
+## How it speeds up decoding
+
+AX aims to emit more tokens per target-model pass while keeping the target in
+charge of what gets emitted. On dense Qwen models, it can verify multiple
+candidate continuations as a tree for one active request and use linear
+chains when requests are batched. On Flash Next, it fixes the sparse
+attention state so SGLang's multi-token prediction (MTP) can verify longer
+drafts. Each route pays off when it saves more time in target passes than it
+adds in drafting and verification.
+[How it works and why we chose this design](docs/design.md)
 
 ## Quick start
 
 Use Python 3.12 on Linux with an NVIDIA GPU and a CUDA 13-compatible driver.
-Install a published release from PyPI in a fresh virtual environment.
+Install v0.3.0 in a fresh virtual environment.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install ax-engine-sglang
+python -m pip install ax-engine-sglang==0.3.0
 ```
 
-To install from a checkout, run `python -m pip install ./ax-engine-sglang`
-from the repository root. In an existing SGLang 0.5.23 environment, add
+Use `python -m pip install ./ax-engine-sglang` from the repository root for a
+source checkout. If you already have a working SGLang 0.5.23 environment, add
 `--no-deps` to install only the add-on.
 [Installation and release status](docs/README.md#installation-and-release-status)
 
@@ -38,9 +49,21 @@ ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
   --speculative-num-draft-tokens 16
 ```
 
-The serving code was validated with this target and drafter on Jetson Thor. A single greedy
+The 0.2.1 wheel served this target and drafter on Jetson Thor. A single greedy
 request returned 32 tokens and the trace contained six DFlash2 tree rounds.
-[Thor smoke test and flags](docs/README.md#installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
+[Thor smoke test and flags](docs/README.md#021-installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
+
+## Changes in v0.3.0
+
+- NVFP4 MoE defaults probe the GPU selected by SGLang. Tree startup checks
+  explicit settings against the target and drafter checkpoints.
+- DFlash2 lattice rounds skip predecessor-token bookkeeping used by n-gram
+  drafting. The B200 measurements include greedy token checks.
+- The recurrent GDN replay benchmark overlay improved stock DFlash2 NVFP4
+  chat throughput by 10.1% at concurrency 16 and matched all 64 greedy
+  sequences in the reverse-order test. The overlay is a separate benchmark.
+
+[Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.3.0) · [B200 replay results](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
 ## Supported platforms
 
@@ -133,10 +156,20 @@ the lead between passes and finished within about 1% of each other.
 [Full RTX benchmark and launch settings](results/rtx_27b_nvfp4_speed/REPORT.md)
 
 Fast tree 64 matched packed AR on one of ten complete sequences per pass.
-The separate opt-in parity profile matched its own AR reference on all ten
-greedy prompts and passed all 28 sampled distribution checks in the recorded
-comparison. It uses different verification numerics and carries a throughput
-cost. [RTX parity and sampling results](docs/reports/2026-11-19-rtx-nvfp4-parity.md)
+The opt-in parity profile (`AX_NVFP4_VERIFY_PARITY=1`) gives AR decode and
+verification the same projection kernels. Its tree and chain routes matched
+its own AR reference on all ten complete sequences, and AR and tree passed
+all 28 sampled distribution checks.
+
+| Parity profile, concurrency 1, 10 requests, 128-token budget | Output tok/s | Relative to parity AR |
+|---|---:|---:|
+| Parity AR | 49.09 | 1.00× |
+| Parity DFlash2 chain, width 8 | 122.88 | 2.50× |
+| Parity DFlash2 tree, 16 nodes | **123.64** | **2.52×** |
+
+This single pass stops at end-of-sequence and uses two request slots, so it
+is not comparable with the speed table above. The parity AR reference differs
+from packed AR. [RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
 ### Jetson Thor · Qwen3.8-27B
 

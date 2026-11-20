@@ -3,44 +3,32 @@
 AX Engine for SGLang is AX Engine's CUDA edition for Linux amd64 and arm64
 hosts with NVIDIA GPUs. Install the `ax-engine-sglang` Python package and run
 `ax-engine-sglang serve` to start SGLang with the `ax-engine` plugin enabled.
-[Quick start](../README.md#quick-start) · [Configuration reference](../ax-engine-sglang/README.md)
+[Quick start](../README.md#quick-start) · [How it works and why](design.md) · [Benchmarks](performance.md) · [Configuration reference](../ax-engine-sglang/README.md)
 
 ## Installation and release status
 
-Version 0.2.0 supports Python 3.11 and 3.12 and pins SGLang
+AX Engine for SGLang 0.3.0 supports Python 3.11 and 3.12 and pins SGLang
 0.5.23. For a fresh install from wheels, use glibc 2.34 or later and a CUDA
 13-compatible NVIDIA driver. [SGLang 0.5.23 wheel files](https://pypi.org/project/sglang/0.5.23/#files)
 
 | Environment | Install command |
 |---|---|
+| Fresh virtual environment | `python -m pip install ax-engine-sglang==0.3.0` |
 | Fresh virtual environment, from the repository root | `python -m pip install ./ax-engine-sglang` |
 | Existing SGLang 0.5.23 stack, including the pinned container | `python -m pip install --no-deps ./ax-engine-sglang` |
-| Existing SGLang 0.5.23 stack with the release wheel file | `python -m pip install --no-deps ./ax_engine_sglang-0.2.0-py3-none-any.whl` |
-| Fresh virtual environment, published PyPI release | `python -m pip install ax-engine-sglang` |
+| Existing SGLang 0.5.23 stack with the 0.3.0 wheel | `python -m pip install --no-deps ./ax_engine_sglang-0.3.0-py3-none-any.whl` |
 
 Run `ax-engine-sglang --version` to verify the install. `serve` forwards
 SGLang server flags, enables AX and reports a startup error if AX fails to load.
 [Launch defaults and checkpoint validation](../ax-engine-sglang/README.md#launch-defaults)
 
-### First public PyPI release
+### Publishing a release
 
-The wheel and source distribution contain Python source. For the first public
-release, set up the GitHub `pypi` environment and add a pending PyPI Trusted
-Publisher with the following values. [PyPI Trusted Publishing setup](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
-
-| PyPI field | Value |
-|---|---|
-| Project name | `ax-engine-sglang` |
-| Owner | `defai-digital` |
-| Repository | `ax-engine-sglang` |
-| Workflow name | `pypi.yml` |
-| Environment name | `pypi` |
-
-Once the workflow is on the default branch, push `v0.2.0` for the release
-commit to build and check the distributions. To publish, run the workflow
-manually on that tag with `publish=true`. The workflow checks the tag against
-the package version before making the upload.
-[Release workflow](../.github/workflows/pypi.yml)
+Build and check distributions by pushing a version tag in the public
+`defai-digital/ax-engine-sglang` repository. Run `pypi.yml` manually on that
+tag with `publish=true` to upload through the `pypi` GitHub environment and
+PyPI Trusted Publishing. The workflow checks the tag against the version
+reported by the installed wheel. [Release workflow](../.github/workflows/pypi.yml) · [PyPI project](https://pypi.org/project/ax-engine-sglang/)
 
 ## Runtime boundaries
 
@@ -66,6 +54,7 @@ Historical SGLang 0.5.22 tree runs used explicitly supplied launch settings.
 
 | Architecture | Recorded deployment | Evidence |
 |---|---|---|
+| Linux amd64 | Two NVIDIA B300 GPUs | [Flash Next BF16 serving](../results/b300-flash-next-bf16/REPORT.md) |
 | Linux amd64 | NVIDIA B200 (SM100) | [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) · [Flash Next release checks](reports/2026-11-18-b200-v0.1.1.md) |
 | Linux amd64 | NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
 | Linux arm64 | NVIDIA Jetson Thor (SM110) | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) |
@@ -98,8 +87,8 @@ checkpoint. Flash Next uses its own NVFP4 MoE and PLE settings.
 
 The target verifies each speculative proposal on the configured numerical
 path. The RTX speed profile uses batched verification. The opt-in parity
-profile uses matched AR and verification settings and trades throughput
-for reproducibility. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles)
+profile uses matched AR and verification settings, so its speculative
+lanes reproduce its own AR reference. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles)
 
 ## Validate a deployment
 
@@ -114,10 +103,9 @@ for reproducibility. [Speed and parity results](performance.md#rtx-speed-and-par
 - [Results history](results-history.md) and the [original NCM plan](plan.md)
   record the research that preceded the SGLang add-on.
 
-### Installed-wheel smoke on Jetson Thor
+### 0.2.1 installed-wheel smoke on Jetson Thor
 
-On 2026-11-20, a development wheel using the 0.2.0 serving code was installed
-with `--no-deps` in
+On 2026-11-20, the 0.2.1 candidate wheel was installed with `--no-deps` in
 `lmsysorg/sglang:v0.5.23-cu130` on one Jetson Thor (Linux arm64, SM110).
 The server started from `/tmp` with no source checkout on its import path.
 The test used these cached checkpoint revisions.
@@ -156,6 +144,5 @@ The trace for that request ID recorded six tree rounds. A second check with
 `AX_GDN_HEADS=1` rejected the mismatched setting and reported the expected
 value of 48 before loading model weights.
 
-The development wheel was labeled `ax_engine_sglang-0.2.1-py3-none-any.whl`
-and had SHA-256
+The tested artifact was `ax_engine_sglang-0.2.1-py3-none-any.whl` with SHA-256
 `67e8765b99d949f0cfc1c51825c6cc73bce376795f9910831bac829e53ab7d97`.

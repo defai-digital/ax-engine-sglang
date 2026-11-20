@@ -214,12 +214,20 @@ def read_json(path: str | None, filename: str, revision: str | None = None) -> d
         return None
 
 
-def device_capability() -> tuple[int, int] | None:
+def device_capability(server_args) -> tuple[int, int] | None:
+    """Probe the first SGLang worker's CUDA ordinal in the visible device list."""
+    if getattr(server_args, "device", None) not in (None, "cuda"):
+        return None
     try:
         import torch
-        return tuple(torch.cuda.get_device_capability()) if torch.cuda.is_available() else None
+        if torch.cuda.is_available():
+            gpu_id = getattr(server_args, "base_gpu_id", None)
+            if gpu_id is None:
+                gpu_id = 0
+            return tuple(torch.cuda.get_device_capability(gpu_id))
     except Exception:
-        return None
+        pass
+    return None
 
 
 def describe(result: Plan, environ: Mapping[str, str]) -> str:
@@ -249,7 +257,7 @@ def resolve(server_args, *, environ=None, load: Callable = read_json, capability
     drafter = load(getattr(server_args, "speculative_draft_model_path", None), "config.json",
                    getattr(server_args, "speculative_draft_model_revision", None))
     result = plan(server_args, environ, target, drafter, quant,
-                  device_capability() if capability is None else capability)
+                  device_capability(server_args) if capability is None else capability)
     for name, (value, _) in result.env.items():
         environ[name] = value
     if result.args and declare is not None:
@@ -265,6 +273,15 @@ def algorithm_uses_plugin(server_args) -> bool:
     return (getattr(server_args, "speculative_algorithm", None) or "").upper() == TREE_ALGORITHM
 
 
+def resolution_hooks_available() -> bool:
+    """SGLang 0.5.23 resolves server arguments through hooks; 0.5.22 has none."""
+    try:
+        from sglang.srt.arg_groups.resolution_hooks import register_resolution_hook  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def install():
     """Run `resolve()` inside SGLang's resolution pipeline (SGLang 0.5.23 resolution hooks)."""
     try:
@@ -276,6 +293,9 @@ def install():
 
     def hook(server_args, previous):
         resolve(server_args, declare=declare_resolution, on_env_change=get_config.cache_clear)
+        # The plugin may have loaded with a provisional configuration (config.startup_config);
+        # read the resolved environment from here on, even when resolution wrote nothing.
+        get_config.cache_clear()
         previous(server_args)
 
     # MoE backends resolve first (pipeline order), the speculative step reads the tree settings.

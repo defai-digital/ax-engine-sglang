@@ -21,8 +21,8 @@ logprob stride, hidden-state view, the result's `speculative_num_draft_tokens`) 
 `begin_round` puts B back at the start of the next call. The accept/bonus buffers are sized by
 `block_size` when first used, so each width keeps its own set (`_swap_accept_buffers`).
 
-`record_accept` (after the stock accept) keeps, per request, the token before the next anchor, which
-the tree builder conditions on when the request is alone again (`pre1_for`), and appends one line
+`record_accept` (after the stock accept) keeps the token before the next anchor when the n-gram
+tree builder needs it (`pre1_for`) and appends one line
 per round to `AX_ROUND_DUMP` (if set) for the offline accept oracle: request id, kind, width, the
 verified tokens and the accepted length.
 
@@ -595,16 +595,18 @@ def record_accept(w, batch, candidates, accept_len):
     """After the stock accept of a chain round: token before the next anchor, per request; oracle dump."""
     if current_runtime().kind != "chain":
         return
-    before = candidates.gather(1, accept_len.to(torch.int64)[:, None])[:, 0]
-    for i, req in enumerate(batch.reqs):
-        req._ax_pre1 = before[i:i + 1]
+    if _TREE and not _CONFIG.lattice:
+        before = candidates.gather(1, accept_len.to(torch.int64)[:, None])[:, 0]
+        for i, req in enumerate(batch.reqs):
+            req._ax_pre1 = before[i:i + 1]
     if _DUMP:
         _dump(batch, "chain", candidates, accept_len)
 
 
 def record_tree(batch, pre1, tree_tokens, accept_index, accept_lens):
     """After a tree round: same bookkeeping as record_accept."""
-    batch.reqs[0]._ax_pre1 = pre1
+    if pre1 is not None:
+        batch.reqs[0]._ax_pre1 = pre1
     if current_runtime().round_info["backend"] is None:
         current_runtime().round_info["backend"] = current_runtime().main_backend
     if _DUMP:

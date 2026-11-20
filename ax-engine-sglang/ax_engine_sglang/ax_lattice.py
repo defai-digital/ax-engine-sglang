@@ -121,7 +121,6 @@ class LatticeBuilder:
         self.lat = torch.zeros_like(lat)
         self.tail = torch.zeros_like(tail)
         self.root = torch.zeros(1, device=cand.device, dtype=torch.long)
-        self.pre1 = torch.zeros_like(self.root)   # unused: Builder interface (n-gram context) only
         if compile_build:
             self.run = torch.compile(self.run, fullgraph=True, mode="default")
         self._dbg, self._lat_ptr = 0, sampler.fc1_lat.data_ptr()
@@ -148,12 +147,13 @@ class LatticeBuilder:
         self.sib = torch.where(self.sib < self.n, self.sib, -1)
 
     def __call__(self, logits, root, pre1):
+        # The lattice already encodes the transitions. The n-gram argument is
+        # kept in the shared builder interface for the legacy overlay.
         s = self.sampler
         self.cand.copy_(s.fc1_cand[0])
         self.lat.copy_(s.fc1_lat[0])
         self.tail.copy_(s.fc1_tail[0])
         self.root.copy_(root)
-        self.pre1.copy_(pre1)
         self.graph.replay()
         if _DUPCHECK:
             _dupcheck(self.parent, self.tokens, s.fc1_cand[0])

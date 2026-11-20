@@ -15,13 +15,14 @@ SERVED_MODEL = os.environ.get("SERVED_MODEL", "qwen")
 
 DIAGNOSTIC_FLAGS = ("AX_CHECK", "AX_FORCE_SYNC", "AX_GDN_DEBUG", "AX_CHAIN_CHECK",
                     "AX_LATTICE_DUPCHECK", "AX_NXT_DEBUG", "AX_QSA_CHECK")
-DIAGNOSTIC_ENV_KEYS = (*DIAGNOSTIC_FLAGS, "AX_LATTICE_DEBUG", "AX_ROUND_DUMP",
+PROFILE_FLAGS = ("NSYS_TRACE", "TRT_ITER_STATS")
+DIAGNOSTIC_ENV_KEYS = (*DIAGNOSTIC_FLAGS, *PROFILE_FLAGS, "AX_LATTICE_DEBUG", "AX_ROUND_DUMP",
                        "TORCH_PROFILE_STEPS", "SGLANG_PLUGINS")
 
 
 def is_diagnostic(env):
     """Detect server launch options that instrument or synchronize measured rounds."""
-    return bool(env and (any(env.get(key) == "1" for key in DIAGNOSTIC_FLAGS)
+    return bool(env and (any(env.get(key) == "1" for key in (*DIAGNOSTIC_FLAGS, *PROFILE_FLAGS))
                          or (env.get("AX_LATTICE_DEBUG") or "0") != "0"
                          or env.get("AX_ROUND_DUMP") or env.get("TORCH_PROFILE_STEPS")
                          or "axprof" in (env.get("SGLANG_PLUGINS") or "")))

@@ -6,13 +6,55 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ax_engine_sglang.compat import installation, patch_attribute, patch_item, check_sglang
 from ax_engine_sglang.config import PluginConfig, get_config
 from ax_engine_sglang.policy import RoundFeatures, chain_width, use_tree
 from ax_engine_sglang.runtime import activate_worker, current_runtime
+
+
+class PredecessorTests(unittest.TestCase):
+    def test_chain_predecessors_are_only_saved_for_the_ngram_tree(self):
+        fake_torch = SimpleNamespace(int64=object())
+        with patch.dict(sys.modules, {"torch": fake_torch}):
+            from ax_engine_sglang import ax_chain
+
+        worker = SimpleNamespace()
+        state = SimpleNamespace(kind="chain")
+        req = SimpleNamespace()
+        batch = SimpleNamespace(reqs=[req])
+        candidates, accepted = MagicMock(), MagicMock()
+        with (patch.object(ax_chain, "current_runtime", return_value=state),
+              patch.object(ax_chain, "torch", fake_torch),
+              patch.object(ax_chain, "_TREE", True), patch.object(ax_chain, "_DUMP", "oracle")):
+            with patch.object(ax_chain, "_CONFIG", PluginConfig(lattice=True)), patch.object(ax_chain, "_dump") as dump:
+                ax_chain.record_accept(worker, batch, candidates, accepted)
+                candidates.gather.assert_not_called()
+                accepted.to.assert_not_called()
+                self.assertIsNone(ax_chain.pre1_for(req))
+                dump.assert_called_once_with(batch, "chain", candidates, accepted)
+
+            with patch.object(ax_chain, "_CONFIG", PluginConfig(lattice=False)), patch.object(ax_chain, "_dump"):
+                ax_chain.record_accept(worker, batch, candidates, accepted)
+                self.assertIsNotNone(ax_chain.pre1_for(req))
+                candidates.gather.assert_called_once()
+
+    def test_lattice_builder_can_replay_without_an_ngram_predecessor(self):
+        with patch.dict(sys.modules, {"torch": ModuleType("torch")}):
+            from ax_engine_sglang import ax_lattice
+
+        builder = ax_lattice.LatticeBuilder.__new__(ax_lattice.LatticeBuilder)
+        builder.sampler = SimpleNamespace(fc1_cand=["candidates"], fc1_lat=["scores"], fc1_tail=["tail"])
+        builder.cand, builder.lat, builder.tail, builder.root, builder.graph = (MagicMock() for _ in range(5))
+        builder.tokens = MagicMock()
+        builder.depth, builder.parent, builder.anc, builder.nxt, builder.sib = range(5)
+        with patch.object(ax_lattice, "_DEBUG", 0), patch.object(ax_lattice, "_DUPCHECK", False):
+            tree = builder(None, "anchor", None)
+        builder.root.copy_.assert_called_once_with("anchor")
+        builder.graph.replay.assert_called_once_with()
+        self.assertEqual(tree[1:], tuple(range(5)))
 
 
 class ConfigTests(unittest.TestCase):

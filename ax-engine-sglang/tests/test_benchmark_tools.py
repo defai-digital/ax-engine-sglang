@@ -3,6 +3,7 @@ import hashlib
 import importlib
 import io
 import json
+import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
 import sys
@@ -102,11 +103,48 @@ class BenchmarkToolTests(unittest.TestCase):
 
     def test_server_side_diagnostic_switches_disqualify_speed_results(self):
         active_flags = ("AX_FORCE_SYNC", "AX_CHAIN_CHECK", "AX_LATTICE_DUPCHECK", "AX_NXT_DEBUG",
-                        "AX_QSA_CHECK", "AX_ROUND_DUMP", "TORCH_PROFILE_STEPS")
+                        "AX_QSA_CHECK", "AX_ROUND_DUMP", "TORCH_PROFILE_STEPS", "NSYS_TRACE",
+                        "TRT_ITER_STATS")
         for name in active_flags:
             with self.subTest(flag=name):
                 self.assertTrue(is_diagnostic({name: "1"}))
         self.assertFalse(is_diagnostic({"AX_LATTICE_DEBUG": "0", "AX_CHAIN_CHECK": "0", "AX_QSA_RING": "16"}))
+        self.assertFalse(is_diagnostic({"NSYS_TRACE": "0", "TRT_ITER_STATS": "0"}))
+
+    def test_nsys_captures_then_shuts_down_its_own_session(self):
+        with tempfile.TemporaryDirectory(prefix="ax trace ") as directory:
+            script = r"""
+set -eu
+source benchmarks/sglang/nsys_trace.sh
+nsys() {
+    if [[ "$1" == "--version" ]]; then echo "test nsys"; return; fi
+    printf '%s\n' "$1" >> "$trace_log"
+    case "$1" in
+        launch)
+            [[ "$2" == "--session-new=$nsys_session" ]]
+            [[ " $* " != *" --sample="* ]]
+            ;;
+        start)
+            [[ "$3" == "--output=$nsys_report" ]]
+            [[ "$4" == "--sample=none" && "$5" == "--cpuctxsw=none" ]]
+            printf 'trace\n' > "$nsys_report.nsys-rep"
+            ;;
+        stop|shutdown) [[ "$2" == "--session=$nsys_session" ]] ;;
+    esac
+}
+NSYS_TRACE=1
+trace_log="$1/calls"
+nsys_trace_init
+nsys_trace_prepare 1 "$1"
+"${nsys_launch[@]}" test-server
+nsys_trace_start
+nsys_trace_stop
+nsys_trace_cleanup
+"""
+            subprocess.run(["bash", "-c", script, "nsys-test", directory], cwd=ROOT, check=True)
+            output = Path(directory)
+            self.assertEqual((output / "calls").read_text().splitlines(), ["launch", "start", "stop", "shutdown"])
+            self.assertEqual((output / "decode.nsys-rep").read_text(), "trace\n")
 
     def test_diagnostic_baseline_is_excluded_from_speed_comparisons(self):
         row = dict(prompt_set="code", concurrency=1, output_tok_s=30.0,

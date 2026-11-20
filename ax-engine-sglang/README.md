@@ -15,14 +15,11 @@ SGLang code and validates the expected upstream integration points.
 ## Install and run
 
 Use Python 3.11 or 3.12 and a CUDA 13-compatible NVIDIA driver on Linux. In a
-fresh virtual environment, run `python -m pip install ./ax-engine-sglang` from
-the repository root to install the add-on and SGLang 0.5.23. In an
-existing SGLang 0.5.23 environment, run
-`python -m pip install --no-deps ./ax-engine-sglang` or pass the 0.2.0 wheel
-path instead. The Jetson Thor smoke test used this wheel install in
-`lmsysorg/sglang:v0.5.23-cu130`.
-
-Install published PyPI releases by name with `python -m pip install ax-engine-sglang`.
+fresh virtual environment, run `python -m pip install ax-engine-sglang==0.3.0`
+to install the add-on and SGLang 0.5.23. Use
+`python -m pip install ./ax-engine-sglang` from a source checkout. Add
+`--no-deps` when you already have the pinned SGLang environment. The Jetson
+Thor smoke test used the 0.2.1 wheel in `lmsysorg/sglang:v0.5.23-cu130`.
 
 ```bash
 ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
@@ -36,7 +33,7 @@ startup if AX fails to load. An existing `SGLANG_PLUGINS` allowlist retains
 its entries. To use the upstream launcher directly, set `SGLANG_PLUGINS=ax-engine`.
 On Jetson Thor, the installed wheel served a 32-token request with six tree
 rounds and rejected a checkpoint setting mismatch before loading weights.
-[Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#installed-wheel-smoke-on-jetson-thor)
+[Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#021-installed-wheel-smoke-on-jetson-thor)
 
 ## B200 benchmark results
 
@@ -173,10 +170,13 @@ Settings that differ from a discrete GPU:
   stock AR as well, so greedy identity and the teacher check cannot qualify NVFP4 routes on Thor.
   Qualify exact-output requirements on bf16.
 
-Not qualified on Thor: sampled decoding (`AX_TREE_SAMPLING`, `AX_EAGLE_JOINT_SAMPLING`,
-`AX_DFLASH_JOINT_SAMPLING`; their kernel-level checks pass on SM110, the distribution qualification
-is the B200 result), more than one running request (`AX_CHAIN_*`), and `AX_QSA_STABLE_TOPK` on a
-served model. All `tests/gpu_*.py` checks pass on SM110.
+Also measured on Thor with the 9B: sampled tree verify (`AX_TREE_SAMPLING=1`) matched stock AR
+on 28 of 28 distribution tests, and a server with `--max-running-requests 4` passed the mixed
+request and stress checks (2,000 requests, 178 cancelled) at the stock DFlash rate for two and
+four requests. Not qualified on Thor: `AX_EAGLE_JOINT_SAMPLING` and `AX_DFLASH_JOINT_SAMPLING`
+on a served model (their kernel-level checks pass on SM110), and `AX_QSA_STABLE_TOPK` on a
+served model. All `tests/gpu_*.py` checks pass on SM110; the NVFP4 parity check is SM120 only and
+skips.
 
 ## Maintenance and validation
 
@@ -300,10 +300,12 @@ GDN tree and chain each matched four of seven greedy outputs against RTX AR.
 For the dense Qwen3.8-27B NVFP4 checkpoint on RTX PRO 6000, the regression
 runner accepts `--nvfp4-verify-parity` for AR, DFlash2 tree and chain.
 It selects FlashInfer paged attention, CUTLASS NVFP4, unpacked GDN
-and row-wise target projections. The serving Python must be able to import
-`cutlass.cute` from NVIDIA CUTLASS DSL. Use the option on both sides of a greedy
-comparison. It changes the AR numerical reference and trades throughput for
-reproducibility. [Verification controls and results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md)
+and target projections in fixed groups of rows. The serving Python must be able
+to import `cutlass.cute` from NVIDIA CUTLASS DSL. Use the option on both sides
+of a greedy comparison, because it changes the AR numerical reference.
+`--nvfp4-parity-rows` (`AX_NVFP4_PARITY_ROWS`, default 16) sets the group size
+and must also match on both sides. A value of 1 runs verification one row at
+a time. [Verification controls](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md) · [Row group results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
 On the Flash Next AR reference server, `AX_GDN_UNPACKED_DECODE=1` selects
 unpacked Triton Gated DeltaNet decode before CUDA graph capture. To reproduce

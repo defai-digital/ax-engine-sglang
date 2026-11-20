@@ -7,12 +7,19 @@
 # request list (prompt i with seed i) at every concurrency level.
 # Env: MODES, OUT, GPU, PORT, CONCURRENCY, N_REQUESTS, MAX_TOKENS, MAX_TOKENS_THINK, PRESETS,
 #   SETS (greedy preset only: subset of code math chat), PROMPT_FILE (ordered speed prompts),
-#   BENCHMARK_PRECISION (label for weights and KV cache), TORCH_PROFILE_STEPS / TORCH_PROFILE_START
+#   BENCHMARK_PRECISION (label for weights and KV cache), TORCH_PROFILE_STEPS / TORCH_PROFILE_START,
+#   NSYS_TRACE=1 (CUDA/NVTX timeline), NSYS_GRAPH_TRACE=graph|node (default graph)
 #      ("greedy qwen38" by default; "greedy" skips the sampled thinking setting; "ids" saves the
 #      greedy output token ids with benchmarks/sglang/token_identity.py), and the
 #      serve_sglang.sh variables (AUTOTUNE, RADIX_CACHE, BLOCK, DRAFT, EXTRA_ARGS)
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+source benchmarks/sglang/nsys_trace.sh
+nsys_trace_init || exit 2
+if [[ "${NSYS_TRACE:-0}" == 1 && -n "${TORCH_PROFILE_STEPS:-}" ]]; then
+  echo "Run Nsight Systems and the SGLang torch profiler in separate passes" >&2
+  exit 2
+fi
 
 MODES=${MODES:-"ar mtp3 dflash dspark"}
 OUT=${OUT:-results/track_a_baselines}
@@ -43,7 +50,8 @@ json.dump({
   "model": os.environ.get("MODEL", "Qwen/Qwen3.8-27B"),
   "precision": os.environ.get("BENCHMARK_PRECISION") or None,
   "lane": {k: os.environ.get(k, "") for k in (*DIAGNOSTIC_ENV_KEYS, "MODES", "AUTOTUNE", "RADIX_CACHE", "BLOCK", "DRAFT", "EXTRA_ARGS",
-           "PRESETS", "PYTHONPATH", "AX_SITE_SHA", "AX_FAST", "AX_LATTICE", "AX_GDN_LAYERS", "AX_GDN_HEADS", "FC1_TREE64",
+           "PRESETS", "PROMPT_FILE", "PYTHONPATH", "AX_SITE_SHA", "AXPROF_SYNC", "AXPROF_NVTX", "NSYS_GRAPH_TRACE", "NSYS_VERSION",
+           "AX_FAST", "AX_LATTICE", "AX_GDN_LAYERS", "AX_GDN_HEADS", "FC1_TREE64",
            "FC1_TREE_N", "FC1_DRAFT_BLOCK", "FC1_COMPILE_BUILD", "FC1_FUSED", "FC1_BRANCH_PILOT", "FC1_OURS",
            "FC1_NGRAM_PATH", "AX_TREE", "AX_CHAIN_WIDTH", "AX_CHAIN_SCHEDULE", "AX_CHAIN_GRAPH_WIDTHS", "AX_CHAIN_DRAFT_WIDTHS", "AX_CHAIN_ATTN", "AX_FP8_PROBE", "AX_TREE_SAMPLING", "AX_FI_OFFSET_FIX", "AX_SSM_POSITIONS", "IDS_CONCURRENCY", "AX_QSA_RING", "IDS_CONTEXT_TOKENS")},
 }, open(tmp, "w"), indent=2)
@@ -53,6 +61,7 @@ PY
 SERVER_PID=""
 stop_server() {
   [[ -n "$SERVER_PID" ]] || return 0
+  nsys_trace_cleanup
   kill -- -"$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true
   for _ in $(seq 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
   kill -9 -- -"$SERVER_PID" 2>/dev/null || true
@@ -65,6 +74,8 @@ stop_server() {
   sleep 10
 }
 trap stop_server EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Speculative algorithm a mode's server must report (empty = plain decoding).
 expected_algorithm() {
@@ -100,9 +111,11 @@ fi
 export RADIX_CACHE=${RADIX_CACHE:-0}
 
 failed=0
+lane_index=0
 prompt_args=()
 if [[ -n "${PROMPT_FILE:-}" ]]; then prompt_args=(--prompt-file "$PROMPT_FILE"); fi
 for mode in $MODES; do
+  lane_index=$((lane_index + 1))
   echo "=== mode: $mode (GPU $GPU) $(date -u +%H:%M:%S) ==="
   # invalidate this mode's previous outputs before anything can fail, so a failed rerun never
   # leaves an older pass that looks complete (token_identity.py writes ids.meta.json last)
@@ -114,11 +127,18 @@ for mode in $MODES; do
   if [[ "$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$BASE_URL/health")" == "200" ]]; then
     echo "SERVER_FAILED $mode: port $PORT already serves something"; failed=1; continue
   fi
-  setsid benchmarks/sglang/serve_sglang.sh "$mode" > "$OUT/$mode/server.log" 2>&1 &
+  if ! nsys_trace_prepare "$lane_index" "$OUT/$mode"; then failed=1; continue; fi
+  setsid "${nsys_launch[@]}" benchmarks/sglang/serve_sglang.sh "$mode" > "$OUT/$mode/server.log" 2>&1 &
   SERVER_PID=$!
   if ! wait_ready; then
     echo "SERVER_FAILED $mode"; grep -iE "error|traceback" "$OUT/$mode/server.log" | tail -5
     tail -5 "$OUT/$mode/server.log"; failed=1; stop_server; continue
+  fi
+  if ! nsys_trace_start; then
+    echo "PROFILE_FAILED $mode: could not start Nsight Systems" >&2
+    failed=1
+    stop_server
+    continue
   fi
   if [[ -n "${TORCH_PROFILE_STEPS:-}" ]]; then
     # SGLang torch profiler over TORCH_PROFILE_STEPS scheduler steps from step TORCH_PROFILE_START
@@ -175,6 +195,7 @@ for mode in $MODES; do
         --max-tokens "$MAX_TOKENS_THINK" --n-requests "$N_REQUESTS" --concurrency $CONCURRENCY \
         || { echo "BENCH_FAILED $mode qwen38"; failed=1; }
   fi
+  nsys_trace_stop || failed=1
   stop_server
 done
 echo "LANE_DONE gpu=$GPU failed=$failed $(date -u)"

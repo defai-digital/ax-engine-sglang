@@ -3,7 +3,7 @@
 # ax-engine-sglang (`SGLANG_PLUGINS=ax-engine`); adapted from DForkTree v0.1.0 fc1_plugin.py.
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.speculative.spec_registry import CustomSpecAlgo
-from .config import get_config
+from .config import get_config, startup_config
 from .compat import check_sglang, installation, patch_attribute
 from .runtime import current_runtime
 _registered = False
@@ -30,13 +30,16 @@ def register():
     global _registered
     if _registered:
         return
-    config = get_config()  # Validate every cross-option constraint before changing upstream objects.
+    # Validate every cross-option constraint before changing upstream objects.
+    config, provisional = startup_config()
     check_sglang(config)
     with installation():
         from . import defaults   # ax-engine-sglang: model/GPU-derived launch defaults (AX_AUTO_DEFAULTS=0 disables)
         defaults.install()
         _install_fixes(config)
-        if config.tree_requested:
+        # A provisional launcher config still lacks the resolved defaults; TreeSpec.handle_server_args
+        # installs the tree after resolution. Scheduler processes inherit the resolved environment.
+        if config.tree_requested and not provisional:
             _install_tree()
 
         @SpeculativeAlgorithm.register('FC1_DFLASH_TREE', supports_overlap=True, spec_class=TreeSpec)
@@ -55,7 +58,7 @@ def _install_fixes(config):
     ax_rng.install()
     if config.nvfp4_verify_parity:
         from . import ax_nvfp4_verify, ax_verify_attention
-        ax_nvfp4_verify.install()
+        ax_nvfp4_verify.install(config.nvfp4_parity_rows)
         ax_verify_attention.install()
     if config.eagle_joint_sampling:
         from . import ax_eagle_sampling

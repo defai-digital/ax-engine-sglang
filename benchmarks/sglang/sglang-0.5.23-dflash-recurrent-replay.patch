@@ -1,0 +1,375 @@
+diff --git a/sglang/srt/mem_cache/kv_cache_configurator.py b/sglang/srt/mem_cache/kv_cache_configurator.py
+index 84f52db..2445727 100644
+--- a/sglang/srt/mem_cache/kv_cache_configurator.py
++++ b/sglang/srt/mem_cache/kv_cache_configurator.py
+@@ -1703,17 +1703,18 @@ class KVCacheConfigurator:
+         max_num_reqs: int,
+         extra_max_context_len: int,
+     ) -> ReqToTokenPool:
+-        # DSPARK/DFLASH commit routes through the backend fold (KDA-only); a
+-        # non-KDA model there would scatter a None intermediate_ssm and crash.
++        # DFlash can commit a GDN replay ring through its worker. DSPARK's
++        # direct commit still requires the backend's KDA fold.
+         _algo = (get_spec().speculative_algorithm or "").upper()
+         if (
+             get_exec().mamba.enable_linear_replayssm_spec
+             and _algo in ("DSPARK", "DFLASH")
+             and self.hybrid_kda_config is None
++            and not (_algo == "DFLASH" and self.hybrid_gdn_config is not None)
+         ):
+             raise ValueError(
+-                "--enable-linear-replayssm-spec with DSPARK/DFLASH requires a KDA "
+-                "model; got a non-KDA model."
++                f"--enable-linear-replayssm-spec with {_algo} requires "
++                "a KDA model (or a GDN model with DFLASH)."
+             )
+         req_to_token_pool = HybridReqToTokenPool(
+             size=max_num_reqs,
+diff --git a/sglang/srt/speculative/dflash_worker_v2.py b/sglang/srt/speculative/dflash_worker_v2.py
+index 27b845e..e02c6f4 100644
+--- a/sglang/srt/speculative/dflash_worker_v2.py
++++ b/sglang/srt/speculative/dflash_worker_v2.py
+@@ -105,8 +105,10 @@ from sglang.srt.speculative.spec_utils import (
+     assign_req_to_token_pool_func,
+     build_grammar_vocab_mask,
+     check_simulate_acc_token_mode,
++    commit_gdn_replay_after_verify,
+     draft_pp_context,
+     draft_tp_context,
++    uses_gdn_replayssm_spec,
+ )
+ from sglang.srt.utils import async_h2d, is_cuda, is_hip, is_npu, is_xpu
+
+@@ -400,6 +402,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+         self._target_worker = target_worker
+         self.model_runner = target_worker.model_runner
+         self._need_mamba_verify_commit = False
++        self._commit_with_gdn_replay = False
+         self.page_size = get_schedule().page_size
+         # Normalized in arg_groups.speculative_hook.handle_speculative_decoding.
+         self.draft_window_size: Optional[int] = get_spec().speculative_draft_window_size
+@@ -695,6 +698,13 @@ class DFlashWorkerV2(BaseSpecWorker):
+             "update_mamba_state_after_mtp_verify",
+         )
+
++        if self._need_mamba_verify_commit:
++            self._commit_with_gdn_replay = uses_gdn_replayssm_spec(
++                getattr(self.model_runner.req_to_token_pool, "mamba_pool", None)
++            )
++            if self._commit_with_gdn_replay:
++                logger.info("DFLASH is using the GDN ReplaySSM verify commit.")
++
+     def init_cuda_graphs(self):
+         target_dp_enabled = get_parallel().attn_dp_enabled
+         with (
+@@ -2123,6 +2133,17 @@ class DFlashWorkerV2(BaseSpecWorker):
+             )
+
+         model_runner = self.target_worker.model_runner
++        if self._commit_with_gdn_replay:
++            if not batch.forward_mode.is_idle() and commit_lens.numel() > 0:
++                commit_gdn_replay_after_verify(
++                    model_runner.req_to_token_pool,
++                    batch,
++                    commit_lens,
++                    self.block_size,
++                    last_correct_step_indices,
++                    mamba_steps_to_track,
++                )
++            return
+         if hasattr(attn_backend, "update_mamba_state_after_mtp_verify"):
+             attn_backend.update_mamba_state_after_mtp_verify(
+                 last_correct_step_indices=last_correct_step_indices,
+diff --git a/sglang/srt/speculative/spec_utils.py b/sglang/srt/speculative/spec_utils.py
+index 3f1836e..3f65ecc 100644
+--- a/sglang/srt/speculative/spec_utils.py
++++ b/sglang/srt/speculative/spec_utils.py
+@@ -1002,6 +1002,106 @@ def _verify_commit_step_indices(
+     return last_correct_step_indices, mamba_steps_to_track
+
+
++def uses_gdn_replayssm_spec(mamba_pool) -> bool:
++    return (
++        mamba_pool is not None
++        and not getattr(mamba_pool, "replayssm_is_kda", False)
++        and (
++            getattr(mamba_pool, "replayssm_spec_fold", False)
++            or getattr(mamba_pool, "replayssm_cache_base", None) is not None
++        )
++    )
++
++
++def commit_gdn_replay_after_verify(
++    req_pool,
++    batch: ScheduleBatch,
++    accept_lens: torch.Tensor,
++    draft_token_num: int,
++    last_correct_step_indices: torch.Tensor,
++    mamba_steps_to_track: Optional[torch.Tensor],
++) -> None:
++    """Commit either GDN ReplaySSM layout for a verified linear chain."""
++    mamba_pool = req_pool.mamba_pool
++    replay_indices = batch.req_pool_indices[: accept_lens.shape[0]]
++    src_indices_raw = replay_indices if pp_spec_stable_rows_enabled() else None
++    spec_state = req_pool.get_speculative_mamba2_params_all_layers()
++    state_batch_indices = req_pool.get_mamba_indices(replay_indices)
++    if mamba_pool.replayssm_spec_fold:
++        from sglang.kernels.ops.attention.linear.gdn_replayssm_spec_fold import (
++            commit_gdn_replayssm_fold_after_verify,
++        )
++
++        commit_gdn_replayssm_fold_after_verify(
++            spec_state=spec_state,
++            state_batch_indices=state_batch_indices,
++            accept_lens=accept_lens,
++            last_correct_step_indices=last_correct_step_indices,
++            mamba_track_indices=batch.mamba_track_indices,
++            mamba_steps_to_track=mamba_steps_to_track,
++            src_indices_raw=src_indices_raw,
++            null_block_id=-1,
++        )
++        return
++
++    from sglang.kernels.ops.attention.linear.gdn_replayssm_spec_decode import (
++        commit_gdn_replayssm_circular,
++        commit_gdn_replayssm_spec,
++    )
++    from sglang.kernels.ops.mamba.mamba_state_scatter_triton import (
++        fused_conv_window_scatter_with_mask,
++    )
++
++    # Advance the per-request circular cursors by the accepted count (incl. the
++    # bonus token). max_cache_len = ring length L = replayssm_d.shape[-2].
++    commit_gdn_replayssm_spec(
++        write_pos=mamba_pool.replayssm_spec_write_pos,
++        cache_base=mamba_pool.replayssm_cache_base,
++        is_flush=mamba_pool.replayssm_is_flush,
++        num_accepted=accept_lens,  # [bs], includes the bonus token
++        replay_indices=replay_indices,
++        max_cache_len=spec_state.replayssm_d.shape[-2],
++        max_spec_len=draft_token_num,
++        fold_every_commit=spec_state.temporal.dtype != torch.float32,
++        null_block_id=-1,  # SGLang: valid slots >= 0, padding == -1
++    )
++    # Capacity rows fold all layers in one launch; track rows snapshot the
++    # exact crossing state without disturbing the active circular history.
++    commit_gdn_replayssm_circular(
++        checkpoint_state=spec_state.temporal,
++        d_cache=spec_state.replayssm_d,
++        k_cache=spec_state.replayssm_k,
++        g_cache=spec_state.replayssm_g,
++        d_residual_cache=spec_state.replayssm_rawv,
++        k_residual_cache=spec_state.replayssm_rawk,
++        state_batch_indices=state_batch_indices,
++        replay_indices=replay_indices,
++        write_pos=mamba_pool.replayssm_spec_write_pos,
++        cache_base=mamba_pool.replayssm_cache_base,
++        is_flush=mamba_pool.replayssm_is_flush,
++        accept_lens=accept_lens,
++        mamba_track_indices=batch.mamba_track_indices,
++        mamba_steps_to_track=mamba_steps_to_track,
++        null_block_id=-1,
++    )
++    # Roll back active conv state and snapshot its interval-crossing window.
++    fused_conv_window_scatter_with_mask(
++        spec_state.conv[0],
++        spec_state.intermediate_conv_window[0],
++        state_batch_indices,
++        last_correct_step_indices,
++        src_indices_raw,
++    )
++    if batch.mamba_track_indices is not None:
++        fused_conv_window_scatter_with_mask(
++            spec_state.conv[0],
++            spec_state.intermediate_conv_window[0],
++            batch.mamba_track_indices,
++            mamba_steps_to_track,
++            src_indices_raw,
++        )
++
++
+ def commit_mamba_states_after_verify(
+     target_worker: TpModelWorker,
+     batch: ScheduleBatch,
+@@ -1025,14 +1125,6 @@ def commit_mamba_states_after_verify(
+     if mambaish_config(model_runner.model_config) is None:
+         return
+
+-    # ReplaySSM spec-verify path (Part B of #28511): the accepted drafts already
+-    # live in the per-slot circular ring (written during verify). Instead of
+-    # scattering an intermediate full SSM state into `temporal`, advance the
+-    # block-keyed cursors by the accepted count (the ring owns the SSM state; the
+-    # verify/flush kernel folds it into `temporal` periodically). The CONV state
+-    # still needs its usual accept-rollback, so we keep the conv-window scatter and
+-    # skip only the SSM scatter. GDN-only + linear-chain (topk<=1) -- the runtime
+-    # ring is allocated only then; KDA never allocates the cursors.
+     req_pool = model_runner.req_to_token_pool
+     mamba_pool = getattr(req_pool, "mamba_pool", None)
+     bs = accept_lens.shape[0]
+@@ -1040,124 +1132,21 @@ def commit_mamba_states_after_verify(
+         batch.req_pool_indices[:bs] if pp_spec_stable_rows_enabled() else None
+     )
+
+-    # Fold-every-commit: replay the accepted prefix from the ring into
+-    # `temporal`; the same fold stores the interval-crossing state to the
+-    # track slot, so no SSM scatter or force-flush is needed here.
+-    if (
+-        mamba_pool is not None
+-        and getattr(mamba_pool, "replayssm_spec_fold", False)
+-        and not getattr(mamba_pool, "replayssm_is_kda", False)
+-    ):
++    if uses_gdn_replayssm_spec(mamba_pool):
+         if batch.forward_mode.is_idle() or accept_index.numel() == 0:
+             return
+-        from sglang.kernels.ops.attention.linear.gdn_replayssm_spec_fold import (
+-            commit_gdn_replayssm_fold_after_verify,
+-        )
+-
+-        spec_state = req_pool.get_speculative_mamba2_params_all_layers()
+-        state_batch_indices = req_pool.get_mamba_indices(batch.req_pool_indices)
+         if prepared_step_indices is None:
+-            last_correct_step_indices, mamba_steps_to_track = (
+-                _verify_commit_step_indices(
+-                    batch=batch,
+-                    accept_index=accept_index,
+-                    accept_lens=accept_lens,
+-                    draft_token_num=draft_token_num,
+-                )
++            prepared_step_indices = _verify_commit_step_indices(
++                batch=batch,
++                accept_index=accept_index,
++                accept_lens=accept_lens,
++                draft_token_num=draft_token_num,
+             )
+-        else:
+-            last_correct_step_indices, mamba_steps_to_track = prepared_step_indices
+-        commit_gdn_replayssm_fold_after_verify(
+-            spec_state=spec_state,
+-            state_batch_indices=state_batch_indices,
+-            accept_lens=accept_lens,
+-            last_correct_step_indices=last_correct_step_indices,
+-            mamba_track_indices=batch.mamba_track_indices,
+-            mamba_steps_to_track=mamba_steps_to_track,
+-            src_indices_raw=src_indices_raw,
+-            null_block_id=-1,
++        commit_gdn_replay_after_verify(
++            req_pool, batch, accept_lens, draft_token_num, *prepared_step_indices
+         )
+         return
+
+-    if (
+-        mamba_pool is not None
+-        and getattr(mamba_pool, "replayssm_cache_base", None) is not None
+-        and not getattr(mamba_pool, "replayssm_is_kda", False)
+-    ):
+-        if batch.forward_mode.is_idle() or accept_index.numel() == 0:
+-            return
+-        from sglang.kernels.ops.attention.linear.gdn_replayssm_spec_decode import (
+-            commit_gdn_replayssm_circular,
+-            commit_gdn_replayssm_spec,
+-        )
+-        from sglang.kernels.ops.mamba.mamba_state_scatter_triton import (
+-            fused_conv_window_scatter_with_mask,
+-        )
+-
+-        spec_state = req_pool.get_speculative_mamba2_params_all_layers()
+-        state_batch_indices = req_pool.get_mamba_indices(batch.req_pool_indices)
+-        replay_indices = batch.req_pool_indices
+-        if prepared_step_indices is None:
+-            last_correct_step_indices, mamba_steps_to_track = (
+-                _verify_commit_step_indices(
+-                    batch=batch,
+-                    accept_index=accept_index,
+-                    accept_lens=accept_lens,
+-                    draft_token_num=draft_token_num,
+-                )
+-            )
+-        else:
+-            last_correct_step_indices, mamba_steps_to_track = prepared_step_indices
+-        # Advance the per-request circular cursors by the accepted count (incl. the
+-        # bonus token). max_cache_len = ring length L = replayssm_d.shape[-2].
+-        commit_gdn_replayssm_spec(
+-            write_pos=mamba_pool.replayssm_spec_write_pos,
+-            cache_base=mamba_pool.replayssm_cache_base,
+-            is_flush=mamba_pool.replayssm_is_flush,
+-            num_accepted=accept_lens,  # [bs], includes the bonus token
+-            replay_indices=replay_indices,
+-            max_cache_len=spec_state.replayssm_d.shape[-2],
+-            max_spec_len=draft_token_num,
+-            fold_every_commit=spec_state.temporal.dtype != torch.float32,
+-            null_block_id=-1,  # SGLang: valid slots >= 0, padding == -1
+-        )
+-        # Capacity rows fold all layers in one launch; track rows snapshot the
+-        # exact crossing state without disturbing the active circular history.
+-        commit_gdn_replayssm_circular(
+-            checkpoint_state=spec_state.temporal,
+-            d_cache=spec_state.replayssm_d,
+-            k_cache=spec_state.replayssm_k,
+-            g_cache=spec_state.replayssm_g,
+-            d_residual_cache=spec_state.replayssm_rawv,
+-            k_residual_cache=spec_state.replayssm_rawk,
+-            state_batch_indices=state_batch_indices,
+-            replay_indices=replay_indices,
+-            write_pos=mamba_pool.replayssm_spec_write_pos,
+-            cache_base=mamba_pool.replayssm_cache_base,
+-            is_flush=mamba_pool.replayssm_is_flush,
+-            accept_lens=accept_lens,
+-            mamba_track_indices=batch.mamba_track_indices,
+-            mamba_steps_to_track=mamba_steps_to_track,
+-            null_block_id=-1,
+-        )
+-        # Roll back active conv state and snapshot its interval-crossing window.
+-        fused_conv_window_scatter_with_mask(
+-            spec_state.conv[0],
+-            spec_state.intermediate_conv_window[0],
+-            state_batch_indices,
+-            last_correct_step_indices,
+-            src_indices_raw,
+-        )
+-        if batch.mamba_track_indices is not None:
+-            fused_conv_window_scatter_with_mask(
+-                spec_state.conv[0],
+-                spec_state.intermediate_conv_window[0],
+-                batch.mamba_track_indices,
+-                mamba_steps_to_track,
+-                src_indices_raw,
+-            )
+-        return
+-
+     # KDA ReplaySSM (fold-every-commit): KDA keeps its own recurrent verify kernel
+     # for the OUTPUT, so we replay the accepted window into the fp32 checkpoint
+     # (`temporal`) here on commit -- `temporal` is always the current committed
+diff --git a/sglang/srt/mem_cache/memory_pool.py b/sglang/srt/mem_cache/memory_pool.py
+--- a/sglang/srt/mem_cache/memory_pool.py
++++ b/sglang/srt/mem_cache/memory_pool.py
+@@ -672,9 +672,7 @@
+         # fold-every-commit for KDA. The shared g allocation gates on
+         # `_replayssm_on`.
+         self.enable_linear_replayssm_spec = enable_linear_replayssm_spec
+-        self.replayssm_spec_fold = bool(
+-            enable_linear_replayssm_spec and cache_params.is_kda
+-        )
++        self.replayssm_spec_fold = enable_linear_replayssm_spec
+         _replayssm_on = enable_linear_replayssm or enable_linear_replayssm_spec
+
+         # for disagg with nvlink
+@@ -767,7 +765,7 @@
+                 # active requests instead of every persistent radix-cache slot.
+                 num_slots = (
+                     spec_state_size + 1
+-                    if enable_linear_replayssm_spec and not cache_params.is_kda
++                    if enable_linear_replayssm_spec and not self.replayssm_spec_fold
+                     else size + 1
+                 )
+                 # Decode records follow the SSM dtype. Spec-verify compact d/k
+@@ -815,8 +813,8 @@
+                 )
+                 # KDA still uses raw-input fold-every-commit. GDN materializes
+                 # its compact d/k/g history directly and needs no duplicate ring.
+-                if enable_linear_replayssm_spec and cache_params.is_kda:
+-                    if cache_params.is_kda or not self.replayssm_spec_fold:
++                if enable_linear_replayssm_spec and self.replayssm_spec_fold:
++                    if cache_params.is_kda:
+                         # Backstop for the KDA ring invariants; this pool is
+                         # sized with the final adaptive-aware draft maximum.
+                         if L & (L - 1) != 0:
