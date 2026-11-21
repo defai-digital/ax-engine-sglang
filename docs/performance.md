@@ -167,13 +167,29 @@ concurrency one, from output tokens 329 and 492; its chain rounds (two or more
 requests) matched. The profile now refuses the tree route. The sequences are
 ten distinct prompts repeated at concurrency 1, 2 and 8.
 
-The same session compared `AX_POLICY_MODE=adaptive` with fixed chain widths on
-the speed profile with eight requests running. Width 16 was 8% faster at
-concurrency two (286 against 265 tok/s) and width 8 was 20% faster at
-concurrency eight (699 against 584 tok/s). The adaptive policy reached 706
-tok/s at concurrency eight and 269 tok/s at concurrency two, so it stays
-experimental and off by default.
-[Gate, adaptive comparison and limits](reports/2026-11-21-verified-profile-gate.md)
+### Chain width by batch size
+
+On the speed profile (no exact-output claim) the better fixed chain width
+depends on how many requests run. The first comparison used the ten frozen
+prompts; because the generated text differs between lanes without the verified
+profile, it was repeated on 200 distinct prompts (256 output tokens, radix cache
+off, two sweeps; concurrency two uses the second sweep, after a slow first pass).
+Output tok/s against fixed width 16, RTX PRO 6000:
+
+| Lane | C2 | C3 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| width 8 | −3.9% | −0.8% | +3.1% | +9.0% |
+| `AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` | +0.1% | +0.7% | +3.0% | +9.3% |
+| `AX_CHAIN_WIDTH_BY_BATCH="1:16,3:8"` | +0.1% | −1.8% | +3.9% | +8.9% |
+
+Width 16 reached 347.9, 470.7, 570.9 and 792.6 tok/s. `1:16,4:8` is within 1%
+of the better fixed width at every measured concurrency and is the recommended
+table for this GPU and checkpoint; it stays experimental. Switching widths
+twice every 32 rounds cost nothing measurable. The adaptive policy
+(`AX_POLICY_MODE=adaptive`) was 2.3% below width 16 at concurrency two and 0.6%
+below width 8 at eight on another pod, so it stays experimental and off by
+default.
+[Gate, width comparisons and limits](reports/2026-11-21-verified-profile-gate.md)
 
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
