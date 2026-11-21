@@ -3,7 +3,7 @@
 # ax-engine-sglang (`SGLANG_PLUGINS=ax-engine`); adapted from DForkTree v0.1.0 fc1_plugin.py.
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.speculative.spec_registry import CustomSpecAlgo
-from .config import get_config, startup_config
+from .config import get_config, server_args_error, startup_config
 from .compat import check_sglang, installation, patch_attribute
 from .runtime import current_runtime
 _registered = False
@@ -13,10 +13,9 @@ class TreeSpec(CustomSpecAlgo):
 
     def handle_server_args(self, server_args):
         config = get_config()
-        if config.ssm_positions and not server_args.disable_radix_cache:
-            raise ValueError("AX_SSM_POSITIONS requires --disable-radix-cache")
-        if config.policy_mode == "adaptive" and getattr(server_args, "speculative_adaptive", False):
-            raise ValueError("AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one")
+        error = server_args_error(config, server_args)
+        if error:
+            raise ValueError(error)
         _install_tree()
         SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
         from sglang.srt.arg_groups.overrides import declare_resolution

@@ -43,17 +43,19 @@ def batch_bucket(requests: int) -> int:
 
 
 class _Arm:
-    __slots__ = ("cost", "cost_samples", "tokens", "token_samples", "ratio", "ratio_samples", "outliers")
+    __slots__ = ("cost", "cost_samples", "tokens", "token_samples", "ratio", "ratio_samples", "outliers",
+                 "sampled")
 
     def __init__(self):
         self.cost = self.tokens = self.ratio = 0.0
-        self.cost_samples = self.token_samples = self.ratio_samples = self.outliers = 0
+        self.cost_samples = self.token_samples = self.ratio_samples = self.outliers = self.sampled = 0
 
 
 class _Bucket:
     def __init__(self, widths, width):
         self.width = width
         self.rounds = self.since_switch = self.switches = 0
+        self.recent = 0.0   # the current width's round time over its last few rounds
         self.arms = {w: _Arm() for w in widths}
 
 
@@ -67,23 +69,23 @@ class WidthController:
       have committed min(a, V - 1) + 1: wide rounds also measure the narrower widths. Widths in
       `direct_only` draft with their own graph (other draft tokens) and use their own rounds only.
     - The bucket's current width is timed every round, the others only when sampled. Their round
-      time is kept as a ratio to the current width's at the moment of the sample, so a slowdown
+      time is kept as a ratio to the current width's over its last few rounds, so a slowdown
       common to all widths (more requests, a busier GPU) does not favour the rarely timed ones.
     - Until every width has `min_samples` round times and accept samples, the bucket stays on
-      `fallback` and samples the other widths every fourth round.
+      `fallback` and samples the other widths in turn every fourth round.
     - Afterwards it switches when another width scores more than `margin` above the current one,
-      at most once per `cooldown` rounds, and samples the other widths every `explore` rounds.
+      at most once per `cooldown` rounds, and samples the other widths in turn every `explore` rounds.
     """
 
-    def __init__(self, widths, fallback, *, min_samples=64, margin=0.08, cooldown=50, explore=32,
-                 window=128, max_gap=0.5, direct_only=()):
+    def __init__(self, widths, fallback, *, min_samples=32, margin=0.08, cooldown=50, explore=32,
+                 window=128, max_gap=0.5, min_gap=2e-4, direct_only=()):
         self.widths = tuple(sorted(set(widths)))
         if len(self.widths) < 2 or fallback not in self.widths:
             raise ValueError(f"adaptive chain widths {self.widths} need two entries including the fallback {fallback}")
         self.fallback = fallback
         self.min_samples, self.margin, self.cooldown, self.explore = min_samples, margin, cooldown, explore
         self.alpha = 2.0 / (window + 1)
-        self.max_gap = max_gap
+        self.max_gap, self.min_gap = max_gap, min_gap
         self.direct_only = frozenset(direct_only)
         self.buckets: dict[int, _Bucket] = {}
         self.reasons: dict[str, int] = {}
@@ -103,6 +105,10 @@ class WidthController:
             return arm.ratio * current.cost
         return arm.cost
 
+    def _comparable(self, state, width):
+        """A width can replace the current one once it was timed against it a few times."""
+        return width == state.width or state.arms[width].ratio_samples >= min(self.min_samples, 4)
+
     def _score(self, state, width):
         cost = self._cost(state, width)
         return state.arms[width].tokens / cost if cost > 0 else 0.0
@@ -115,13 +121,15 @@ class WidthController:
         if state.rounds % (self.explore if ready else min(4, self.explore)) == 0:
             reason = "explore"
             width = min((w for w in self.widths if w != state.width),
-                        key=lambda w: (state.arms[w].cost_samples, w))
+                        key=lambda w: (state.arms[w].sampled, w))
+            state.arms[width].sampled = state.rounds
         elif not ready:
             reason, width = "warmup", state.width
         elif state.since_switch <= self.cooldown:
             reason, width = "cooldown", state.width
         else:
-            best = max(self.widths, key=lambda w: (self._score(state, w), w == state.width))
+            best = max((w for w in self.widths if self._comparable(state, w)),
+                       key=lambda w: (self._score(state, w), w == state.width))
             if best != state.width and self._score(state, best) > self._score(state, state.width) * (1 + self.margin):
                 reason = "switch"
                 self._switch(state, best)
@@ -133,14 +141,16 @@ class WidthController:
 
     def _switch(self, state, width):
         # Re-express the round-time ratios against the new current width.
-        base = state.arms[width].ratio if state.arms[width].ratio_samples else 0.0
+        samples = state.arms[width].ratio_samples
+        base = state.arms[width].ratio if samples else 0.0
         for other, arm in state.arms.items():
             if other == width or not base:
                 arm.ratio, arm.ratio_samples = 0.0, 0
             elif other == state.width:
-                arm.ratio, arm.ratio_samples = 1.0 / base, state.arms[width].ratio_samples
+                arm.ratio, arm.ratio_samples = 1.0 / base, samples
             elif arm.ratio_samples:
                 arm.ratio /= base
+        state.recent *= base
         state.width, state.since_switch = width, 0
         state.switches += 1
 
@@ -155,16 +165,20 @@ class WidthController:
         arm = state.arms[width]
         # A gap with no running request is not a round time. One long round is dropped as a stall;
         # three in a row are the new round time (a bucket spans several batch sizes).
-        stall = arm.cost_samples >= 8 and seconds > 4 * arm.cost
+        idle = not self.min_gap <= seconds <= self.max_gap
+        stall = not idle and arm.cost_samples >= 8 and seconds > 4 * arm.cost
         arm.outliers = arm.outliers + 1 if stall else 0
-        if not 0 < seconds <= self.max_gap or (stall and arm.outliers < 3):
+        if idle or (stall and arm.outliers < 3):
             self.reasons["cost_dropped"] = self.reasons.get("cost_dropped", 0) + 1
             return
         arm.cost = self._blend(arm.cost, arm.cost_samples, seconds, 1)
         arm.cost_samples += 1
-        current = state.arms[state.width]
-        if width != state.width and current.cost > 0:
-            arm.ratio = self._blend(arm.ratio, arm.ratio_samples, seconds / current.cost, 1)
+        if width == state.width:
+            state.recent = seconds if not state.recent else state.recent + (seconds - state.recent) * 0.5
+        elif state.recent:
+            # Against the current width's last few rounds, not its long average: both were
+            # measured under the same load.
+            arm.ratio = self._blend(arm.ratio, arm.ratio_samples, seconds / state.recent, 1)
             arm.ratio_samples += 1
 
     def observe_accepts(self, bucket: int, width: int, counts):

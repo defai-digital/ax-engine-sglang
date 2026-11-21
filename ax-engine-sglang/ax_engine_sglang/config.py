@@ -41,7 +41,7 @@ class PluginConfig:
     nvfp4_parity_rows: int = 0
     quality_profile: str | None = None
     policy_mode: str = "static"
-    adaptive_min_samples: int = 64
+    adaptive_min_samples: int = 32
     adaptive_margin: float = 0.08
     adaptive_cooldown: int = 50
     adaptive_explore: int = 32
@@ -118,7 +118,7 @@ class PluginConfig:
             nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
             quality_profile=env.get("AX_QUALITY_PROFILE") or None,
             policy_mode=env.get("AX_POLICY_MODE") or "static",
-            adaptive_min_samples=integer("AX_ADAPTIVE_MIN_SAMPLES", 64),
+            adaptive_min_samples=integer("AX_ADAPTIVE_MIN_SAMPLES", 32),
             adaptive_margin=number("AX_ADAPTIVE_MARGIN", 0.08),
             adaptive_cooldown=integer("AX_ADAPTIVE_COOLDOWN", 50),
             adaptive_explore=integer("AX_ADAPTIVE_EXPLORE", 32),
@@ -140,8 +140,6 @@ class PluginConfig:
         if self.policy_mode not in ("static", "adaptive"):
             raise ValueError(f"AX_POLICY_MODE must be static or adaptive, got {self.policy_mode!r}")
         if self.policy_mode == "adaptive":
-            if self.gdn_chain_replay:
-                raise ValueError("AX_POLICY_MODE=adaptive does not apply to AX_GDN_CHAIN_REPLAY (fixed width eight)")
             if len(self.graph_widths) < 2:
                 raise ValueError("AX_POLICY_MODE=adaptive chooses among AX_CHAIN_GRAPH_WIDTHS; list at least two widths")
             if self.chain_schedule:
@@ -203,6 +201,25 @@ class PluginConfig:
                                  "AX_TREE=1 and AX_CHAIN_WIDTH")
             if max((*chain, *self.graph_widths)) > self.ssm_positions:
                 raise ValueError("chain graph widths exceed AX_SSM_POSITIONS")
+
+
+def server_args_error(config: PluginConfig, server_args) -> str | None:
+    """Rules that need SGLang's server arguments (TreeSpec.handle_server_args and the doctor)."""
+    if config.ssm_positions and not getattr(server_args, "disable_radix_cache", False):
+        return "AX_SSM_POSITIONS requires --disable-radix-cache"
+    if config.policy_mode != "adaptive":
+        return None
+    if getattr(server_args, "speculative_adaptive", False):
+        return "AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one"
+    if any((getattr(server_args, name, 1) or 1) != 1 for name in ("tp_size", "pp_size", "dp_size")):
+        # Each rank would time its own rounds and could choose another width for the same round.
+        return "AX_POLICY_MODE=adaptive supports one GPU (TP1, PP1 and DP1)"
+    # The worker drafts FC1_DRAFT_BLOCK tokens with FC1_TREE64=1, else --speculative-num-draft-tokens.
+    block = config.draft_block if config.tree64 else getattr(server_args, "speculative_num_draft_tokens", None)
+    if block is not None and max(config.graph_widths) > int(block):
+        return (f"AX_POLICY_MODE=adaptive: chain width {max(config.graph_widths)} in AX_CHAIN_GRAPH_WIDTHS "
+                f"exceeds the draft block {block}")
+    return None
 
 
 def get_config() -> PluginConfig:

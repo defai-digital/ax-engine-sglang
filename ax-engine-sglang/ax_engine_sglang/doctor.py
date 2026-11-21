@@ -14,7 +14,7 @@ from typing import Callable, Mapping
 
 from . import __version__
 from .compat import TESTED_SGLANG
-from .config import startup_config
+from .config import server_args_error, startup_config
 from .defaults import (LaunchConfigError, Plan, _plan_gdn_chain_replay, device_capability, drafter_kind,
                        gdn_shape, is_nvfp4, is_qwen4_exp, plan, read_json, route_of)
 from .qualification import lookup, target_key
@@ -22,26 +22,36 @@ from .qualification import lookup, target_key
 SUPPORTED, EXPERIMENTAL, UNSUPPORTED = "supported", "experimental", "unsupported"
 
 
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="ax-engine-sglang doctor", description=__doc__.split("\n\n")[0])
-    result.add_argument("model", nargs="?", help="target model directory or Hugging Face repository")
-    result.add_argument("--model-path")
-    result.add_argument("--revision")
-    result.add_argument("--speculative-algorithm")
-    result.add_argument("--speculative-draft-model-path")
-    result.add_argument("--speculative-draft-model-revision")
-    result.add_argument("--speculative-num-draft-tokens", type=int)
-    result.add_argument("--max-running-requests", type=int)
-    result.add_argument("--disable-radix-cache", action="store_true")
-    result.add_argument("--speculative-adaptive", action="store_true")
-    result.add_argument("--attention-backend")
-    result.add_argument("--fp4-gemm-backend", dest="fp4_gemm_runner_backend")
-    result.add_argument("--linear-attn-verify-backend")
-    result.add_argument("--mamba-ssm-dtype")
-    result.add_argument("--disable-flashinfer-autotune", action="store_true")
-    result.add_argument("--sm", help="CUDA compute capability to check, such as 12.0 (default: this machine's GPU)")
-    result.add_argument("--json", action="store_true", help="print the report as JSON")
-    return result
+# The server arguments the launch rules read: flag, ServerArgs field, type (None: a switch), SGLang's default.
+SERVER_FLAGS = (
+    ("--model-path", "model_path", str, None),
+    ("--revision", "revision", str, None),
+    ("--speculative-algorithm", "speculative_algorithm", str, None),
+    ("--speculative-draft-model-path", "speculative_draft_model_path", str, None),
+    ("--speculative-draft-model-revision", "speculative_draft_model_revision", str, None),
+    ("--speculative-num-draft-tokens", "speculative_num_draft_tokens", int, None),
+    ("--speculative-eagle-topk", "speculative_eagle_topk", int, None),
+    ("--speculative-adaptive", "speculative_adaptive", None, False),
+    ("--max-running-requests", "max_running_requests", int, None),
+    ("--cuda-graph-max-bs-decode", "cuda_graph_max_bs_decode", int, None),
+    ("--disable-radix-cache", "disable_radix_cache", None, False),
+    ("--disable-flashinfer-autotune", "disable_flashinfer_autotune", None, False),
+    ("--disable-prefill-cuda-graph", "disable_prefill_cuda_graph", None, False),
+    ("--chunked-prefill-size", "chunked_prefill_size", int, None),
+    ("--attention-backend", "attention_backend", str, None),
+    ("--fp4-gemm-backend", "fp4_gemm_runner_backend", str, None),
+    ("--linear-attn-verify-backend", "linear_attn_verify_backend", str, None),
+    ("--mamba-ssm-dtype", "mamba_ssm_dtype", str, None),
+    ("--moe-runner-backend", "moe_runner_backend", str, "auto"),
+    ("--speculative-moe-runner-backend", "speculative_moe_runner_backend", str, None),
+    ("--tp-size", "tp_size", int, 1),
+    ("--pp-size", "pp_size", int, 1),
+    ("--dp-size", "dp_size", int, 1),
+    ("--disaggregation-mode", "disaggregation_mode", str, "null"),
+    ("--enable-page-major-kv-layout", "enable_page_major_kv_layout", None, False),
+    ("--device", "device", str, None),
+    ("--base-gpu-id", "base_gpu_id", int, None),
+)
 
 
 def _capability(text):
@@ -49,7 +59,32 @@ def _capability(text):
         major, minor = text.split(".")
         return int(major), int(minor)
     except ValueError:
-        raise SystemExit(f"--sm expects MAJOR.MINOR such as 12.0, got {text!r}") from None
+        raise argparse.ArgumentTypeError(f"expected MAJOR.MINOR such as 12.0, got {text!r}") from None
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog="ax-engine-sglang doctor", description=__doc__.split("\n\n")[0],
+        epilog="Give the model first, as with serve, or with --model-path.")
+    for flag, field, kind, default in SERVER_FLAGS:
+        if kind is None:
+            result.add_argument(flag, dest=field, action="store_true")
+        else:
+            result.add_argument(flag, dest=field, type=kind, default=default)
+    result.add_argument("--sm", type=_capability,
+                        help="CUDA compute capability to check, such as 12.0 (default: this machine's GPU)")
+    result.add_argument("--json", action="store_true", help="print the report as JSON")
+    return result
+
+
+def parse(argv):
+    """The model comes first, as with `serve`; a value after an unknown flag is not taken for it."""
+    argv = list(argv)
+    model = argv.pop(0) if argv and not argv[0].startswith("-") else None
+    options, unchecked = parser().parse_known_args(argv)
+    options.model_path = options.model_path or model
+    options.unchecked = unchecked
+    return options
 
 
 def _sglang_version():
@@ -62,21 +97,8 @@ def _sglang_version():
 def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
              capability: tuple[int, int] | None = None, sglang: str | None = None) -> dict:
     environ = dict(environ)
-    model = options.model_path or options.model
-    args = SimpleNamespace(
-        model_path=model, revision=options.revision,
-        speculative_algorithm=options.speculative_algorithm,
-        speculative_draft_model_path=options.speculative_draft_model_path,
-        speculative_num_draft_tokens=options.speculative_num_draft_tokens,
-        max_running_requests=options.max_running_requests, cuda_graph_max_bs_decode=None,
-        moe_runner_backend="auto", speculative_moe_runner_backend=None,
-        disable_radix_cache=options.disable_radix_cache,
-        speculative_adaptive=options.speculative_adaptive,
-        attention_backend=options.attention_backend,
-        fp4_gemm_runner_backend=options.fp4_gemm_runner_backend,
-        linear_attn_verify_backend=options.linear_attn_verify_backend,
-        mamba_ssm_dtype=options.mamba_ssm_dtype,
-        disable_flashinfer_autotune=options.disable_flashinfer_autotune)
+    model = options.model_path
+    args = SimpleNamespace(**{field: getattr(options, field) for _, field, _, _ in SERVER_FLAGS})
     target = load(model, "config.json", options.revision)
     quant = load(model, "hf_quant_config.json", options.revision)
     drafter = load(options.speculative_draft_model_path, "config.json", options.speculative_draft_model_revision)
@@ -118,12 +140,11 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
     except ValueError as error:
         if not errors:   # a refused plan leaves its defaults unset; report the first cause only
             errors.append(str(error))
-    if config and algorithm == "FC1_DFLASH_TREE":   # TreeSpec.handle_server_args
-        radix_off = options.disable_radix_cache or settings.args.get("disable_radix_cache", (False,))[0]
-        if config.ssm_positions and not radix_off:
-            errors.append("AX_SSM_POSITIONS requires --disable-radix-cache")
-        if config.policy_mode == "adaptive" and options.speculative_adaptive:
-            errors.append("AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one")
+    if config and algorithm == "FC1_DFLASH_TREE" and not errors:   # TreeSpec.handle_server_args
+        resolved_args = SimpleNamespace(**{**vars(args), **{name: value for name, (value, _) in settings.args.items()}})
+        error = server_args_error(config, resolved_args)
+        if error:
+            errors.append(error)
 
     replay = {"requested": environ.get("AX_GDN_CHAIN_REPLAY") == "1", "eligible": True, "reason": None}
     try:
@@ -159,6 +180,7 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
         "route": route,
         "quality": {
             "profile": environ.get("AX_QUALITY_PROFILE") or None,
+            "claims_exact_output": bool(config and config.quality_profile == "verified"),
             "exact_output": lookup(capability, target_key(target, quant), route).as_dict(),
         },
         "gdn_chain_replay": replay,
@@ -181,7 +203,9 @@ def render(report: dict) -> str:
         f"target: {target['path'] or 'not given'} ({target['qualified_as'] or 'no qualification rows'})",
         f"drafter: {report['drafter']['kind'] or 'none or unknown'}",
         f"route: {report['route']}; policy mode: {report['policy_mode']}",
-        f"exact output ({report['quality']['profile'] or 'no profile'}): {quality['status']}. {quality['reason']}",
+        ("exact output: claimed by this launch (verified profile). " if report["quality"]["claims_exact_output"]
+         else "exact output: not claimed by this launch; AX_QUALITY_PROFILE=verified would find: ")
+        + f"{quality['status']}. {quality['reason']}",
     ]
     if replay["eligible"]:
         lines.append("GDN chain replay: eligible" + ("" if replay["requested"] else " (set AX_GDN_CHAIN_REPLAY=1)"))
@@ -200,8 +224,8 @@ def render(report: dict) -> str:
 
 
 def main(argv) -> int:
-    options, options.unchecked = parser().parse_known_args(argv)
-    capability = _capability(options.sm) if options.sm else device_capability(SimpleNamespace(device="cuda"))
+    options = parse(argv)
+    capability = options.sm or device_capability(options)
     report = diagnose(options, os.environ, capability=capability, sglang=_sglang_version())
     print(json.dumps(report, indent=2) if options.json else render(report))
     return 1 if report["status"] == UNSUPPORTED else 0

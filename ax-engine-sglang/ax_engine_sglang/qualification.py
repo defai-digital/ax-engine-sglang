@@ -42,9 +42,9 @@ _SM120_27B = Qualification(
     "concurrency 8 on the RTX 5090 and 1,024-token outputs are not measured",
     ("results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest",
      "docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md"),
-    ("the prefill chunk covers each prompt (a 512-token chunk changed a 2,266-token prompt's first token)",
-     "radix cache and FlashInfer autotune off",
-     "tree 16 nodes; chain width 8"),
+    ("each prompt fits one prefill chunk (set to 4,096 tokens; a 512-token chunk changed a "
+     "2,266-token prompt's first token)",
+     "greedy requests of at most 128 output tokens were compared",),
 )
 
 # (CUDA compute capability, target, route) -> measured qualification.

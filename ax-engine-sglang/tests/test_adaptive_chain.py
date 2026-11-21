@@ -99,6 +99,17 @@ class AdaptiveChainTests(unittest.TestCase):
         self.assertLessEqual(Tensor.readbacks, 8)
         self.assertGreaterEqual(Tensor.readbacks, 4)
 
+    def test_accept_lengths_outside_the_width_are_clamped(self):
+        chain = self.chain
+        chain.begin_round(self.worker)
+        state = chain.current_runtime()
+        state.kind = "chain"
+        state.controller = chain.WidthController((8, 16), 8)
+        state.pending = (0, 8)
+        with patch.object(chain, "_TREE", False):
+            chain.record_accept(self.worker, SimpleNamespace(reqs=[]), None, Tensor([-3, 2, 7, 40]))
+        self.assertEqual(state.accept_counts[(0, 8)].values, [1, 0, 1, 0, 0, 0, 0, 2] + [0] * 8)
+
     def test_batch_sizes_use_their_own_bucket(self):
         for _ in range(64):
             self.round(15, {8: 0.020, 16: 0.022}, requests=8)

@@ -34,9 +34,19 @@ PARITY_ENV = {"AX_GDN_UNPACKED_DECODE": "1"}
 PARITY_TREE_ENV = {"FC1_FUSED": "0", "FC1_TREE_N": "16", "AX_GDN_RECURRENT_VERIFY": "1",
                    "AX_DFLASH_JOINT_SAMPLING": "1"}
 # ServerArgs field: (value, command-line flag).
-# AX_QUALITY_PROFILE=verified, tree route: the rest of the measured tree-16 lane.
-VERIFIED_TREE_ENV = {"FC1_TREE_N": "16", "AX_CHAIN_GRAPH_WIDTHS": "8", "AX_CHAIN_DRAFT_WIDTHS": "8",
-                     "AX_SSM_POSITIONS": "8"}
+# AX_QUALITY_PROFILE=verified: the measured lanes of benchmarks/sglang/bench_27b_nvfp4.py --verify-parity.
+# A tree server ran its chain rounds (two or more requests) on a private width-8 graph; chain rounds
+# on the tree's own graph differed from AR. The chain server drafted and verified 8 tokens.
+VERIFIED_ENV = {
+    "tree": {"FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8",
+             "AX_CHAIN_DRAFT_WIDTHS": "8", "AX_SSM_POSITIONS": "8"},
+    "chain": {"FC1_TREE_N": "8", "AX_CHAIN_WIDTH": "8"},
+    "ar": {},
+}
+VERIFIED_BLOCK = {"tree": 16, "chain": 8}
+# One prefill pass per prompt (a 512-token chunk changed a 2,266-token prompt's first token), and
+# no prefill graphs, as in the RTX 5090 lanes.
+VERIFIED_PREFILL_CHUNK = 4096
 PARITY_ARGS = {"attention_backend": ("flashinfer", "--attention-backend"),
                "fp4_gemm_runner_backend": (CUTLASS, "--fp4-gemm-backend")}
 PARITY_TREE_ARGS = {"linear_attn_verify_backend": ("triton", "--linear-attn-verify-backend")}
@@ -75,10 +85,12 @@ def env_defaults(environ: Mapping[str, str], tree: bool) -> dict[str, str]:
     values = dict(TREE_ENV) if tree else {}
     if parity_requested(environ):
         values.update(PARITY_ENV)
-        if verified_requested(environ):
-            values["AX_NVFP4_VERIFY_PARITY"] = "1"
         if tree:
             values.update(PARITY_TREE_ENV)
+        if verified_requested(environ):
+            values["AX_NVFP4_VERIFY_PARITY"] = "1"
+            if tree:
+                values.update(VERIFIED_ENV[route_of(TREE_ALGORITHM, environ)])
     return values
 
 
@@ -198,6 +210,8 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
     if verified and environ.get("AX_AUTO_DEFAULTS", "1") == "0":
         raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified needs the launch defaults "
                                 "(AX_AUTO_DEFAULTS=0 skips the qualification check)")
+    if environ.get("AX_QUALITY_PROFILE") == "fast":
+        result.notes.append("fast profile: this launch makes no exact-output claim")
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         return result
@@ -237,12 +251,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
             if not row.admits_verified:
                 raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified refused: {row.reason}. "
                                         f"Unset it (or use fast) to run without an exact-output claim")
-            # The rows were measured with 16 tree nodes and chain rounds of width 8. A tree server
-            # ran its chain rounds (two or more requests) on a private width-8 graph: chain rounds
-            # on the tree's own graph differed from AR.
-            measured = {} if route == "ar" else {"AX_CHAIN_WIDTH": "8"}
-            if route == "tree":
-                measured.update(VERIFIED_TREE_ENV)
+            measured = VERIFIED_ENV[route]
             for name, value in measured.items():
                 if environ.get(name) not in (None, "", value):
                     raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with "
@@ -252,6 +261,24 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                 raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with chain rounds "
                                         "of width 8 on the server's own graph; unset AX_CHAIN_SCHEDULE, "
                                         "AX_CHAIN_GRAPH_WIDTHS and AX_CHAIN_DRAFT_WIDTHS")
+            if environ.get("AX_TREE_SAMPLING") == "1":
+                raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with greedy "
+                                        "requests; AX_TREE_SAMPLING=1 sends sampled requests to the tree")
+            block = getattr(args, "speculative_num_draft_tokens", None)
+            if route in VERIFIED_BLOCK and block != VERIFIED_BLOCK[route]:
+                raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified ({route}) was measured with "
+                                        f"--speculative-num-draft-tokens {VERIFIED_BLOCK[route]}, got {block}")
+            chunk = getattr(args, "chunked_prefill_size", None)
+            if chunk is None:
+                result.args["chunked_prefill_size"] = (
+                    VERIFIED_PREFILL_CHUNK, "AX_QUALITY_PROFILE=verified: one prefill pass per prompt, as measured")
+            elif 0 < chunk < VERIFIED_PREFILL_CHUNK:
+                raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified needs --chunked-prefill-size "
+                                        f"{VERIFIED_PREFILL_CHUNK} or more, got {chunk}: a prompt prefilled in "
+                                        f"several chunks changed its first token")
+            if not getattr(args, "disable_prefill_cuda_graph", False):
+                result.args["disable_prefill_cuda_graph"] = (
+                    True, "AX_QUALITY_PROFILE=verified: the RTX 5090 lanes ran without prefill graphs")
             for name, value in measured.items():
                 result.default_env(environ, name, value, "AX_QUALITY_PROFILE=verified: the measured lane")
             result.default_env(environ, "AX_NVFP4_VERIFY_PARITY", "1", "AX_QUALITY_PROFILE=verified")
@@ -420,7 +447,8 @@ def resolve(server_args, *, environ=None, load: Callable = read_json, capability
         declare(server_args, SOURCE, **{name: value for name, (value, _) in result.args.items()})
     if result.env and on_env_change is not None:
         on_env_change()
-    if result.env or result.args or result.notes or algorithm_uses_plugin(server_args):
+    if (result.env or result.args or result.notes or algorithm_uses_plugin(server_args)
+            or environ.get("AX_QUALITY_PROFILE")):
         print(describe(result, environ), file=sys.stderr, flush=True)
     return result
 

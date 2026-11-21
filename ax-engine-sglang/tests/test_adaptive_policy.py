@@ -89,6 +89,80 @@ class WidthControllerTests(unittest.TestCase):
         self.assertEqual((bucket["width"], bucket["switches"]), (16, 0))
         self.assertLessEqual(chosen.count(8), 600 // 32 + 1)   # samples only
 
+    def test_round_time_ratios_follow_a_switch(self):
+        seconds = {4: 0.008, 8: 0.010, 16: 0.016}
+        controller = WidthController((4, 8, 16), 16, min_samples=8, cooldown=4, explore=4)
+        drive(controller, 400, accepted=5, seconds=seconds)     # 6 tokens at width 8 and 16, 4 at width 4
+        state = controller.buckets[0]
+        self.assertEqual((state.width, state.switches), (8, 1))
+        self.assertEqual(state.arms[8].ratio_samples, 0)        # the current width is timed directly
+        for width in (4, 16):                                   # the others relative to it
+            self.assertAlmostEqual(state.arms[width].ratio, seconds[width] / seconds[8], delta=0.02)
+            self.assertAlmostEqual(controller._cost(state, width), seconds[width], delta=0.0003)
+        # Re-expressed at the switch, before any new sample: the old current width against the new one.
+        fresh = WidthController((4, 8, 16), 16, min_samples=8)
+        bucket = fresh._bucket(0)
+        for width, ratio in ((4, 0.5), (8, 0.625)):
+            bucket.arms[width].ratio, bucket.arms[width].ratio_samples = ratio, 10
+        fresh._switch(bucket, 8)
+        self.assertEqual((bucket.width, bucket.arms[8].ratio_samples), (8, 0))
+        self.assertAlmostEqual(bucket.arms[16].ratio, 1 / 0.625)
+        self.assertAlmostEqual(bucket.arms[4].ratio, 0.5 / 0.625)
+
+    def test_a_slowdown_after_a_switch_keeps_the_faster_width(self):
+        controller = self.controller(cooldown=0, explore=16, window=32)
+        drive(controller, 400, accepted=3, seconds={8: 0.010, 16: 0.014})
+        state = controller.buckets[0]
+        self.assertEqual((state.width, state.switches), (8, 1))
+        self.assertGreater(state.arms[16].ratio_samples, 0)     # kept through the switch
+        drive(controller, 400, accepted=3, seconds={8: 0.020, 16: 0.028})
+        self.assertEqual((state.width, state.switches), (8, 1))
+
+    def test_ratios_use_round_times_measured_under_the_same_load(self):
+        # Width 16 ran at 20 ms for a long time; then both get faster and width 8 is the slower one.
+        controller = self.controller(explore=8)
+        drive(controller, 600, accepted=7, seconds={8: 0.024, 16: 0.020})
+        chosen = drive(controller, 600, accepted=7, seconds={8: 0.012, 16: 0.010})
+        state = controller.buckets[0]
+        self.assertEqual((state.width, state.switches), (16, 0))
+        self.assertAlmostEqual(state.arms[8].ratio, 1.2, delta=0.05)
+        # The converse: width 8 becomes much the faster one and is taken.
+        drive(controller, 600, accepted=7, seconds={8: 0.007, 16: 0.020})
+        self.assertEqual(state.width, 8)
+
+    def test_idle_gaps_do_not_turn_one_stall_into_a_round_time(self):
+        controller = self.controller()
+        for seconds in [0.010] * 10 + [0.9, 0.9, 0.05]:
+            controller.observe_cost(0, 16, seconds)
+        arm = controller.buckets[0].arms[16]
+        self.assertAlmostEqual(arm.cost, 0.010)
+        for seconds in (0.05, 0.9, 0.05, 0.9, 0.05):            # stalls separated by idle gaps
+            controller.observe_cost(0, 16, seconds)
+        self.assertAlmostEqual(arm.cost, 0.010)
+
+    def test_implausibly_short_round_times_are_dropped(self):
+        controller = self.controller()
+        controller.observe_cost(0, 16, 1e-9)
+        self.assertEqual(controller.buckets[0].arms[16].cost_samples, 0)
+
+    def test_the_other_widths_are_sampled_in_turn(self):
+        controller = WidthController((4, 8, 16), 16, min_samples=8, cooldown=4, explore=8)
+        state = controller._bucket(0)
+        state.arms[4].cost_samples = 1000                       # sampled a lot, long ago
+        chosen = drive(controller, 320, accepted=15, seconds={4: 0.009, 8: 0.010, 16: 0.012})
+        explored = [w for w in chosen if w != 16]
+        self.assertLessEqual(abs(explored.count(4) - explored.count(8)), 1)
+
+    def test_a_width_never_timed_against_the_current_one_is_not_taken(self):
+        controller = self.controller()
+        state = controller._bucket(0)
+        for width, cost in ((16, 0.014), (8, 0.001)):           # width 8: a stale, very low round time
+            arm = state.arms[width]
+            arm.cost, arm.cost_samples, arm.tokens, arm.token_samples = cost, 100, 8.0, 100
+        state.since_switch = 100
+        self.assertEqual(controller.choose(0), 16)
+        self.assertEqual(controller.snapshot()["reasons"], {"hold": 1})
+
     def test_one_large_readback_does_not_replace_the_average(self):
         controller = self.controller()
         drive(controller, 400, accepted=15, seconds={8: 0.010, 16: 0.014})
@@ -166,7 +240,7 @@ class AdaptiveConfigTests(unittest.TestCase):
     def test_adaptive_reads_its_settings(self):
         config = PluginConfig.from_env({**ADAPTIVE, "AX_ADAPTIVE_MARGIN": "0.1", "AX_ADAPTIVE_COOLDOWN": "20"})
         self.assertEqual((config.policy_mode, config.adaptive_margin, config.adaptive_cooldown,
-                          config.adaptive_min_samples, config.adaptive_explore), ("adaptive", 0.1, 20, 64, 32))
+                          config.adaptive_min_samples, config.adaptive_explore), ("adaptive", 0.1, 20, 32, 32))
 
     def test_adaptive_starts_before_the_draft_block_is_resolved(self):
         # The launcher validates once before SGLang resolves --speculative-num-draft-tokens.
@@ -198,6 +272,7 @@ class AdaptiveConfigTests(unittest.TestCase):
             ({"AX_ADAPTIVE_MARGIN": "nan"}, "AX_ADAPTIVE_MARGIN"),
             ({"AX_ADAPTIVE_MARGIN": "wide"}, "must be a number"),
             ({"AX_POLICY_MODE": "auto"}, "static or adaptive"),
+            ({"AX_GDN_CHAIN_REPLAY": "1"}, "stock width-eight DFLASH worker"),
         )
         for extra, message in cases:
             with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, message):
