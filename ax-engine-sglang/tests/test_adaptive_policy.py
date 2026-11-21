@@ -161,7 +161,29 @@ class WidthControllerTests(unittest.TestCase):
             arm.cost, arm.cost_samples, arm.tokens, arm.token_samples = cost, 100, 8.0, 100
         state.since_switch = 100
         self.assertEqual(controller.choose(0), 16)
-        self.assertEqual(controller.snapshot()["reasons"], {"hold": 1})
+        # Not decided yet: the bucket keeps sampling width 8 every fourth round until it is comparable.
+        self.assertEqual(controller.snapshot()["reasons"], {"warmup": 1})
+        self.assertEqual([controller.choose(0) for _ in range(3)], [16, 16, 8])
+
+    def test_warmup_sampling_backs_off_when_a_width_cannot_be_compared(self):
+        controller = self.controller(min_samples=2, explore=16)     # budget: 4 * 2 * 1 = 8 fast samples
+        choices = [controller.choose(0) for _ in range(96)]         # no round time is ever reported
+        self.assertEqual(choices[:32].count(8), 8)                  # every fourth round
+        self.assertEqual(choices[32:].count(8), 4)                  # then every sixteenth
+        self.assertEqual(controller.buckets[0].switches, 0)
+
+    def test_a_few_comparisons_do_not_allow_a_switch(self):
+        controller = self.controller(min_samples=8)
+        state = controller._bucket(0)
+        for width, cost in ((16, 0.014), (8, 0.014)):
+            arm = state.arms[width]
+            arm.cost, arm.cost_samples, arm.tokens, arm.token_samples = cost, 100, 4.0, 100
+        state.recent, state.since_switch = 0.014, 100
+        state.arms[8].ratio, state.arms[8].ratio_samples = 0.5, 7     # looks twice as fast, on 7 comparisons
+        self.assertEqual(controller.choose(0), 16)
+        self.assertEqual(controller.buckets[0].switches, 0)
+        state.arms[8].ratio_samples = 8
+        self.assertEqual(controller.choose(0), 8)
 
     def test_one_large_readback_does_not_replace_the_average(self):
         controller = self.controller()
@@ -261,6 +283,52 @@ class AdaptiveConfigTests(unittest.TestCase):
 
     def test_static_is_the_default(self):
         self.assertEqual(PluginConfig.from_env({}).policy_mode, "static")
+
+    def test_a_width_table_maps_batch_sizes_to_widths(self):
+        from ax_engine_sglang.policy import chain_width
+        base = {"AX_CHAIN_GRAPH_WIDTHS": "16 8", "FC1_DRAFT_BLOCK": "16"}
+        config = PluginConfig.from_env({**base, "AX_CHAIN_WIDTH_BY_BATCH": "1:16, 5:8"})
+        self.assertEqual(config.chain_width_table, ((1, 16), (5, 8)))
+        self.assertTrue(config.tree_requested)
+        self.assertEqual([chain_width(config, 16, 7, n) for n in (1, 4, 5, 9)], [16, 16, 8, 8])
+        self.assertEqual(chain_width(config, 16, 0), 16)            # a caller that gives no batch size
+        self.assertEqual(chain_width(config, 16, 0, 0), 16)         # an empty batch uses the first entry
+        # The table alone asks for the tree worker, before the other settings are validated.
+        self.assertTrue(PluginConfig.from_env({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8"}, validate=False).tree_requested)
+        with self.assertRaisesRegex(ValueError, "outside 2..8"):
+            chain_width(config, 8, 0, 2)                            # the server's draft block is smaller
+        ssm = PluginConfig.from_env({**base, "AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_SSM_POSITIONS": "16",
+                                     "FC1_FUSED": "1"})
+        self.assertEqual(ssm.ssm_positions, 16)
+        cases = (
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "16,8"}, "requests:width"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": " , "}, "requests:width"),     # not silently no table
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "2:16,5:8"}, "starting at 1"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8,5:4"}, "ascending"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:12"}, "AX_CHAIN_GRAPH_WIDTHS runner"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:1"}, "outside 2..16"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_WIDTH": "8"}, "unset AX_CHAIN_WIDTH"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_SCHEDULE": "16x2,8x2"}, "unset AX_CHAIN_WIDTH"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_POLICY_MODE": "adaptive"}, "unset AX_CHAIN_WIDTH"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_GRAPH_WIDTHS": ""}, "in AX_CHAIN_GRAPH_WIDTHS"),
+            ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_NVFP4_VERIFY_PARITY": "1", "AX_GDN_UNPACKED_DECODE": "1",
+              "FC1_FUSED": "0", "AX_GDN_RECURRENT_VERIFY": "1"}, "fixed chain width"),
+        )
+        for extra, message in cases:
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, message):
+                PluginConfig.from_env({**base, **extra})
+        self.assertEqual(PluginConfig.from_env({**base, "AX_CHAIN_WIDTH_BY_BATCH": ""}).chain_width_table, ())
+
+    def test_a_width_table_is_checked_against_the_servers_draft_block(self):
+        from types import SimpleNamespace
+        from ax_engine_sglang.config import server_args_error
+        table = PluginConfig.from_env({"AX_CHAIN_GRAPH_WIDTHS": "16 8", "AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8"})
+        self.assertIn("chain width 16 exceeds the draft block 8",
+                      server_args_error(table, SimpleNamespace(speculative_num_draft_tokens=8)))
+        # Every rank sees the same batch, so several GPUs choose the same width.
+        self.assertIsNone(server_args_error(table, SimpleNamespace(speculative_num_draft_tokens=16, tp_size=2)))
+        self.assertIn("supports DP1", server_args_error(table, SimpleNamespace(speculative_num_draft_tokens=16,
+                                                                               dp_size=2)))
 
     def test_adaptive_refuses_settings_it_cannot_combine_with(self):
         cases = (

@@ -22,6 +22,7 @@ class PluginConfig:
     gdn_heads: int = 32
     chain_width: int | None = None
     chain_schedule: tuple[int, ...] = ()
+    chain_width_table: tuple[tuple[int, int], ...] = ()   # (first batch size, width), ascending
     graph_widths: tuple[int, ...] = ()
     draft_widths: tuple[int, ...] = ()
     chain_attention: str | None = None
@@ -49,7 +50,8 @@ class PluginConfig:
     @property
     def tree_requested(self) -> bool:
         return bool(self.tree64 or self.branch_pilot or self.fused or self.lattice
-                    or self.chain_width is not None or self.chain_schedule or self.graph_widths
+                    or self.chain_width is not None or self.chain_schedule or self.chain_width_table
+                    or self.graph_widths
                     or self.draft_widths or self.chain_attention or self.ssm_positions)
 
     @classmethod
@@ -87,6 +89,19 @@ class PluginConfig:
                 if count <= 0 or len(schedule) + count > 10000:
                     raise ValueError("AX_CHAIN_SCHEDULE needs positive counts, at most 10000 rounds")
                 schedule.extend([width] * count)
+        table = []
+        for part in (env.get("AX_CHAIN_WIDTH_BY_BATCH") or "").split(","):
+            if not part.strip():
+                continue
+            try:
+                first, width = (int(x) for x in part.strip().split(":"))
+            except ValueError as error:
+                raise ValueError("AX_CHAIN_WIDTH_BY_BATCH must contain requests:width entries, "
+                                 "such as 1:16,5:8") from error
+            table.append((first, width))
+        if (env.get("AX_CHAIN_WIDTH_BY_BATCH") or "").strip() and not table:
+            raise ValueError("AX_CHAIN_WIDTH_BY_BATCH must contain requests:width entries, such as 1:16,5:8")
+
         def number(name, default):
             try:
                 return float(env.get(name) or default)
@@ -101,7 +116,8 @@ class PluginConfig:
             tree_nodes=integer("FC1_TREE_N", 64), draft_block=integer("FC1_DRAFT_BLOCK", 24),
             gdn_layers=integer("AX_GDN_LAYERS", 24), gdn_heads=integer("AX_GDN_HEADS", 32),
             chain_width=integer("AX_CHAIN_WIDTH", 0) if env.get("AX_CHAIN_WIDTH") else None,
-            chain_schedule=tuple(schedule), graph_widths=widths("AX_CHAIN_GRAPH_WIDTHS"),
+            chain_schedule=tuple(schedule), chain_width_table=tuple(table),
+            graph_widths=widths("AX_CHAIN_GRAPH_WIDTHS"),
             draft_widths=widths("AX_CHAIN_DRAFT_WIDTHS"),
             chain_attention=env.get("AX_CHAIN_ATTN") or None,
             chain_check=flag("AX_CHAIN_CHECK"), round_dump=env.get("AX_ROUND_DUMP") or None,
@@ -152,6 +168,20 @@ class PluginConfig:
                                  "and AX_ADAPTIVE_EXPLORE at least 2")
             if not math.isfinite(self.adaptive_margin) or not 0 <= self.adaptive_margin <= 1:
                 raise ValueError("AX_ADAPTIVE_MARGIN must be finite and between 0 and 1")
+        if self.chain_width_table:
+            firsts = [first for first, _ in self.chain_width_table]
+            if firsts[0] != 1 or any(b <= a for a, b in zip(firsts, firsts[1:])):
+                raise ValueError("AX_CHAIN_WIDTH_BY_BATCH entries are requests:width, starting at 1 request "
+                                 "and ascending, such as 1:16,5:8")
+            if self.chain_width is not None or self.chain_schedule or self.policy_mode == "adaptive":
+                raise ValueError("AX_CHAIN_WIDTH_BY_BATCH chooses the chain width; unset AX_CHAIN_WIDTH, "
+                                 "AX_CHAIN_SCHEDULE and AX_POLICY_MODE=adaptive")
+            if self.nvfp4_verify_parity:
+                raise ValueError("AX_CHAIN_WIDTH_BY_BATCH is not measured with AX_NVFP4_VERIFY_PARITY "
+                                 "(parity results cover a fixed chain width)")
+            if not self.graph_widths:
+                # Measured with one captured graph per width; the tree's own graph serves one width.
+                raise ValueError("AX_CHAIN_WIDTH_BY_BATCH needs its widths in AX_CHAIN_GRAPH_WIDTHS")
         if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
                                       or self.nvfp4_verify_parity or self.gdn_unpacked_decode):
             raise ValueError("AX_GDN_CHAIN_REPLAY uses the stock width-eight DFLASH worker without AX tree or parity options")
@@ -187,6 +217,8 @@ class PluginConfig:
                                         else (self.draft_block,))
         if self.policy_mode == "adaptive" and self.chain_width is None:
             chain = self.graph_widths   # the policy chooses among the graph widths, widest first
+        if self.chain_width_table:
+            chain = tuple(width for _, width in self.chain_width_table)
         for width in (*chain, *self.graph_widths, *self.draft_widths):
             if not 2 <= width <= self.draft_block:
                 raise ValueError(f"chain width {width} outside 2..{self.draft_block}")
@@ -196,9 +228,10 @@ class PluginConfig:
             raise ValueError("AX_CHAIN_DRAFT_WIDTHS needs graph widths below FC1_DRAFT_BLOCK")
         if self.ssm_positions:
             if (not (self.fused or self.gdn_recurrent_verify) or not self.tree
-                    or (self.chain_width is None and self.policy_mode != "adaptive")):
+                    or (self.chain_width is None and self.policy_mode != "adaptive"
+                        and not self.chain_width_table)):
                 raise ValueError("AX_SSM_POSITIONS needs FC1_FUSED=1 or AX_GDN_RECURRENT_VERIFY=1, "
-                                 "AX_TREE=1 and AX_CHAIN_WIDTH")
+                                 "AX_TREE=1 and AX_CHAIN_WIDTH or AX_CHAIN_WIDTH_BY_BATCH")
             if max((*chain, *self.graph_widths)) > self.ssm_positions:
                 raise ValueError("chain graph widths exceed AX_SSM_POSITIONS")
 
@@ -207,6 +240,17 @@ def server_args_error(config: PluginConfig, server_args) -> str | None:
     """Rules that need SGLang's server arguments (TreeSpec.handle_server_args and the doctor)."""
     if config.ssm_positions and not getattr(server_args, "disable_radix_cache", False):
         return "AX_SSM_POSITIONS requires --disable-radix-cache"
+    # The worker drafts FC1_DRAFT_BLOCK tokens with FC1_TREE64=1, else --speculative-num-draft-tokens.
+    block = config.draft_block if config.tree64 else getattr(server_args, "speculative_num_draft_tokens", None)
+    if config.chain_width_table:
+        widest = max(width for _, width in config.chain_width_table)
+        if block is not None and widest > int(block):
+            return f"AX_CHAIN_WIDTH_BY_BATCH: chain width {widest} exceeds the draft block {block}"
+        if (getattr(server_args, "dp_size", 1) or 1) != 1:
+            # DP ranks hold different numbers of requests, so they would verify different widths
+            # in one step and disagree on the sizes they gather.
+            return "AX_CHAIN_WIDTH_BY_BATCH supports DP1 (each DP rank would choose its own width)"
+        return None
     if config.policy_mode != "adaptive":
         return None
     if getattr(server_args, "speculative_adaptive", False):
@@ -214,8 +258,6 @@ def server_args_error(config: PluginConfig, server_args) -> str | None:
     if any((getattr(server_args, name, 1) or 1) != 1 for name in ("tp_size", "pp_size", "dp_size")):
         # Each rank would time its own rounds and could choose another width for the same round.
         return "AX_POLICY_MODE=adaptive supports one GPU (TP1, PP1 and DP1)"
-    # The worker drafts FC1_DRAFT_BLOCK tokens with FC1_TREE64=1, else --speculative-num-draft-tokens.
-    block = config.draft_block if config.tree64 else getattr(server_args, "speculative_num_draft_tokens", None)
     if block is not None and max(config.graph_widths) > int(block):
         return (f"AX_POLICY_MODE=adaptive: chain width {max(config.graph_widths)} in AX_CHAIN_GRAPH_WIDTHS "
                 f"exceeds the draft block {block}")

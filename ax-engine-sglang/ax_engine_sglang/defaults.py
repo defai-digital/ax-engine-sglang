@@ -251,6 +251,9 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                 if environ.get(name) not in (None, "", value):
                     raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with "
                                             f"{name}={value}, got {environ[name]}; unset it")
+            if environ.get("AX_CHAIN_WIDTH_BY_BATCH"):
+                raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with one chain "
+                                        "width; unset AX_CHAIN_WIDTH_BY_BATCH")
             if environ.get("AX_CHAIN_SCHEDULE") or (route == "chain" and any(
                     environ.get(name) for name in ("AX_CHAIN_GRAPH_WIDTHS", "AX_CHAIN_DRAFT_WIDTHS"))):
                 raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with chain rounds "
@@ -371,6 +374,9 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         reason = ("tree rounds serve one request; the tree's GDN state cache is sized per slot. "
                   "Set --max-running-requests (and AX_CHAIN_* graphs) for multi-user chain rounds")
         result.args["max_running_requests"] = (1, reason)
+        if environ.get("AX_CHAIN_WIDTH_BY_BATCH"):
+            result.notes.append("AX_CHAIN_WIDTH_BY_BATCH has no effect with one running request: "
+                                "set --max-running-requests")
         if getattr(args, "cuda_graph_max_bs_decode", None) is None:
             result.args["cuda_graph_max_bs_decode"] = (1, "one running request")
     return result

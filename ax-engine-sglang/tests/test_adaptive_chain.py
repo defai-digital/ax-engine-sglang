@@ -20,37 +20,49 @@ class Tensor:
     """The few tensor operations the accept counter uses."""
     readbacks = 0
 
-    def __init__(self, values):
+    def __init__(self, values, ndim=1):
         self.values = list(values)
+        self.ndim = ndim
 
-    def reshape(self, *_):
-        return self
+    def reshape(self, *shape):
+        return Tensor(self.values, ndim=len(shape))
 
     def to(self, _):
         return self
 
     def clamp(self, low, high):
-        return Tensor(min(max(v, low), high) for v in self.values)
+        return Tensor((min(max(v, low), high) for v in self.values), self.ndim)
 
-    def __add__(self, other):
-        return Tensor(a + b for a, b in zip(self.values, other.values))
+    device = "gpu"
+
+    def scatter_add_(self, dim, index, source):
+        if dim != 0 or index.ndim != 1:     # as torch: the counter has one dimension
+            raise RuntimeError(f"scatter_add_ on a 1-D counter with dim={dim}, index of {index.ndim} dimensions")
+        for position, value in zip(index.values, source.values):
+            self.values[position] += value
+        return self
 
     def tolist(self):
         Tensor.readbacks += 1
         return list(self.values)
 
 
+def zeros(size, dtype, device):
+    return Tensor([0] * size)
+
+
+def ones_like(tensor):
+    return Tensor([1] * len(tensor.values), tensor.ndim)
+
+
 def bincount(tensor, minlength):
-    counts = [0] * minlength
-    for value in tensor.values:
-        counts[value] += 1
-    return Tensor(counts)
+    raise AssertionError("torch.bincount reads back to the host on CUDA")
 
 
 class AdaptiveChainTests(unittest.TestCase):
     def setUp(self):
         torch = ModuleType("torch")
-        torch.int64, torch.bincount = "int64", bincount
+        torch.int64, torch.bincount, torch.zeros, torch.ones_like = "int64", bincount, zeros, ones_like
         self.enterContext(patch.dict(sys.modules, {"torch": torch}))
         self.enterContext(patch.dict(os.environ, ENV, clear=True))
         get_config.cache_clear()
@@ -130,9 +142,29 @@ class AdaptiveChainTests(unittest.TestCase):
     def test_static_mode_keeps_the_configured_width(self):
         self.chain.begin_round(self.worker)   # this worker's own round state
         with patch.object(self.chain, "_ADAPTIVE", False), patch.object(self.chain, "_CONFIG", SimpleNamespace(
-                chain_schedule=(), chain_width=8)):
+                chain_schedule=(), chain_width=8, chain_width_table=())):
             self.assertEqual(self.chain.width(16, 4), 8)
         self.assertIsNone(self.chain.current_runtime().controller)
+
+    def test_a_width_table_follows_the_batch_size(self):
+        table = SimpleNamespace(chain_schedule=(), chain_width=None, chain_width_table=((1, 16), (5, 8)))
+        with patch.object(self.chain, "_ADAPTIVE", False), patch.object(self.chain, "_CONFIG", table):
+            self.assertEqual([self.chain.width(16, n) for n in (1, 2, 4, 5, 8, 64)], [16, 16, 16, 8, 8, 8])
+            self.assertEqual(self.chain._configured_widths(16), [8, 16])
+        self.assertIsNone(self.chain.current_runtime().controller)
+
+    def test_accept_lengths_of_any_shape_are_counted(self):
+        self.chain.begin_round(self.worker)
+        width = self.chain.width(16, 2)
+        self.chain._count_accepts(self.chain.current_runtime(), Tensor([2, 3], ndim=2))   # one column per request
+        self.assertEqual(self.chain.current_runtime().accept_counts[(1, width)].values[2:4], [1, 1])
+
+    def test_accept_counting_does_not_call_bincount(self):
+        # The stand-in bincount raises: on CUDA the real one waits for the GPU every round.
+        for _ in range(3):
+            self.round(4, {16: 0.02, 8: 0.01}, requests=2)
+        counts = self.chain.current_runtime().accept_counts
+        self.assertEqual(sum(sum(held.values) for held in counts.values()), 6)
 
 
 if __name__ == "__main__":
