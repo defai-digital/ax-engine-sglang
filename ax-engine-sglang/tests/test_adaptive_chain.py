@@ -166,6 +166,19 @@ class AdaptiveChainTests(unittest.TestCase):
         counts = self.chain.current_runtime().accept_counts
         self.assertEqual(sum(sum(held.values) for held in counts.values()), 6)
 
+    def test_a_verify_asked_twice_is_counted_once(self):
+        # SGLang asks can_run_graph in prepare_for_verify and again in _forward_raw, same batch.
+        answers = iter([True, True, True, False])
+        runner = SimpleNamespace(can_run_graph=lambda forward_batch: next(answers))
+        self.chain._count_replays(runner, 8, "fa3")
+        self.chain.begin_round(self.worker)
+        first, second = SimpleNamespace(batch_size=2), SimpleNamespace(batch_size=2)
+        for batch in (first, first, second, second):
+            runner.can_run_graph(batch)
+        # the second verify's later answer (eager) is the one _forward_raw acted on
+        self.assertEqual(self.chain.current_runtime().stats["replay"], {"8:2:graph": 1, "8:2:eager": 1})
+        self.assertFalse(self.chain.current_runtime().round_info["graph"])
+
 
 if __name__ == "__main__":
     unittest.main()

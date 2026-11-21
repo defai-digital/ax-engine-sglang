@@ -127,8 +127,8 @@ def _settle_round_time(state):
 def _count_accepts(state, accept_len):
     """Adaptive policy: add this round's accept lengths on the GPU; read them back every few rounds."""
     # Not torch.bincount: on CUDA it reads the input's range back to the host, which waits for the
-    # round's GPU work every round. The adaptive lane ran about 2.4 ms per round slower than fixed
-    # width 16 with two requests; bincount is the suspected cause, not yet confirmed on a GPU.
+    # round's GPU work every round. Its cost was not measured on its own
+    # (docs/reports/2026-11-21-verified-profile-gate.md).
     lengths = accept_len.reshape(-1).to(torch.int64).clamp(0, state.pending[1] - 1)
     held = state.accept_counts.get(state.pending)
     if held is None:
@@ -372,14 +372,24 @@ def _backend_name(mr, main=False):
 
 
 def _count_replays(runner, wid, name):
-    """Record, per target verify on this graph runner, whether the captured graph replays (SGLang
-    asks can_run_graph once per forward) or the round runs eager."""
+    """Record, per target verify on this graph runner, whether the captured graph replays or the round
+    runs eager. SGLang 0.5.23 asks can_run_graph twice per verify with the same ForwardBatch
+    (DFlashVerifyInput.prepare_for_verify, then ModelRunner._forward_raw), so a verify is counted
+    once, under the answer of its latest ask (the one _forward_raw acts on)."""
     original = runner.can_run_graph
 
     def can_run_graph(forward_batch):
         ok = bool(original(forward_batch))
         key = f"{'tree' if wid is None else wid}:{forward_batch.batch_size}:{'graph' if ok else 'eager'}"
-        current_runtime().stats["replay"][key] = current_runtime().stats["replay"].get(key, 0) + 1
+        counts = current_runtime().stats["replay"]
+        previous = getattr(forward_batch, "_ax_replay_key", None)
+        if previous != key:
+            if previous is not None:
+                counts[previous] -= 1
+                if not counts[previous]:
+                    del counts[previous]
+            counts[key] = counts.get(key, 0) + 1
+            forward_batch._ax_replay_key = key
         current_runtime().round_info["graph"] = ok
         return ok
 

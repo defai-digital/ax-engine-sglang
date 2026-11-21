@@ -256,7 +256,7 @@ class DoctorTests(unittest.TestCase):
         table = self.report(self.TREE_ARGV + ["--max-running-requests", "8"],
                             {"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
         self.assertEqual((table["status"], table["errors"]), ("experimental", []))
-        self.assertEqual(table["experimental_features"], ["AX_CHAIN_WIDTH_BY_BATCH (not run on a GPU)"])
+        self.assertEqual(table["experimental_features"], ["AX_CHAIN_WIDTH_BY_BATCH"])
         single = self.report(self.TREE_ARGV, {"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
         self.assertTrue(any("no effect with one running request" in note for note in single["derived"]["notes"]), single)
         untested = self.report(self.TREE_ARGV, sglang="0.6.0")
