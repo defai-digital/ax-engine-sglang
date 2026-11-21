@@ -93,32 +93,11 @@ verified on separate serving routes. [Model routes and precision support](docs/R
 
 ## Measured throughput
 
-### Two B300 GPUs · Qwen3.8-Flash-Next BF16
+[Qwen3.8-27B](#qwen38-27b) · [Qwen3.8-Flash-Next](#qwen38-flash-next)
 
-SGLang 0.5.23 ran the BF16 checkpoint with TP2 and an on-GPU BF16 KV cache.
-The table and chart show end-to-end output tok/s from the second pass, with
-24 greedy prompts per family and a 256-token output limit.
+### Qwen3.8-27B
 
-![Qwen3.8-Flash-Next BF16 on two B300 GPUs. Stock AR, stock MTP3, and AX Engine MTP7 throughput at concurrency 1, 4, and 16.](docs/figures/b300-flash-next-bf16-throughput.svg)
-
-| Workload | Concurrency | Stock SGLang AR | Stock SGLang MTP3 | AX Engine MTP7 |
-|---|---:|---:|---:|---:|
-| Code | 1 | 184.9 | 306.6 | **390.0** |
-| Code | 4 | 389.6 | 520.7 | **615.4** |
-| Code | 16 | 794.5 | 1,199.7 | **1,649.8** |
-| Math | 1 | 206.8 | 353.9 | **409.9** |
-| Math | 4 | 550.4 | 649.4 | **735.2** |
-| Math | 16 | 1,258.0 | 1,606.1 | **1,708.0** |
-| Chat | 1 | 207.2 | **294.4** | 268.0 |
-| Chat | 4 | 534.1 | **584.5** | 521.1 |
-| Chat | 16 | 1,069.6 | **1,272.6** | 1,169.6 |
-
-MTP7 beat stock MTP3 by **18–38% on code** and **6–16% on math**.
-Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
-references. AR and MTP7 passed all 28 sampled distribution checks.
-[Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
-
-### B200 · Qwen3.8-27B NVFP4
+#### B200 · Qwen3.8-27B NVFP4
 
 Greedy runs used 64 prompts per family, a 1,024-token output limit and 64
 server slots. Each rate averages two passes. Values are output tok/s in
@@ -131,11 +110,9 @@ code / math / chat order.
 | 1 | 816 / 733 / 401 | **1,160 / 971 / 458** (tree 16) |
 | 16 | 3,628 / 4,670 / 2,980 | **4,379.5 / 4,989 / 3,110** (chain 8) |
 
-The paired dense-model run compared the two speculative routes. The B200
-Flash Next chart and table include a matched stock SGLang AR lane and use
-MTP as the speculative baseline. [Dense 27B benchmark](docs/performance.md#b200--qwen38-27b) · [Flash Next chart and table](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
+[Full B200 27B benchmark and launch settings](docs/performance.md#b200--qwen38-27b)
 
-#### Experimental recurrent GDN replay
+##### Experimental recurrent GDN replay
 
 The benchmark overlay used width-8 stock DFlash2 on one B200 with SGLang
 0.5.23 and 32 request slots. Both timed runs used the same 64 greedy NVFP4
@@ -152,7 +129,7 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
-### RTX PRO 6000 · Qwen3.8-27B NVFP4
+#### RTX PRO 6000 · Qwen3.8-27B NVFP4
 
 All three routes used SGLang 0.5.23, the same target checkpoint, frozen
 inputs and fixed 128-token greedy outputs.
@@ -201,7 +178,7 @@ concurrency eight. It refuses the tree route. `ax-engine-sglang doctor` checks
 a launch against these rules without loading the model.
 [Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Profile settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
 
-### GeForce RTX 5090 · Qwen3.8-27B NVFP4
+#### GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 One 32 GB RTX 5090 ran SGLang 0.5.23 with two GPU request slots. Each
 request generated 128 greedy tokens from the same frozen inputs used on
@@ -227,7 +204,7 @@ AR, tree 16 and chain 8 each matched all 100 sequences from the serialized
 AR reference across concurrency one and two.
 [RTX 5090 parity results](results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest)
 
-#### Experimental recurrent GDN replay
+##### Experimental recurrent GDN replay
 
 The width-eight DFlash2 follow-up used the same checkpoint, inputs, and
 fixed 128-token outputs. The C1 and C2 rates pool four passes per route
@@ -247,7 +224,7 @@ with about **0.017 GiB** of replay buffers. The two-slot runs matched all
 also passed cancellation and slot reuse checks.
 [Replay benchmark and validation](results/rtx_5090_27b_nvfp4/REPORT.md#accepted-prefix-gdn-replay-follow-up)
 
-### Jetson Thor · Qwen3.8-27B
+#### Jetson Thor · Qwen3.8-27B
 
 Single-request SGLang 0.5.23 runs on arm64 with FlashInfer. Each row gives
 code / math / chat output tok/s. NVFP4 used a 512-token output limit and
@@ -262,7 +239,34 @@ BF16 used a 384-token limit.
 
 [Thor workload details and launch settings](docs/performance.md#jetson-thor--qwen38-27b)
 
-### Qwen3.8-Flash-Next NVFP4 · MTP
+### Qwen3.8-Flash-Next
+
+#### Two B300 GPUs · Qwen3.8-Flash-Next BF16
+
+SGLang 0.5.23 ran the BF16 checkpoint with TP2 and an on-GPU BF16 KV cache.
+The table and chart show end-to-end output tok/s from the second pass, with
+24 greedy prompts per family and a 256-token output limit.
+
+![Qwen3.8-Flash-Next BF16 on two B300 GPUs. Stock AR, stock MTP3, and AX Engine MTP7 throughput at concurrency 1, 4, and 16.](docs/figures/b300-flash-next-bf16-throughput.svg)
+
+| Workload | Concurrency | Stock SGLang AR | Stock SGLang MTP3 | AX Engine MTP7 |
+|---|---:|---:|---:|---:|
+| Code | 1 | 184.9 | 306.6 | **390.0** |
+| Code | 4 | 389.6 | 520.7 | **615.4** |
+| Code | 16 | 794.5 | 1,199.7 | **1,649.8** |
+| Math | 1 | 206.8 | 353.9 | **409.9** |
+| Math | 4 | 550.4 | 649.4 | **735.2** |
+| Math | 16 | 1,258.0 | 1,606.1 | **1,708.0** |
+| Chat | 1 | 207.2 | **294.4** | 268.0 |
+| Chat | 4 | 534.1 | **584.5** | 521.1 |
+| Chat | 16 | 1,069.6 | **1,272.6** | 1,169.6 |
+
+MTP7 beat stock MTP3 by **18–38% on code** and **6–16% on math**.
+Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
+references. AR and MTP7 passed all 28 sampled distribution checks.
+[Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
+
+#### Qwen3.8-Flash-Next NVFP4 · MTP
 
 These single-request results use SGLang 0.5.23. The B200 figures come from
 the second benchmark pass with a 256-token output limit. The Thor figures use
