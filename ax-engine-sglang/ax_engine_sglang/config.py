@@ -36,8 +36,9 @@ class PluginConfig:
     allow_untested_sglang: bool = False
     gdn_unpacked_decode: bool = False
     gdn_recurrent_verify: bool = False
+    gdn_chain_replay: bool = False
     nvfp4_verify_parity: bool = False
-    nvfp4_parity_rows: int = 16
+    nvfp4_parity_rows: int = 0
 
     @property
     def tree_requested(self) -> bool:
@@ -103,21 +104,30 @@ class PluginConfig:
             allow_untested_sglang=flag("AX_ALLOW_UNTESTED_SGLANG"),
             gdn_unpacked_decode=flag("AX_GDN_UNPACKED_DECODE"),
             gdn_recurrent_verify=flag("AX_GDN_RECURRENT_VERIFY"),
+            gdn_chain_replay=flag("AX_GDN_CHAIN_REPLAY"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
-            nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 16),
+            nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
         )
         if validate:
-            if env.get("AX_NVFP4_PARITY_ROWS") and not config.nvfp4_verify_parity:
+            if env.get("AX_NVFP4_PARITY_ROWS") not in (None, "") and not config.nvfp4_verify_parity:
                 raise ValueError("AX_NVFP4_PARITY_ROWS needs AX_NVFP4_VERIFY_PARITY=1")
             config.validate()
         return config
 
     def validate(self):
+        if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
+                                      or self.nvfp4_verify_parity or self.gdn_unpacked_decode):
+            raise ValueError("AX_GDN_CHAIN_REPLAY uses the stock width-eight DFLASH worker without AX tree or parity options")
+        if self.fused and self.tree and self.tree_nodes not in (16, 32, 64):
+            raise ValueError("FC1_FUSED=1 requires FC1_TREE_N to be 16, 32 or 64")
         if self.nvfp4_verify_parity and (not self.gdn_unpacked_decode
                 or (self.tree_requested and not self.gdn_recurrent_verify)):
             raise ValueError("AX_NVFP4_VERIFY_PARITY requires unpacked GDN decode and recurrent DFlash2 verify")
-        if not 1 <= self.nvfp4_parity_rows <= 64:
-            raise ValueError("AX_NVFP4_PARITY_ROWS must be between 1 and 64")
+        if self.nvfp4_verify_parity and self.chain_attention:
+            # ax_chain builds that backend by name, outside the FlashInfer verification patch.
+            raise ValueError("AX_NVFP4_VERIFY_PARITY does not support AX_CHAIN_ATTN")
+        if not 0 <= self.nvfp4_parity_rows <= 64:
+            raise ValueError("AX_NVFP4_PARITY_ROWS must be between 0 and 64")
         if self.gdn_recurrent_verify and self.fused:
             raise ValueError("AX_GDN_RECURRENT_VERIFY requires FC1_FUSED=0 for native convolution and state commit")
         for name, value, minimum in (
@@ -146,8 +156,9 @@ class PluginConfig:
         if any(w not in self.graph_widths or w >= self.draft_block for w in self.draft_widths):
             raise ValueError("AX_CHAIN_DRAFT_WIDTHS needs graph widths below FC1_DRAFT_BLOCK")
         if self.ssm_positions:
-            if not self.fused or not self.tree or self.chain_width is None:
-                raise ValueError("AX_SSM_POSITIONS needs FC1_FUSED=1, AX_TREE=1 and AX_CHAIN_WIDTH")
+            if not (self.fused or self.gdn_recurrent_verify) or not self.tree or self.chain_width is None:
+                raise ValueError("AX_SSM_POSITIONS needs FC1_FUSED=1 or AX_GDN_RECURRENT_VERIFY=1, "
+                                 "AX_TREE=1 and AX_CHAIN_WIDTH")
             if max((*chain, *self.graph_widths)) > self.ssm_positions:
                 raise ValueError("chain graph widths exceed AX_SSM_POSITIONS")
 
@@ -165,7 +176,7 @@ def startup_config(environ=None, hooks_available=None):
     clears the cache once it has written the defaults, so the next get_config() is final."""
     if environ is None:
         return _loaded()
-    from .defaults import TREE_ENV, resolution_hooks_available
+    from .defaults import env_defaults, parity_requested, resolution_hooks_available
 
     try:
         return PluginConfig.from_env(environ), False
@@ -174,9 +185,11 @@ def startup_config(environ=None, hooks_available=None):
             hooks_available = resolution_hooks_available()
         if not hooks_available or environ.get("AX_AUTO_DEFAULTS", "1") == "0":
             raise
-        if not PluginConfig.from_env(environ, validate=False).tree_requested:
+        tree = PluginConfig.from_env(environ, validate=False).tree_requested
+        if not tree and not parity_requested(environ):
             raise
-        merged = {**TREE_ENV, **{name: value for name, value in environ.items() if value != ""}}
+        merged = {**env_defaults(environ, tree),
+                  **{name: value for name, value in environ.items() if value != ""}}
         return PluginConfig.from_env(merged), True
 
 

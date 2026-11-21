@@ -4,11 +4,12 @@ import os
 import torch
 import tree_ops as TO
 from ngram_gpu import NGramGPU
+from ax_engine_sglang.config import get_config
 
 class Builder:
 
     def __init__(self, logits, ngram=True, compile_build=False):
-        self.n = int(os.environ.get('FC1_TREE_N', '32'))
+        self.n = get_config().tree_nodes
         self.slots = logits.shape[0]
         self.chain_first = os.environ.get('FC1_CHAIN_FIRST', '0') == '1'
         self.logits = torch.zeros_like(logits)

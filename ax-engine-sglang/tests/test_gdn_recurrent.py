@@ -1,4 +1,4 @@
-"""Check GDN candidate ancestry and scratch writes without a CUDA runtime."""
+"""Check GDN candidate ancestry, scratch writes and the verify parent table without a CUDA runtime."""
 
 import importlib.util
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ax_engine_sglang.ax_gdn_recurrent import replay
+from ax_engine_sglang.ax_gdn_recurrent import one_row, replay, verify
 from ax_engine_sglang.config import PluginConfig
 
 
@@ -58,3 +58,74 @@ class RecurrentVerifyTests(unittest.TestCase):
                 self.assertEqual(snapshots[:, :, 0, 0].tolist(),
                                  [second + [-10], first + [-10], [-10] * 5])
                 self.assertEqual(committed.flatten().tolist(), [100, 200, 300])
+
+
+@unittest.skipUnless(importlib.util.find_spec("torch"), "PyTorch is required for the tensor check")
+class VerifyParentTableTests(unittest.TestCase):
+    def call(self, batch, width, parents):
+        import torch
+
+        seen = {}
+
+        def native(*args, **kwargs):
+            seen.update(kwargs)
+            return "output"
+
+        q = torch.zeros(1, batch * width, 2, 4)
+        offsets = torch.arange(0, (batch + 1) * width, width, dtype=torch.int32)
+        result = verify(native, None, None, q, q, q, None, None, query_start_loc=offsets,
+                        cache_steps=width, retrieve_parent_token=parents, ssm_states="states",
+                        intermediate_states_buffer=torch.zeros(batch + 1, width, 1),
+                        intermediate_state_indices=torch.arange(batch, dtype=torch.int32))
+        self.assertEqual(result, "output")
+        self.assertEqual(seen["ssm_states"], "states")
+        return seen["retrieve_parent_token"]
+
+    def test_chain_gets_a_linear_parent_table(self):
+        import torch
+
+        table = self.call(batch=2, width=4, parents=None)
+        self.assertEqual(table.dtype, torch.int32)
+        self.assertEqual(table.tolist(), [[-1, 0, 1, 2]] * 2)
+
+    def test_tree_parents_pass_through(self):
+        import torch
+
+        parents = torch.tensor([[-1, 0, 0, 1]], dtype=torch.int32)
+        self.assertIs(self.call(batch=1, width=4, parents=parents), parents)
+
+    def test_ragged_windows_and_wrong_tables_are_refused(self):
+        import torch
+
+        with self.assertRaisesRegex(ValueError, "uniform verification window"):
+            verify(None, None, None, torch.zeros(1, 7, 2, 4), None, None, None, None,
+                   query_start_loc=torch.tensor([0, 4, 7]), cache_steps=4,
+                   intermediate_states_buffer=None, intermediate_state_indices=None)
+        with self.assertRaisesRegex(ValueError, "one local parent index per candidate"):
+            self.call(batch=2, width=4, parents=torch.zeros(1, 4, dtype=torch.int32))
+
+    def test_one_request_uses_a_capped_buffer_as_one_row(self):
+        import torch
+
+        seen = {}
+        q = torch.zeros(1, 64, 2, 4)
+        capped = torch.arange(9 * 8 * 3, dtype=torch.float32).reshape(9, 8, 3)  # 9 rows of 8 positions
+        verify(lambda *args, **kwargs: seen.update(kwargs), None, None, q, q, q, None, None,
+               query_start_loc=torch.tensor([0, 64]), cache_steps=64, intermediate_states_buffer=capped,
+               intermediate_state_indices=torch.tensor([5], dtype=torch.int32))
+        row = seen["intermediate_states_buffer"]
+        self.assertEqual(tuple(row.shape), (1, 72, 3))
+        self.assertEqual(row.data_ptr(), capped.data_ptr())  # a view: the commit reads what verify wrote
+        self.assertEqual(seen["intermediate_state_indices"].tolist(), [0])
+        self.assertEqual(tuple(one_row(torch.zeros(48, 9, 8, 3), layers=1).shape), (48, 1, 72, 3))
+
+    def test_capped_buffer_refuses_several_requests_and_oversized_trees(self):
+        import torch
+
+        for batch, rows in ((2, 9), (1, 7)):  # two requests; 7 rows of 8 hold 56 < 64
+            q = torch.zeros(1, batch * 64, 2, 4)
+            with self.subTest(batch=batch, rows=rows), self.assertRaisesRegex(ValueError, "needs 64 snapshot positions"):
+                verify(None, None, None, q, q, q, None, None,
+                       query_start_loc=torch.arange(0, (batch + 1) * 64, 64), cache_steps=64,
+                       intermediate_states_buffer=torch.zeros(rows, 8, 3),
+                       intermediate_state_indices=torch.zeros(batch, dtype=torch.int32))

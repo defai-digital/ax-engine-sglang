@@ -38,6 +38,7 @@ baseline that enters a comparison on one version.
 
 | Entry point | Purpose |
 |---|---|
+| `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark for stock AR, stock DFlash2 and AX Engine. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. |
 | `run_stage1a.sh` | Qwen3.8-27B comparison with greedy, sampling and multi-user checks |
 | `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes |
 | `run_paired.sh` | Repeat matched benchmark lanes for paired statistics |

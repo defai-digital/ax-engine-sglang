@@ -1,14 +1,20 @@
 """Give dense Qwen NVFP4 decode and target verification the same projection arithmetic.
 
-SGLang selects a different FP8 or NVFP4 kernel for each row count. With one row
-per call, verification repeats the kernels of single-request AR. With a wider
-group, AR decode and verification both pad to that row count, so each call
-selects the same kernel and reads the weights once per group.
+SGLang selects a different FP8 kernel for each row count, and the SM120 small-row
+kernels and the FlashInfer BMM give a row different bits at different row counts.
+By default (rows 0) every FP8 projection uses SGLang's generic FP8 path. For this
+checkpoint's per-tensor scales that is torch._scaled_mm, which gave a row the same
+bits at every row count, in prefill, decode and verification.
+
+A positive row count keeps SGLang's kernel choice instead and pads AR decode and
+verification to fixed groups of that many rows. Prefill is then not matched.
 """
 from contextvars import ContextVar
+import os
 from functools import wraps
 
 from .compat import patch_attribute
+from .defaults import parity_algorithm_error
 
 
 def grouped(project, x, rows):
@@ -25,11 +31,12 @@ def grouped(project, x, rows):
     return torch.cat([project(group.contiguous()) for group in x.split(rows)])[:count]
 
 
-def install(rows=16):
+def install(rows=0):
     import torch
     from sglang.srt.batch_invariant_ops import enable_batch_invariant_mode
     from sglang.srt.model_executor.model_runner import ModelRunner
     from sglang.srt.layers.logits_processor import LogitsProcessor
+    from sglang.srt.layers.quantization.fp8_utils import apply_fp8_linear
     from sglang.srt.layers.quantization.modelopt_quant import ModelOptFp4LinearMethod, ModelOptFp8LinearMethod
     from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
     from sglang.srt.models import qwen3_5
@@ -50,6 +57,10 @@ def install(rows=16):
                     or config.quantization != "modelopt_mixed"
                     or "Qwen3_5ForConditionalGeneration" not in config.hf_config.architectures):
                 raise ValueError("AX_NVFP4_VERIFY_PARITY requires a dense Qwen ModelOpt mixed target on SM12x")
+            # The launch resolver reports this too; it is skipped with AX_AUTO_DEFAULTS=0.
+            error = parity_algorithm_error(getattr(self.server_args, "speculative_algorithm", None))
+            if error:
+                raise ValueError(error)
             try:
                 import cutlass.cute  # SGLang can silently select different numerics without the DSL.
             except ImportError as error:
@@ -59,15 +70,15 @@ def install(rows=16):
         enable_batch_invariant_mode()
 
     patch_attribute(ModelRunner, "maybe_enable_batch_invariant_mode", enable_invariant)
-    # One row per call leaves AR decode on its native single-row kernels.
-    # A wider group has to cover decode as well, or AR would select other kernels.
+    # Decode is regrouped as well: AR must select the kernels of verification, also
+    # when several requests decode together. A lone row in one-row groups is unchanged.
     regrouping = ContextVar("ax_nvfp4_regroup_rows", default=False)
     forward = Qwen3_5ForConditionalGeneration.forward
 
     @wraps(forward)
     def forward_target(self, input_ids, positions, forward_batch, *args, **kwargs):
         mode = forward_batch.forward_mode
-        scope = regrouping.set(mode.is_target_verify() or (rows > 1 and mode.is_decode()))
+        scope = regrouping.set(rows > 0 and (mode.is_target_verify() or mode.is_decode()))
         try:
             return forward(self, input_ids, positions, forward_batch, *args, **kwargs)
         finally:
@@ -88,11 +99,29 @@ def install(rows=16):
     for method in (ModelOptFp4LinearMethod, ModelOptFp8LinearMethod, UnquantizedLinearMethod):
         patch_attribute(method, "apply", wrap_linear(method.apply))
 
+    if rows == 0:
+        # SGLang's generic FP8 path (torch._scaled_mm for per-tensor scales) gave a row the
+        # same bits at every row count, unlike the SM120 small-row kernels and the
+        # FlashInfer BMM. Use it in every forward mode, prefill included.
+        # Channelwise scales could otherwise select a Triton tile from the row count.
+        os.environ["SGLANG_ENABLE_FP8_GEMM_CONFIG_TUNE"] = "0"
+        fp8_apply = ModelOptFp8LinearMethod.apply
+
+        @wraps(fp8_apply)
+        def invariant_fp8(self, layer, x, bias=None):
+            if self.use_marlin or not self.cutlass_fp8_supported or not isinstance(x, torch.Tensor):
+                raise RuntimeError("AX_NVFP4_PARITY_ROWS=0 needs SGLang's generic FP8 GEMM, not Marlin")
+            return apply_fp8_linear(input=x, weight=layer.weight, weight_scale=layer.weight_scale,
+                                    input_scale=layer.input_scale, bias=bias, cutlass_fp8_supported=True)
+
+        patch_attribute(ModelOptFp8LinearMethod, "apply", invariant_fp8)
+
     compute_head = LogitsProcessor._compute_lm_head
 
     @wraps(compute_head)
     def project_head(self, hidden_states, lm_head, embedding_bias=None, *, out=None):
         if regrouping.get() and hidden_states.ndim == 2 and (rows > 1 or hidden_states.shape[0] > 1):
+            # rows == 0 never sets the scope: the head keeps its native full-width call.
             logits = grouped(lambda group: compute_head(self, group, lm_head, embedding_bias),
                              hidden_states, rows)
             if out is not None and out.shape == logits.shape and out.dtype == logits.dtype:

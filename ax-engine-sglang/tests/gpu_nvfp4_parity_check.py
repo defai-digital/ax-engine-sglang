@@ -19,7 +19,8 @@ class VerifyProjectionTests(unittest.TestCase):
     def test_missing_cutlass_dsl_rejects_the_reference_profile(self):
         config = SimpleNamespace(quantization="modelopt_mixed",
                                  hf_config=SimpleNamespace(architectures=["Qwen3_5ForConditionalGeneration"]))
-        runner = SimpleNamespace(is_draft_worker=False, device=torch.device("cuda:0"), model_config=config)
+        runner = SimpleNamespace(is_draft_worker=False, device=torch.device("cuda:0"), model_config=config,
+                                 server_args=SimpleNamespace(speculative_algorithm="FC1_DFLASH_TREE"))
         with self.assertRaisesRegex(RuntimeError, "requires an importable NVIDIA CUTLASS DSL"), installation():
             ax_nvfp4_verify.install()
             with patch.dict(sys.modules, {"cutlass.cute": None}):
@@ -46,20 +47,44 @@ class VerifyProjectionTests(unittest.TestCase):
         def forward(self, inputs, positions, batch):
             return method.apply(layer, inputs)
 
-        def batch(verify):
-            return SimpleNamespace(forward_mode=SimpleNamespace(is_target_verify=lambda: verify,
-                                                                is_decode=lambda: not verify))
+        def batch(mode):
+            return SimpleNamespace(forward_mode=SimpleNamespace(
+                is_target_verify=lambda: mode == "verify", is_decode=lambda: mode == "decode"))
 
         with (patch.object(ModelOptFp8LinearMethod, "apply", project),
               patch.object(Qwen3_5ForConditionalGeneration, "forward", forward),
               self.assertRaisesRegex(RuntimeError, "end patch scope"), installation()):
             ax_nvfp4_verify.install(1)
-            result = Qwen3_5ForConditionalGeneration.forward(None, x, None, batch(True))
-            self.assertEqual(rows, [1] * len(x))
-            torch.testing.assert_close(result, expected, atol=0, rtol=0)
+            for mode in ("verify", "decode"):  # decode: several requests in one AR step
+                rows.clear()
+                result = Qwen3_5ForConditionalGeneration.forward(None, x, None, batch(mode))
+                self.assertEqual(rows, [1] * len(x))
+                torch.testing.assert_close(result, expected, atol=0, rtol=0)
             rows.clear()
-            Qwen3_5ForConditionalGeneration.forward(None, x, None, batch(False))
+            Qwen3_5ForConditionalGeneration.forward(None, x, None, batch("prefill"))
             self.assertEqual(rows, [len(x)])
+            raise RuntimeError("end patch scope")
+
+    def test_invariant_gemm_gives_a_row_the_same_bits_at_every_row_count(self):
+        generator = torch.Generator(device="cuda").manual_seed(4111)
+        method = object.__new__(ModelOptFp8LinearMethod)
+        method.use_marlin = False
+        method.use_sm120_fp8 = True
+        method.cutlass_fp8_supported = True
+        with self.assertRaisesRegex(RuntimeError, "end patch scope"), installation():
+            ax_nvfp4_verify.install(0)
+            for inputs, outputs in ((5120, 8192), (5120, 16384), (6144, 5120), (5120, 5120), (5120, 34816)):
+                weight = torch.randn(outputs, inputs, dtype=torch.bfloat16, device="cuda", generator=generator)
+                layer = SimpleNamespace(weight=weight.to(torch.float8_e4m3fn).T,
+                                        input_scale=torch.tensor([0.02], device="cuda"),
+                                        sm120_fp8_alpha=torch.tensor([0.02], device="cuda"),
+                                        weight_scale=torch.tensor([1.0], device="cuda"),
+                                        use_flashinfer_bmm=True)
+                x = torch.randn(64, inputs, dtype=torch.bfloat16, device="cuda", generator=generator)
+                alone = torch.cat([method.apply(layer, row.contiguous()) for row in x.split(1)])
+                for count in (2, 3, 4, 8, 9, 16, 17, 32, 64):
+                    with self.subTest(inputs=inputs, outputs=outputs, rows=count):
+                        self.assertTrue(torch.equal(method.apply(layer, x[:count].contiguous()), alone[:count]))
             raise RuntimeError("end patch scope")
 
     def test_fixed_row_groups_match_between_decode_and_verify(self):

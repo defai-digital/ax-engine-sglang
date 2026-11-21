@@ -113,7 +113,9 @@ class LatticeBuilder:
         import tree_ops as TO
         self.TO = TO
         self.sampler = sampler
-        self.n = int(os.environ.get("FC1_TREE_N", "32"))
+        from ax_engine_sglang.config import get_config
+
+        self.n = get_config().tree_nodes
         self.chain_first = os.environ.get("FC1_CHAIN_FIRST", "0") == "1"
         cand, lat, tail = sampler.fc1_cand[0], sampler.fc1_lat[0], sampler.fc1_tail[0]
         self.slots = cand.shape[0]

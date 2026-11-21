@@ -359,9 +359,9 @@ def main():
                         help="baseline --random-seed; the candidate uses the next seed for server RNG cohorts")
     parser.add_argument("--nvfp4-verify-parity", action="store_true",
                         help="use the RTX dense NVFP4 matched projection and attention profile")
-    parser.add_argument("--nvfp4-parity-rows", type=int, choices=range(1, 65), metavar="1..64",
-                        help="rows per target projection call in AR decode and verification (default 16); "
-                             "1 keeps single-row kernels and runs verification one row at a time")
+    parser.add_argument("--nvfp4-parity-rows", type=int, choices=range(0, 65), metavar="0..64",
+                        help="0 (default) uses the row-count-invariant FP8 path; 1..64 keeps SGLang's "
+                             "kernels and pads AR decode and verification to groups of that many rows")
     parser.add_argument("--enable-deterministic-inference", action="store_true")
     parser.add_argument("--candidate-only", action="store_true")
     parser.add_argument("--route", choices=ROUTES, default="tree")
@@ -420,9 +420,10 @@ def main():
     lanes = ("candidate",) if args.candidate_only else ("baseline", "candidate")
     uses_dflash = any(lane_route(args, name) in DFLASH_ROUTES for name in lanes)
     model_config = json.loads((args.model / "config.json").read_text())
-    if args.nvfp4_parity_rows and not args.nvfp4_verify_parity:
+    if args.nvfp4_parity_rows is not None and not args.nvfp4_verify_parity:
         parser.error("--nvfp4-parity-rows requires --nvfp4-verify-parity")
-    args.nvfp4_parity_rows = args.nvfp4_parity_rows or 16
+    if args.nvfp4_parity_rows is None:
+        args.nvfp4_parity_rows = 0
     if args.nvfp4_verify_parity:
         if any(lane_route(args, name) not in (*DFLASH_ROUTES, "ar") for name in lanes):
             parser.error("--nvfp4-verify-parity supports the dense AR, tree and chain routes")

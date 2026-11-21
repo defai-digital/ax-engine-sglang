@@ -3,7 +3,9 @@
 import os
 from ax_engine_sglang.runtime import current_runtime
 from ax_engine_sglang.compat import patch_attribute
-NN = int(os.environ.get('FC1_TREE_N', '64'))
+from ax_engine_sglang.config import get_config
+
+NN = get_config().tree_nodes
 BS = int(os.environ.get('FC1_DRAFT_BLOCK', '24'))
 GL = int(os.environ.get('AX_GDN_LAYERS', '24'))   # ax-engine-sglang: GDN layers of the target
 GH = int(os.environ.get('AX_GDN_HEADS', '32'))    # ax-engine-sglang: GDN value heads

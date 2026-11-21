@@ -15,9 +15,14 @@ SGLang code and validates the expected upstream integration points.
 ## Install and run
 
 Use Python 3.11 or 3.12 and a CUDA 13-compatible NVIDIA driver on Linux. In a
-fresh virtual environment, run `python -m pip install ax-engine-sglang==0.3.0`
-to install the add-on and SGLang 0.5.23. Use
-`python -m pip install ./ax-engine-sglang` from a source checkout. Add
+fresh virtual environment, install the [v0.4.0 release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl)
+to install the add-on and SGLang 0.5.23.
+
+```bash
+python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl
+```
+
+Use `python -m pip install ./ax-engine-sglang` from a source checkout. Add
 `--no-deps` when you already have the pinned SGLang environment. The Jetson
 Thor smoke test used the 0.2.1 wheel in `lmsysorg/sglang:v0.5.23-cu130`.
 
@@ -34,6 +39,26 @@ its entries. To use the upstream launcher directly, set `SGLANG_PLUGINS=ax-engin
 On Jetson Thor, the installed wheel served a 32-token request with six tree
 rounds and rejected a checkpoint setting mismatch before loading weights.
 [Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#021-installed-wheel-smoke-on-jetson-thor)
+
+## Experimental GDN replay for DFlash2 chains
+
+On SGLang 0.5.23, AX can keep the recurrent GDN verifier and replay just the
+accepted prefix into the FP32 state. The width-eight DFlash2 worker allocates
+compact replay buffers in place of full speculative SSM snapshots. Use a
+single CUDA GPU and disable the radix cache.
+
+```bash
+AX_GDN_CHAIN_REPLAY=1 ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
+  --speculative-algorithm DFLASH \
+  --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2 \
+  --speculative-num-draft-tokens 8 --disable-radix-cache \
+  --max-running-requests 8 --cuda-graph-max-bs-decode 8
+```
+
+AX selects FP32 GDN state, Triton verify, and fold-after-accept replay for
+this standalone chain. The option is experimental and currently covers
+the dense Qwen3.8-27B target with static, width-eight verification.
+[RTX 5090 validation](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_5090_gdn_chain_replay/REPORT.md)
 
 ## B200 benchmark results
 
@@ -300,12 +325,31 @@ GDN tree and chain each matched four of seven greedy outputs against RTX AR.
 For the dense Qwen3.8-27B NVFP4 checkpoint on RTX PRO 6000, the regression
 runner accepts `--nvfp4-verify-parity` for AR, DFlash2 tree and chain.
 It selects FlashInfer paged attention, CUTLASS NVFP4, unpacked GDN
-and target projections in fixed groups of rows. The serving Python must be able
-to import `cutlass.cute` from NVIDIA CUTLASS DSL. Use the option on both sides
-of a greedy comparison, because it changes the AR numerical reference.
-`--nvfp4-parity-rows` (`AX_NVFP4_PARITY_ROWS`, default 16) sets the group size
-and must also match on both sides. A value of 1 runs verification one row at
-a time. [Verification controls](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md) · [Row group results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
+and an FP8 path that gave a row the same bits at every row count. The serving
+Python must be able to import `cutlass.cute` from NVIDIA CUTLASS DSL. Use the
+option on both sides of a greedy comparison, because it changes the AR
+numerical reference. `--nvfp4-parity-rows` (`AX_NVFP4_PARITY_ROWS`, default 0)
+must also match on both sides. A value from 1 to 64 keeps SGLang's FP8 kernels
+and pads AR decode and verification to groups of that many rows; that mode
+matched only with one request in flight.
+
+On GeForce RTX 5090, the default FP8 path produced different bits at some
+row counts in the CUDA projection check. The published 5090 throughput
+benchmarks used the speed profile with parity disabled.
+
+When you launch a server yourself, `AX_NVFP4_VERIFY_PARITY=1` is enough on
+SGLang 0.5.23. The launch defaults add FlashInfer attention, the CUTLASS NVFP4
+GEMM and unpacked GDN decode, and disable FlashInfer autotune, which picks
+GEMM tactics by row count, and the radix cache, which was not checked with
+partial prefix hits. Prefill graphs stay on. With `FC1_DFLASH_TREE` they also select the
+16-node tree, recurrent GDN verification with `FC1_FUSED=0` and the Triton
+verify backend. Recurrent verification is one launch of SGLang's verify kernel
+per layer, with a parent table that makes it match unpacked decode bit for bit.
+`AX_SSM_POSITIONS=8` lets tree 64 run with eight slots: a tree round serves one
+request and uses the whole capped snapshot buffer as one row. A stock speculative algorithm, another attention or NVFP4 GEMM
+backend, or `AX_CHAIN_ATTN` stops the launch, because those paths bypass the
+matched verification. With the default, outputs under concurrency two, three
+and eight equalled the same requests alone. [Fixed-length results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md) · [One-launch GDN results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-gdn-one-launch.md) · [Invariant GEMM results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-invariant-gemm.md) · [Verification controls](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md) · [Row group results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
 On the Flash Next AR reference server, `AX_GDN_UNPACKED_DECODE=1` selects
 unpacked Triton Gated DeltaNet decode before CUDA graph capture. To reproduce

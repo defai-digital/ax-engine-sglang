@@ -15,12 +15,12 @@ with exact-match edits; start-up fails with the function's name if an edit does 
 """
 from __future__ import annotations
 
-import inspect
-import os
+from functools import partial
 import sys
-import textwrap
 from ax_engine_sglang.config import get_config
-from ax_engine_sglang.compat import installation, patch_attribute, patch_item
+from ax_engine_sglang.compat import installation, patch_attribute, patch_item, rebuild_function
+
+_rebuild = partial(rebuild_function, feature="AX_SSM_POSITIONS")
 
 POS = get_config().ssm_positions
 _installed = False
@@ -45,23 +45,6 @@ def budget_positions(n):
     if n is None or not POS or int(n) <= POS:
         return n
     return POS + (int(n) - POS) * CONV_SHARE
-
-
-def _rebuild(cls, name, edits):
-    fn = getattr(cls, name)
-    src = textwrap.dedent(inspect.getsource(fn))
-    for old, new, count in edits:
-        found = src.count(old)
-        if found != count:
-            raise RuntimeError(f"ax-engine AX_SSM_POSITIONS: {cls.__name__}.{name} has {found} matches "
-                               f"for {old!r}, expected {count} (SGLang changed?)")
-        src = src.replace(old, new)
-    mod = sys.modules[fn.__module__]
-    ns = {}
-    exec(compile(src, f"<ax_state_cap {fn.__module__}.{cls.__name__}.{name}>", "exec"), mod.__dict__, ns)
-    new_fn = ns[name]
-    new_fn.__qualname__ = fn.__qualname__
-    return new_fn
 
 
 def install():

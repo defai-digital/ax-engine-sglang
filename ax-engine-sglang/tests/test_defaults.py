@@ -113,6 +113,83 @@ class TreeDefaultsTests(unittest.TestCase):
 
 
 class StockRouteDefaultsTests(unittest.TestCase):
+    def test_gdn_chain_replay_resolves_with_auto_defaults_disabled(self):
+        launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True,
+                      model_path="target", speculative_draft_model_path="draft")
+        env = {"AX_GDN_CHAIN_REPLAY": "1", "AX_AUTO_DEFAULTS": "0"}
+        configs = {("target", "config.json"): QWEN38_27B, ("draft", "config.json"): DFLASH2}
+        declare = Mock()
+        result = resolve(launch, environ=env, capability=(12, 0), declare=declare,
+                         load=lambda path, name, revision: configs.get((path, name)))
+        self.assertEqual(result.env, {})
+        self.assertEqual(plan(launch, {"AX_GDN_CHAIN_REPLAY": "1"}, QWEN38_27B, DFLASH2,
+                              capability=(12, 0)).args, result.args)
+        declare.assert_called_once_with(
+            launch, "ax-engine-sglang defaults", enable_linear_replayssm_spec=True,
+            mamba_ssm_dtype="float32", linear_attn_verify_backend="triton",
+        )
+        self.assertEqual(plan(launch, {}, QWEN38_27B, DFLASH2, capability=(12, 0)).args, {})
+
+    def test_gdn_chain_replay_rejects_unqualified_launches(self):
+        cases = (
+            ({"speculative_algorithm": "FC1_DFLASH_TREE"}, "algorithm DFLASH"),
+            ({"speculative_num_draft_tokens": 16}, "tokens 8"),
+            ({"pp_size": 2}, "TP1, PP1 and DP1"),
+            ({"disable_radix_cache": False}, "disable-radix-cache"),
+            ({"mamba_ssm_dtype": "bfloat16"}, "mamba-ssm-dtype float32"),
+            ({"linear_attn_verify_backend": "flashinfer"}, "linear-attn-verify-backend triton"),
+        )
+        for overrides, message in cases:
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(LaunchConfigError, message):
+                values = {"speculative_num_draft_tokens": 8, "disable_radix_cache": True, **overrides}
+                algorithm = values.pop("speculative_algorithm", "DFLASH")
+                plan(args(algorithm, **values), {"AX_GDN_CHAIN_REPLAY": "1"},
+                     QWEN38_27B, DFLASH2, capability=(12, 0))
+
+    def test_parity_tree_gets_the_measured_parity_settings(self):
+        result = plan(args(attention_backend=None, fp4_gemm_runner_backend="auto", linear_attn_verify_backend=None),
+                      {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, DFLASH2)
+        env = env_of(result)
+        for name, value in (("FC1_FUSED", "0"), ("FC1_TREE_N", "16"), ("AX_GDN_UNPACKED_DECODE", "1"),
+                            ("AX_GDN_RECURRENT_VERIFY", "1"), ("AX_DFLASH_JOINT_SAMPLING", "1"),
+                            ("FC1_TREE64", "1")):
+            self.assertEqual(env[name], value, name)
+        self.assertEqual(result.args["attention_backend"][0], "flashinfer")
+        self.assertEqual(result.args["fp4_gemm_runner_backend"][0], "flashinfer_cutlass")
+        self.assertEqual(result.args["linear_attn_verify_backend"][0], "triton")
+        for name in ("disable_radix_cache", "disable_flashinfer_autotune"):
+            self.assertIs(result.args[name][0], True, name)
+        self.assertNotIn("disable_prefill_cuda_graph", result.args)  # measured with matched outputs
+        from ax_engine_sglang.config import PluginConfig
+        PluginConfig.from_env({"AX_NVFP4_VERIFY_PARITY": "1", **env})  # the defaults pass validation
+
+    def test_parity_ar_needs_no_tree_settings(self):
+        result = plan(args(algorithm=None, attention_backend="flashinfer", fp4_gemm_runner_backend="flashinfer_cutlass"),
+                      {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, None)
+        self.assertEqual(env_of(result), {"AX_GDN_UNPACKED_DECODE": "1"})
+        self.assertEqual(sorted(result.args), ["disable_flashinfer_autotune", "disable_radix_cache"])
+        explicit = plan(args(algorithm=None, attention_backend="flashinfer", fp4_gemm_runner_backend="flashinfer_cutlass",
+                             disable_radix_cache=True, disable_flashinfer_autotune=True),
+                        {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, None)
+        self.assertEqual(explicit.args, {})
+        self.assertNotIn("linear_attn_verify_backend", result.args)
+
+    def test_parity_refuses_stock_algorithms_and_other_backends(self):
+        environ = {"AX_NVFP4_VERIFY_PARITY": "1"}
+        with self.assertRaisesRegex(LaunchConfigError, "supports AR and --speculative-algorithm"):
+            plan(args(algorithm="DFLASH"), environ, QWEN38_27B_NVFP4, DFLASH2)
+        with self.assertRaisesRegex(LaunchConfigError, "needs --attention-backend flashinfer, got triton"):
+            plan(args(attention_backend="triton"), environ, QWEN38_27B_NVFP4, DFLASH2)
+        with self.assertRaisesRegex(LaunchConfigError, "needs --fp4-gemm-backend flashinfer_cutlass, got marlin"):
+            plan(args(fp4_gemm_runner_backend="marlin"), environ, QWEN38_27B_NVFP4, DFLASH2)
+        with self.assertRaisesRegex(LaunchConfigError, "needs --linear-attn-verify-backend triton"):
+            plan(args(linear_attn_verify_backend="nv_cutedsl"), environ, QWEN38_27B_NVFP4, DFLASH2)
+        plan(args(algorithm="DFLASH"), {}, QWEN38_27B_NVFP4, DFLASH2)  # without parity, stock is fine
+
+    def test_explicit_parity_tree_settings_win(self):
+        environ = {"AX_NVFP4_VERIFY_PARITY": "1", "FC1_TREE_N": "32"}
+        self.assertNotIn("FC1_TREE_N", env_of(plan(args(), environ, QWEN38_27B_NVFP4, DFLASH2)))
+
     def test_flash_next_mtp_gets_the_qsa_ring(self):
         result = plan(args("EAGLE", speculative_num_draft_tokens=None), {}, FLASH_NEXT, None)
         self.assertEqual(env_of(result)["AX_QSA_RING"], "16")

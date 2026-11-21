@@ -2,6 +2,7 @@
 # See NOTICE for upstream attribution.
 """DForkTree branch verification and state commit."""
 from contextlib import nullcontext
+from ax_engine_sglang.config import get_config
 from ax_engine_sglang.runtime import current_runtime
 import torch
 from sglang.srt.speculative.eagle_info import EagleVerifyInput
@@ -10,7 +11,7 @@ from sglang.srt.model_executor.forward_batch_info import CaptureHiddenMode
 
 def verify_branch(w, batch, tokens, prefix, positions, plan, cache2d, on_publish):
     bs = tokens.shape[0]
-    n = int(__import__('os').environ.get('FC1_TREE_N', '64'))
+    n = get_config().tree_nodes
     assert bs == 1, 'single-request latency experiment'
     dev = tokens.device
     import os

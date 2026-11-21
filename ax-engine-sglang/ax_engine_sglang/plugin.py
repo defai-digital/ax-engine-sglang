@@ -12,6 +12,8 @@ _tree_installed = False
 class TreeSpec(CustomSpecAlgo):
 
     def handle_server_args(self, server_args):
+        if get_config().ssm_positions and not server_args.disable_radix_cache:
+            raise ValueError("AX_SSM_POSITIONS requires --disable-radix-cache")
         _install_tree()
         SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
         from sglang.srt.arg_groups.overrides import declare_resolution
@@ -56,6 +58,9 @@ def _install_fixes(config):
     patch_attribute(sys, 'path', [directory, *(p for p in sys.path if p != directory)])
     import ax_rng   # ax-engine-sglang: flashinfer sampling offset reuse (sampled decoding), AX_FI_OFFSET_FIX
     ax_rng.install()
+    if config.gdn_chain_replay:
+        from . import ax_gdn_chain_replay
+        ax_gdn_chain_replay.install()
     if config.nvfp4_verify_parity:
         from . import ax_nvfp4_verify, ax_verify_attention
         ax_nvfp4_verify.install(config.nvfp4_parity_rows)
@@ -66,6 +71,9 @@ def _install_fixes(config):
     if config.gdn_unpacked_decode:
         from sglang.srt.layers.attention.linear.kernels.gdn_triton import TritonGDNKernel
         patch_attribute(TritonGDNKernel, "supports_packed_decode", False)
+    if config.nvfp4_verify_parity:
+        from .ax_gdn_recurrent import install_value_tile
+        install_value_tile()
     import ax_qsa   # ax-engine-sglang: AX_QSA_RING widens the QSA pending ring (Qwen4-Exp verify windows)
     ax_qsa.install()
 

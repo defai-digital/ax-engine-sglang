@@ -97,6 +97,93 @@ sequences. Tree reached 123.64 tok/s and chain 122.88 tok/s against 49.09
 tok/s for parity AR.
 [Row group measurements and limits](reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
+Row groups matched only with one request in flight: at concurrency eight, 20
+or 21 of 30 outputs equalled the same request alone. The profile now runs FP8
+projections on a path that gave a row the same bits at every row count.
+
+| RTX PRO 6000 parity profile, eight slots, 128-token budget | Equal to alone at C8 | Alone tok/s | C8 tok/s |
+|---|---:|---:|---:|
+| Parity AR | 30/30 | 48.84 | 237.80 |
+| Parity DFlash2 tree, 16 nodes | 30/30 | 112.33 | 384.84 |
+| Parity DFlash2 chain, width 8 | 30/30 | 118.02 | 401.66 |
+| Parity DFlash2 tree, 16 nodes, former 16-row groups | 21/30 | 111.44 | 240.68 |
+
+Tree 64 also matched AR on all ten inputs, at 71.16 tok/s alone with two slots.
+[Invariant GEMM measurements and limits](reports/2026-11-20-rtx-nvfp4-parity-invariant-gemm.md)
+
+GDN verification then moved from one decode call per candidate to one launch
+per layer, with the same bits. On a second pod, with prefill graphs and
+FlashInfer autotune enabled, every lane below equalled the reference AR on all
+ten inputs and its own alone outputs on 30/30 requests at concurrency eight.
+
+| RTX PRO 6000 parity profile, 128-token budget | Alone tok/s | C8 tok/s |
+|---|---:|---:|
+| Parity AR | 51.19 | 268.70 |
+| Parity DFlash2 tree, 16 nodes | 160.70 | 570.58 |
+| Parity DFlash2 tree, 32 nodes | 160.21 | 559.08 |
+| Parity DFlash2 chain, width 8 | 140.74 | 575.09 |
+| Parity DFlash2 tree, 64 nodes, two slots | 140.44 | 248.27 |
+
+[One-launch GDN measurements and limits](reports/2026-11-20-rtx-nvfp4-parity-gdn-one-launch.md)
+
+Those runs stopped at end-of-sequence. With exactly 128 tokens per request,
+FlashInfer autotune changed one or two of ten outputs at concurrency eight, so
+the parity defaults now disable it and keep prefill graphs on. Every lane below
+equalled parity AR on all ten inputs and its own alone outputs at concurrency
+eight. Tree 64 runs with eight slots through the capped snapshot buffer.
+
+| RTX PRO 6000, parity defaults, exactly 128 tokens | C1 tok/s | C8 tok/s |
+|---|---:|---:|
+| Parity AR | 51.79 | 226.78 |
+| Parity DFlash2 tree, 16 nodes | 118.09 | 493.03 |
+| Parity DFlash2 tree, 32 nodes | 120.05 | 520.60 |
+| Parity DFlash2 chain, width 8 | 109.76 | 507.35 |
+| Parity DFlash2 tree, 64 nodes, `AX_SSM_POSITIONS=8` | 102.34 | 508.50 |
+
+On the same pod with the speed sweep's flags, speed-profile tree 16 reached
+126.59 and 449.86 tok/s and parity tree 16 112.70 and 387.57 tok/s.
+[Fixed-length comparison and profile](reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
+
+## GeForce RTX 5090 · Qwen3.8-27B NVFP4
+
+Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with
+SGLang 0.5.23 and two GPU request slots. The text workload used the RTX
+PRO 6000 suite's frozen inputs and fixed 128-token greedy outputs. Rates
+pool two passes and include prefill and loopback HTTP.
+
+![GeForce RTX 5090 throughput by serving route at concurrency one and two. Both panels use the same output token rate scale.](figures/rtx-5090-27b-nvfp4-throughput.svg)
+
+| Concurrency and requests per pass | Stock SGLang AR | Stock SGLang + DFlash2, block 8 | SGLang + ax-engine-sglang |
+|---|---:|---:|---:|
+| 1, 10 requests | 57.64 | 125.01 | **135.18** (tree 32) |
+| 2, 40 requests | 101.77 | **182.38** | 181.36 (tree 32, chain width 8) |
+
+Tree 32 delivered **2.35×** stock AR and **1.08×** stock DFlash2 at
+concurrency one. AX Engine delivered **1.78×** stock AR at concurrency
+two and finished within **0.6%** of stock DFlash2. Verification parity
+was disabled for the timed comparison. Both speculative routes matched
+packed AR on 0 of 10 complete outputs per pass at concurrency one.
+[Per-pass timings, token matches and reproduction](../results/rtx_5090_27b_nvfp4/REPORT.md)
+
+### Experimental recurrent GDN replay
+
+The width-eight DFlash2 follow-up reused the frozen prompts and 128-token
+greedy outputs. The two-slot rates pool four passes and the eight-slot
+rate pools two. Rates include prefill and loopback HTTP.
+
+![Stock DFlash2 and AX GDN replay throughput on the RTX 5090. Only replay completed the eight-slot run.](figures/rtx-5090-27b-gdn-replay-throughput.svg)
+
+| Concurrency | Stock DFlash2 output tok/s | AX GDN replay output tok/s |
+|---:|---:|---:|
+| 1 | 123.21 | 124.39 |
+| 2 | 178.67 | 181.19 |
+| 8 | GPU memory limit | 389.63 |
+
+Replay matched all 200 fixed-length stock DFlash2 sequences at one and
+two concurrent requests. It replaced 3.38 GiB of speculative SSM
+snapshots with about 0.017 GiB of replay buffers in the two-slot runs.
+[Replay evidence and test settings](../results/rtx_5090_27b_nvfp4/REPORT.md#accepted-prefix-gdn-replay-follow-up)
+
 ## Jetson Thor · Qwen3.8-27B
 
 All rows use the single-request FlashInfer lanes on a Linux arm64 Jetson
@@ -160,6 +247,7 @@ lanes. [Thor Flash Next configuration and accepted tokens](reports/2026-11-19-je
 
 ## Reproduce
 
+- [Run the GeForce RTX 5090 comparison](../results/rtx_5090_27b_nvfp4/REPORT.md#reproduce-the-comparison).
 - [Run the RTX three-route comparison](../results/rtx_27b_nvfp4_speed/REPORT.md#launch-the-measured-configurations).
 - [Run SGLang benchmarks and serving checks](../benchmarks/sglang/).
 - [Validate benchmark records](../contracts/benchmark-result-v1.schema.json).

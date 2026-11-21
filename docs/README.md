@@ -7,16 +7,16 @@ hosts with NVIDIA GPUs. Install the `ax-engine-sglang` Python package and run
 
 ## Installation and release status
 
-AX Engine for SGLang 0.3.0 supports Python 3.11 and 3.12 and pins SGLang
+AX Engine for SGLang 0.4.0 supports Python 3.11 and 3.12 and pins SGLang
 0.5.23. For a fresh install from wheels, use glibc 2.34 or later and a CUDA
 13-compatible NVIDIA driver. [SGLang 0.5.23 wheel files](https://pypi.org/project/sglang/0.5.23/#files)
 
 | Environment | Install command |
 |---|---|
-| Fresh virtual environment | `python -m pip install ax-engine-sglang==0.3.0` |
+| Fresh virtual environment | `python -m pip install ./ax_engine_sglang-0.4.0-py3-none-any.whl` after downloading the [release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl) |
 | Fresh virtual environment, from the repository root | `python -m pip install ./ax-engine-sglang` |
 | Existing SGLang 0.5.23 stack, including the pinned container | `python -m pip install --no-deps ./ax-engine-sglang` |
-| Existing SGLang 0.5.23 stack with the 0.3.0 wheel | `python -m pip install --no-deps ./ax_engine_sglang-0.3.0-py3-none-any.whl` |
+| Existing SGLang 0.5.23 stack with the 0.4.0 wheel | `python -m pip install --no-deps ./ax_engine_sglang-0.4.0-py3-none-any.whl` |
 
 Run `ax-engine-sglang --version` to verify the install. `serve` forwards
 SGLang server flags, enables AX and reports a startup error if AX fails to load.
@@ -24,11 +24,10 @@ SGLang server flags, enables AX and reports a startup error if AX fails to load.
 
 ### Publishing a release
 
-Build and check distributions by pushing a version tag in the public
-`defai-digital/ax-engine-sglang` repository. Run `pypi.yml` manually on that
-tag with `publish=true` to upload through the `pypi` GitHub environment and
-PyPI Trusted Publishing. The workflow checks the tag against the version
-reported by the installed wheel. [Release workflow](../.github/workflows/pypi.yml) · [PyPI project](https://pypi.org/project/ax-engine-sglang/)
+Push a version tag to the public `defai-digital/ax-engine-sglang` repository
+to build and check the distributions. The workflow checks the tag against
+the installed wheel version. Attach the wheel and source distribution to
+the GitHub release. [Release workflow](../.github/workflows/pypi.yml) · [GitHub releases](https://github.com/defai-digital/ax-engine-sglang/releases)
 
 ## Runtime boundaries
 
@@ -57,6 +56,7 @@ Historical SGLang 0.5.22 tree runs used explicitly supplied launch settings.
 | Linux amd64 | Two NVIDIA B300 GPUs | [Flash Next BF16 serving](../results/b300-flash-next-bf16/REPORT.md) |
 | Linux amd64 | NVIDIA B200 (SM100) | [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) · [Flash Next release checks](reports/2026-11-18-b200-v0.1.1.md) |
 | Linux amd64 | NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
+| Linux amd64 | NVIDIA GeForce RTX 5090 (SM120) | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |
 | Linux arm64 | NVIDIA Jetson Thor (SM110) | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) |
 
 Each report records its exact model, precision, CUDA stack and workload.

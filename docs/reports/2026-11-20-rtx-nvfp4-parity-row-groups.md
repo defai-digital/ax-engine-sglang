@@ -83,6 +83,10 @@ used the generic FP8 path with a synthetic weight scale.
 - NVFP4, BF16 and output head kernels have no separate bit-level test. The
   full-model greedy comparison covers them on the checkpoint weights.
 - Sampling was checked for 16 rows only.
+- Prefill and mixed prefill-decode batches are not regrouped. Requests that
+  prefill together can start from different bits than the same requests alone.
+- Row groups did not hold under concurrency, and the default is now a
+  row-count-invariant FP8 GEMM. [Follow-up](2026-11-20-rtx-nvfp4-parity-invariant-gemm.md)
 
 ## Validation environment
 

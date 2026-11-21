@@ -118,21 +118,12 @@ the pinned checkpoint weights.
 
 ## Reproduce
 
-The [private release](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.1.2)
-includes the exact inputs, output token IDs, timings and raw samples.
-Run the sampled comparison on CPU from the repository root.
-
-```bash
-tar xzf rtx-pro-6000-27b-nvfp4-samples.tar.gz
-python benchmarks/sglang/sampling_dist_check.py compare parity-v2-ar/candidate/sampled.jsonl \
-    parity-v2-tree/candidate/sampled.jsonl --require-independent-seeds
-```
-
 Set `target` and `draft` to the pinned checkpoint directories and `runner`
 to the absolute path of the pod's Python. Use the same checkout for both
 lanes. Download the ten-input `parity-expanded-ids.json` release asset into
 the working directory. To run just the seven original prompts, replace
 `--input-ids parity-expanded-ids.json` with `--long-context 2600`.
+[Frozen input token IDs](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/parity-expanded-ids.json)
 
 ```bash
 common=(--candidate-only --python "$runner" --baseline "$PWD" --candidate "$PWD"

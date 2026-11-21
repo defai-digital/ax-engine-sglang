@@ -2,6 +2,9 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 import importlib
+import inspect
+import sys
+import textwrap
 
 
 TESTED_SGLANG = ("0.5.22", "0.5.23")
@@ -78,3 +81,21 @@ def check_sglang(config):
             "Port and validate the hooks, or explicitly set AX_ALLOW_UNTESTED_SGLANG=1."
         )
     return version
+
+
+def rebuild_function(cls, name, edits, *, feature):
+    """Compile a version-checked replacement without changing the live class."""
+    fn = getattr(cls, name)
+    src = textwrap.dedent(inspect.getsource(fn))
+    for old, new, count in edits:
+        found = src.count(old)
+        if found != count:
+            raise RuntimeError(f"ax-engine {feature}: {cls.__name__}.{name} has {found} matches "
+                               f"for {old!r}, expected {count} (SGLang changed?)")
+        src = src.replace(old, new)
+    mod = sys.modules[fn.__module__]
+    ns = {}
+    exec(compile(src, f"<ax-engine {feature} {fn.__module__}.{cls.__name__}.{name}>", "exec"), mod.__dict__, ns)
+    new_fn = ns[name]
+    new_fn.__qualname__ = fn.__qualname__
+    return new_fn

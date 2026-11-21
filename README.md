@@ -26,12 +26,12 @@ adds in drafting and verification.
 ## Quick start
 
 Use Python 3.12 on Linux with an NVIDIA GPU and a CUDA 13-compatible driver.
-Install v0.3.0 in a fresh virtual environment.
+Install the v0.4.0 GitHub release wheel in a fresh virtual environment.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install ax-engine-sglang==0.3.0
+python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl
 ```
 
 Use `python -m pip install ./ax-engine-sglang` from the repository root for a
@@ -53,22 +53,21 @@ The 0.2.1 wheel served this target and drafter on Jetson Thor. A single greedy
 request returned 32 tokens and the trace contained six DFlash2 tree rounds.
 [Thor smoke test and flags](docs/README.md#021-installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
 
-## Changes in v0.3.0
+## Changes in v0.4.0
 
-- NVFP4 MoE defaults probe the GPU selected by SGLang. Tree startup checks
-  explicit settings against the target and drafter checkpoints.
-- DFlash2 lattice rounds skip predecessor-token bookkeeping used by n-gram
-  drafting. The B200 measurements include greedy token checks.
-- The [recurrent GDN replay benchmark](#experimental-recurrent-gdn-replay)
-  measures accepted-prefix replay with stock DFlash2.
+- Add opt-in accepted-prefix GDN replay for stock width-eight DFlash2
+  chains to reduce speculative state memory on a single GPU.
+- Use one recurrent GDN verification launch per layer in the NVFP4 parity
+  profile and support 64-candidate trees with eight request slots on RTX PRO 6000.
+- Add Qwen3.8-27B NVFP4 speed and replay charts for GeForce RTX 5090.
 
-[Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.3.0) · [B200 replay results](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
+[Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.4.0) · [RTX 5090 benchmarks](#geforce-rtx-5090--qwen38-27b-nvfp4)
 
 ## Supported platforms
 
 | Host | NVIDIA configurations with recorded runs |
 |---|---|
-| Linux amd64 (x86_64) | B300, B200, and RTX PRO 6000 |
+| Linux amd64 (x86_64) | B300, B200, RTX PRO 6000, and GeForce RTX 5090 |
 | Linux arm64 (aarch64) | Jetson Thor |
 
 SGLang 0.5.23 is the reference runtime. Use a CUDA-enabled SGLang environment
@@ -177,15 +176,59 @@ verification the same projection kernels. Its tree and chain routes matched
 its own AR reference on all ten complete sequences, and AR and tree passed
 all 28 sampled distribution checks.
 
-| Parity profile, concurrency 1, 10 requests, 128-token budget | Output tok/s | Relative to parity AR |
+| Parity profile, 10 requests of exactly 128 tokens | C1 tok/s | C8 tok/s |
 |---|---:|---:|
-| Parity AR | 49.09 | 1.00× |
-| Parity DFlash2 chain, width 8 | 122.88 | 2.50× |
-| Parity DFlash2 tree, 16 nodes | **123.64** | **2.52×** |
+| Parity AR | 51.79 | 226.78 |
+| Parity DFlash2 chain, width 8 | 109.76 | 507.35 |
+| Parity DFlash2 tree, 16 nodes | **118.09** | 493.03 |
+| Parity DFlash2 tree, 64 nodes, `AX_SSM_POSITIONS=8` | 102.34 | **508.50** |
 
-This single pass stops at end-of-sequence and uses two request slots, so it
-is not comparable with the speed table above. The parity AR reference differs
-from packed AR. [RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
+Every lane equalled parity AR on all ten inputs, and at concurrency eight
+every request equalled the same request alone. On the same pod, speed-profile
+tree 16 reached 126.59 and 449.86 tok/s, and no speed-profile lane kept its
+outputs at concurrency eight. The parity AR reference differs from packed AR.
+[RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
+
+### GeForce RTX 5090 · Qwen3.8-27B NVFP4
+
+One 32 GB RTX 5090 ran SGLang 0.5.23 with two GPU request slots. Each
+request generated 128 greedy tokens from the same frozen inputs used on
+the RTX PRO 6000. Rates pool two passes and include prefill and local HTTP
+overhead.
+
+![GeForce RTX 5090 output throughput. AX Engine leads at concurrency one. Stock DFlash2 and AX Engine are within 0.6% at concurrency two.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
+
+| Concurrency and requests per pass | Stock SGLang AR | Stock SGLang + DFlash2, block 8 | SGLang + ax-engine-sglang |
+|---|---:|---:|---:|
+| 1, 10 requests | 57.64 | 125.01 | **135.18** (tree 32) |
+| 2, 40 requests | 101.77 | **182.38** | 181.36 (tree 32, chain width 8) |
+
+At concurrency one, AX Engine delivered **2.35×** stock AR and **8.1%**
+more throughput than stock DFlash2. At concurrency two, the speculative
+routes were within **0.6%** of each other. These are speed-profile runs
+with verification parity disabled. Both speculative routes matched packed
+AR on 0 of 10 complete outputs per pass at concurrency one.
+[Full RTX 5090 benchmark and launch settings](results/rtx_5090_27b_nvfp4/REPORT.md)
+
+#### Experimental recurrent GDN replay
+
+The width-eight DFlash2 follow-up used the same checkpoint, inputs, and
+fixed 128-token outputs. The C1 and C2 rates pool four passes per route
+with two server slots. The C8 run used eight slots and two passes.
+
+![RTX 5090 DFlash2 replay throughput at concurrency 1, 2, and 8. The stock eight-slot launch ran out of GPU memory during cache sizing.](docs/figures/rtx-5090-27b-gdn-replay-throughput.svg)
+
+| Concurrency | Stock DFlash2 output tok/s | AX GDN replay output tok/s |
+|---:|---:|---:|
+| 1 | 123.21 | 124.39 |
+| 2 | 178.67 | 181.19 |
+| 8 | GPU memory limit | **389.63** |
+
+At two slots, replay replaced **3.38 GiB** of speculative state snapshots
+with about **0.017 GiB** of replay buffers. The two-slot runs matched all
+**200 of 200** complete stock DFlash2 outputs. The eight-slot replay run
+also passed cancellation and slot reuse checks.
+[Replay benchmark and validation](results/rtx_5090_27b_nvfp4/REPORT.md#accepted-prefix-gdn-replay-follow-up)
 
 ### Jetson Thor · Qwen3.8-27B
 

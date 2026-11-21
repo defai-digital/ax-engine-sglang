@@ -20,6 +20,7 @@ import sys
 from typing import Callable, Mapping
 
 TREE_ALGORITHM = "FC1_DFLASH_TREE"
+CUTLASS = "flashinfer_cutlass"
 SOURCE = "ax-engine-sglang defaults"
 
 # The tree configuration measured on Qwen3.5-9B and Qwen3.8-27B (B200, RTX PRO 6000, Jetson Thor).
@@ -27,8 +28,20 @@ TREE_ENV = {
     "FC1_TREE64": "1", "FC1_BRANCH_PILOT": "1", "FC1_OURS": "1", "FC1_FUSED": "1",
     "FC1_COMPILE_BUILD": "1", "AX_FAST": "1", "FC1_TREE_N": "32",
 }
+# AX_NVFP4_VERIFY_PARITY=1: the settings of the measured RTX PRO 6000 parity lanes. The tree
+# values replace their TREE_ENV counterparts; the fused verifier has its own GDN arithmetic.
+PARITY_ENV = {"AX_GDN_UNPACKED_DECODE": "1"}
+PARITY_TREE_ENV = {"FC1_FUSED": "0", "FC1_TREE_N": "16", "AX_GDN_RECURRENT_VERIFY": "1",
+                   "AX_DFLASH_JOINT_SAMPLING": "1"}
+# ServerArgs field: (value, command-line flag).
+PARITY_ARGS = {"attention_backend": ("flashinfer", "--attention-backend"),
+               "fp4_gemm_runner_backend": (CUTLASS, "--fp4-gemm-backend")}
+PARITY_TREE_ARGS = {"linear_attn_verify_backend": ("triton", "--linear-attn-verify-backend")}
+# FlashInfer autotune picks GEMM tactics by row count: with it on, 8 of 10 fixed-length outputs
+# at concurrency eight equalled the same requests at concurrency one (10 of 10 with prefill
+# graphs alone). The radix cache was not checked with partial prefix hits.
+PARITY_DISABLED = ("disable_radix_cache", "disable_flashinfer_autotune")
 QSA_RING = "16"
-CUTLASS = "flashinfer_cutlass"
 
 
 class LaunchConfigError(ValueError):
@@ -44,6 +57,30 @@ class Plan:
     def default_env(self, environ: Mapping[str, str], name: str, value, reason: str):
         if name not in environ or environ[name] == "":
             self.env[name] = (str(value), reason)
+
+
+def parity_requested(environ: Mapping[str, str]) -> bool:
+    return environ.get("AX_NVFP4_VERIFY_PARITY") == "1"
+
+
+def env_defaults(environ: Mapping[str, str], tree: bool) -> dict[str, str]:
+    """Environment defaults of a launch; parity values take precedence over the tree's."""
+    values = dict(TREE_ENV) if tree else {}
+    if parity_requested(environ):
+        values.update(PARITY_ENV)
+        if tree:
+            values.update(PARITY_TREE_ENV)
+    return values
+
+
+def parity_algorithm_error(algorithm: str | None) -> str | None:
+    """Only AR and the plugin's tree algorithm run the matched verification path."""
+    name = (algorithm or "").upper()
+    if name and name != TREE_ALGORITHM:
+        return (f"ax-engine-sglang: AX_NVFP4_VERIFY_PARITY=1 supports AR and --speculative-algorithm "
+                f"{TREE_ALGORITHM} (AX_TREE=0 for chain rounds); {name} verifies with SGLang's batched "
+                f"Gated-DeltaNet kernel and would not reproduce the AR reference")
+    return None
 
 
 def text_config(config: Mapping) -> Mapping:
@@ -94,10 +131,43 @@ def _int_env(environ, name):
         raise LaunchConfigError(f"{name} must be an integer, got {value!r}") from error
 
 
+def _plan_gdn_chain_replay(result, args, environ, target, drafter, capability):
+    feature = "AX_GDN_CHAIN_REPLAY=1"
+    if (getattr(args, "speculative_algorithm", None) or "").upper() != "DFLASH":
+        raise LaunchConfigError(f"{feature} requires --speculative-algorithm DFLASH")
+    if (getattr(args, "speculative_num_draft_tokens", None) != 8
+            or getattr(args, "speculative_eagle_topk", None) not in (None, 1)
+            or drafter_kind(drafter) != "dflash2"):
+        raise LaunchConfigError(f"{feature} requires a DFlash2 drafter with --speculative-num-draft-tokens 8")
+    if (gdn_shape(target or {}) != (48, 48)
+            or "Qwen3_5ForConditionalGeneration" not in (target or {}).get("architectures", ())):
+        raise LaunchConfigError(f"{feature} requires the dense Qwen3.8-27B GDN target")
+    if capability is None or any(getattr(args, name, 1) != 1 for name in ("tp_size", "pp_size", "dp_size")):
+        raise LaunchConfigError(f"{feature} requires a single CUDA GPU with TP1, PP1 and DP1")
+    if getattr(args, "disaggregation_mode", "null") not in (None, "null"):
+        raise LaunchConfigError(f"{feature} requires a non-disaggregated server")
+    if not getattr(args, "disable_radix_cache", False):
+        raise LaunchConfigError(f"{feature} requires --disable-radix-cache")
+    if (environ.get("SGLANG_RAGGED_VERIFY_MODE", "static") != "static"
+            or getattr(args, "enable_page_major_kv_layout", False)
+            or getattr(args, "speculative_adaptive", False)):
+        raise LaunchConfigError(f"{feature} requires static verify windows and the default KV layout")
+    for name, value in (("mamba_ssm_dtype", "float32"), ("linear_attn_verify_backend", "triton")):
+        given = getattr(args, name, None)
+        if given not in (None, value):
+            flag = "--" + name.replace("_", "-")
+            raise LaunchConfigError(f"{feature} requires {flag} {value}, got {given}")
+        result.args[name] = (value, feature)
+    result.args["enable_linear_replayssm_spec"] = (True, feature)
+
+
 def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapping | None,
          target_quant: Mapping | None = None, capability: tuple[int, int] | None = None) -> Plan:
     """Decide defaults for one launch. `args` is the raw (unresolved) ServerArgs."""
     result = Plan()
+    if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
+        _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
+        return result
     if environ.get("AX_AUTO_DEFAULTS", "1") == "0":
         return result
     algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
@@ -120,6 +190,26 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         # verify window crosses a 4-token group (MTP 1-3 included) and refuses windows above 4.
         result.default_env(environ, "AX_QSA_RING", QSA_RING,
                            "Qwen4-Exp QSA with speculative decoding: fixes the 4-slot pending ring")
+
+    parity = parity_requested(environ)
+    if parity:
+        error = parity_algorithm_error(algorithm)
+        if error:
+            raise LaunchConfigError(error)
+        wanted = {**PARITY_ARGS, **(PARITY_TREE_ARGS if algorithm == TREE_ALGORITHM else {})}
+        for name, (value, flag) in wanted.items():
+            given = getattr(args, name, None)
+            if given in (None, "auto"):
+                result.args[name] = (value, "AX_NVFP4_VERIFY_PARITY=1: the measured parity backend")
+            elif given != value:
+                raise LaunchConfigError(
+                    f"ax-engine-sglang: AX_NVFP4_VERIFY_PARITY=1 needs {flag} {value}, got {given}; "
+                    f"the parity patches cover that backend only")
+        for name in PARITY_DISABLED:
+            if not getattr(args, name, False):
+                result.args[name] = (True, "AX_NVFP4_VERIFY_PARITY=1: outputs not matched with it on")
+        for name, value in PARITY_ENV.items():
+            result.default_env(environ, name, value, "AX_NVFP4_VERIFY_PARITY=1")
 
     if algorithm != TREE_ALGORITHM:
         return result
@@ -188,8 +278,11 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                 f"table, but {path} does not exist. Download ngram_counts.npz from the DForkTree "
                 f"v0.1.0 release and set FC1_NGRAM_PATH, or use a DFlash2 drafter (AX_LATTICE=1)")
 
-    for name, value in TREE_ENV.items():
-        result.default_env(environ, name, value, "measured tree configuration")
+    for name, value in env_defaults(environ, tree=True).items():
+        reason = ("AX_NVFP4_VERIFY_PARITY=1: measured parity tree" if parity and name in PARITY_TREE_ENV
+                  else "measured tree configuration")
+        if name not in PARITY_ENV:
+            result.default_env(environ, name, value, reason)
 
     if getattr(args, "max_running_requests", None) is None:
         reason = ("tree rounds serve one request; the tree's GDN state cache is sized per slot. "
@@ -235,7 +328,8 @@ def describe(result: Plan, environ: Mapping[str, str]) -> str:
     for name, (value, reason) in sorted(result.env.items()):
         lines.append(f"  {name}={value}  [auto: {reason}]")
     for name, (value, reason) in sorted(result.args.items()):
-        lines.append(f"  --{name.replace('_', '-')} {value}  [auto: {reason}]")
+        flag = {**PARITY_ARGS, **PARITY_TREE_ARGS}.get(name, (None, "--" + name.replace("_", "-")))[1]
+        lines.append(f"  {flag} {value}  [auto: {reason}]")
     for name in sorted(k for k in environ if k.startswith(("AX_", "FC1_")) and k not in result.env):
         lines.append(f"  {name}={environ[name]}  [env]")
     lines.extend(f"  note: {note}" for note in result.notes)
@@ -249,7 +343,7 @@ def resolve(server_args, *, environ=None, load: Callable = read_json, capability
     if getattr(server_args, "_ax_defaults_resolved", False):
         return Plan()
     server_args._ax_defaults_resolved = True   # private marker, like SGLang's own _resolved_overrides
-    if environ.get("AX_AUTO_DEFAULTS", "1") == "0":
+    if environ.get("AX_AUTO_DEFAULTS", "1") == "0" and environ.get("AX_GDN_CHAIN_REPLAY") != "1":
         return Plan()
     revision = getattr(server_args, "revision", None)
     target = load(getattr(server_args, "model_path", None), "config.json", revision)
