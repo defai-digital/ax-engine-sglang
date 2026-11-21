@@ -87,7 +87,7 @@ def main():
     parser.add_argument("--widths", type=int, nargs="+", default=[16, 8])
     parser.add_argument("--lanes", nargs="+",
                         help="w<width>, table, schedule or adaptive; default: every width, then table and adaptive")
-    parser.add_argument("--table", default="1:16,5:8", help="AX_CHAIN_WIDTH_BY_BATCH of the table lane")
+    parser.add_argument("--table", default="1:16,4:8", help="AX_CHAIN_WIDTH_BY_BATCH of the table lane")
     parser.add_argument("--schedule", default="16x31,8x1",
                         help="AX_CHAIN_SCHEDULE of the schedule lane: width changes without a policy")
     parser.add_argument("--adaptive-env", nargs="*", default=[], metavar="NAME=VALUE")

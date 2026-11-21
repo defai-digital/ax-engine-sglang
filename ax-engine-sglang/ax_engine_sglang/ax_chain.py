@@ -11,7 +11,7 @@ fused tree hooks (fc1_fused, fc1_conv, fc1_plan) run only in tree rounds:
 
 Stage 0 has no width rule. The width is pinned with `AX_CHAIN_WIDTH` (8 or 16, default B), or a
 forced schedule `AX_CHAIN_SCHEDULE="16x5,8x3"` (width x rounds, cycled) for the switching checks.
-`AX_CHAIN_WIDTH_BY_BATCH="1:16,5:8"` chooses it by the number of requests in the round, and
+`AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` chooses it by the number of requests in the round, and
 `AX_POLICY_MODE=adaptive` from measured accept lengths and round times (experimental).
 `AX_TREE=0` turns tree rounds off (every round is a chain round, also with one request).
 
