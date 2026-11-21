@@ -214,10 +214,10 @@ prints the report for scripts. Flags outside the launch rules, such as
 would be refused.
 
 ```bash
-AX_QUALITY_PROFILE=verified ax-engine-sglang doctor RadixArk/Qwen3.8-27B-NVFP4 \
+AX_QUALITY_PROFILE=verified AX_TREE=0 ax-engine-sglang doctor RadixArk/Qwen3.8-27B-NVFP4 \
   --speculative-algorithm FC1_DFLASH_TREE \
   --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2 \
-  --speculative-num-draft-tokens 16
+  --speculative-num-draft-tokens 8
 ```
 
 The report gives `supported`, `experimental` or `unsupported`, the derived
@@ -226,18 +226,29 @@ whether the launch could use GDN replay. It does not estimate GPU memory.
 
 | Variable | Meaning |
 |---|---|
-| `AX_QUALITY_PROFILE=verified` | run the parity path (`AX_NVFP4_VERIFY_PARITY=1` and its defaults) and refuse to start unless `qualification.py` lists an exact-output measurement for the GPU, target and route. Needs SGLang 0.5.23 launch defaults. It sets the measured lane and refuses other values. Tree: `--speculative-num-draft-tokens 16`, `FC1_TREE_N=16`, chain rounds of width 8 on a private graph (`AX_CHAIN_WIDTH=8 AX_CHAIN_GRAPH_WIDTHS=8 AX_CHAIN_DRAFT_WIDTHS=8 AX_SSM_POSITIONS=8`). Chain (`AX_TREE=0`): `--speculative-num-draft-tokens 8`, `FC1_TREE_N=8`, `AX_CHAIN_WIDTH=8`. Every route: `--chunked-prefill-size 4096` (larger is accepted) and `--disable-prefill-cuda-graph`; `AX_TREE_SAMPLING=1` is refused. The launcher prints how many sequences were measured and the conditions of the measurement |
+| `AX_QUALITY_PROFILE=verified` | run the parity path (`AX_NVFP4_VERIFY_PARITY=1` and its defaults) and refuse to start unless `qualification.py` lists an exact-output measurement for the GPU, target and route. Needs SGLang 0.5.23 launch defaults. It sets the measured lane and refuses other values. Speculative serving needs the chain route: `AX_TREE=0` with `--speculative-num-draft-tokens 8` (the launcher sets `FC1_TREE_N=8` and `AX_CHAIN_WIDTH=8`); the tree route is refused. Every route: `--chunked-prefill-size 4096` (larger is accepted) and `--disable-prefill-cuda-graph`; `AX_TREE_SAMPLING=1` is refused. The launcher prints how many sequences were measured and the conditions of the measurement |
 | `AX_QUALITY_PROFILE=fast` | the launcher prints that the launch makes no exact-output claim; refuses `AX_NVFP4_VERIFY_PARITY=1` |
 | `AX_POLICY_MODE=adaptive` | experimental: choose each chain round's width among `AX_CHAIN_GRAPH_WIDTHS` (at least two) from measured accepted tokens and round time, per batch-size group. `AX_CHAIN_WIDTH`, else the widest graph width, serves until every width is measured. One GPU (TP1, PP1, DP1). Refuses `AX_CHAIN_SCHEDULE`, `AX_NVFP4_VERIFY_PARITY=1`, `AX_GDN_CHAIN_REPLAY=1`, `--speculative-adaptive` and a graph width above the draft block |
 | `AX_ADAPTIVE_MIN_SAMPLES`, `AX_ADAPTIVE_MARGIN`, `AX_ADAPTIVE_COOLDOWN`, `AX_ADAPTIVE_EXPLORE` | adaptive policy: samples per width before a decision (32), gain needed to switch (0.08), rounds between switches (50), rounds between samples of the other widths (32) |
 
 The qualification rows cover Qwen3.8-27B NVFP4 on SM120 (RTX 5090 and RTX PRO
-6000) for AR, tree 16 and chain 8. Their status is `exact_measured`: every
-measured sequence equalled the AR reference, on fewer sequences than the
-1,000-sequence release gate. The adaptive policy has CPU tests only. Its
-throughput and its outputs under width changes have not been measured on a GPU,
-and the default stays `static`. Its choices appear under `adaptive` in the
+6000). AR and chain 8 are `exact_measured`: on an RTX PRO 6000 every sequence
+equalled the AR reference at concurrency 1, 2 and 8 (1,000 of 128 tokens, 120
+of 1,024 tokens, ten distinct prompts). The tree route is `experimental`: it
+matched for 128 tokens, and two of ten prompts differed in 1,024-token outputs.
+See `docs/reports/2026-11-21-verified-profile-gate.md`.
+
+The adaptive policy stays experimental and the default stays `static`. On the
+same GPU it matched the better fixed width at concurrency 8 (width 8, 20% above
+width 16) but ran 6% below fixed width 16 at concurrency 2, and it switched on
+noise where the widths are equal. Its choices appear under `adaptive` in the
 round statistics the worker prints every 1,000 rounds.
+
+With the radix cache on, SGLang may run fewer requests than
+`--max-running-requests`: it logs `max_running_requests is capped to N by the
+mamba state cache`. Eight slots became three on a 97 GB GPU at
+`--mem-fraction-static 0.82`; `--disable-radix-cache` or a larger
+`--max-mamba-cache-size` restores them.
 
 ## Maintenance and validation
 

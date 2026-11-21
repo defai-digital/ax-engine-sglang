@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ax_engine_sglang import cli, doctor
 from ax_engine_sglang.config import PluginConfig, startup_config
 from ax_engine_sglang.defaults import LaunchConfigError, plan
-from ax_engine_sglang.qualification import EXACT_MEASURED, UNSUPPORTED, lookup, target_key
+from ax_engine_sglang.qualification import EXACT_MEASURED, EXPERIMENTAL, UNSUPPORTED, lookup, target_key
 
 QWEN38_27B = {"architectures": ["Qwen3_5ForConditionalGeneration"],
               "text_config": {"model_type": "qwen3_5_text", "linear_num_value_heads": 48,
@@ -22,7 +22,12 @@ QWEN38_27B_NVFP4 = {**QWEN38_27B, "quantization_config": {"quant_method": "model
 DFLASH2 = {"architectures": ["DFlash2DraftModel"], "dflash_config": {"block_size": 8}}
 TREE = "FC1_DFLASH_TREE"
 VERIFIED = {"AX_QUALITY_PROFILE": "verified"}
+CHAIN = {**VERIFIED, "AX_TREE": "0"}      # the speculative route the verified profile admits
 RTX, B200 = (12, 0), (10, 0)
+
+
+def chain_args(**values):
+    return args(**{"speculative_num_draft_tokens": 8, **values})
 
 
 def args(algorithm=TREE, **values):
@@ -43,8 +48,9 @@ class QualificationTests(unittest.TestCase):
     def test_rows_are_measured_not_gate_verified(self):
         for route in ("ar", "tree", "chain"):
             row = lookup(RTX, "qwen3.8-27b-nvfp4", route)
-            self.assertEqual(row.status, EXACT_MEASURED)
-            self.assertTrue(row.admits_verified)
+            # Tree rounds differed from AR in 1,024-token outputs (RTX PRO 6000, 2026-11-21).
+            self.assertEqual(row.status, EXPERIMENTAL if route == "tree" else EXACT_MEASURED)
+            self.assertEqual(row.admits_verified, route != "tree")
             self.assertTrue(all((Path(__file__).resolve().parents[2] / path.split("#")[0]).is_file()
                                 for path in row.evidence))
 
@@ -58,7 +64,7 @@ class QualificationTests(unittest.TestCase):
 
 class VerifiedProfileTests(unittest.TestCase):
     def test_verified_turns_on_the_parity_path_on_a_measured_gpu(self):
-        result = plan(args(), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        result = plan(chain_args(), CHAIN, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertEqual(result.env["AX_NVFP4_VERIFY_PARITY"], ("1", "AX_QUALITY_PROFILE=verified"))
         self.assertEqual(result.env["AX_GDN_RECURRENT_VERIFY"][0], "1")
         self.assertEqual(result.args["attention_backend"][0], "flashinfer")
@@ -79,71 +85,55 @@ class VerifiedProfileTests(unittest.TestCase):
             (dict(capability=RTX), QWEN38_27B_NVFP4, {"AX_NVFP4_VERIFY_PARITY": "0"}, "contradicts"),
             (dict(capability=RTX), QWEN38_27B_NVFP4, {"AX_AUTO_DEFAULTS": "0"}, "AX_AUTO_DEFAULTS"),
             (dict(capability=RTX), QWEN38_27B_NVFP4, {"AX_GDN_CHAIN_REPLAY": "1"}, "AX_GDN_CHAIN_REPLAY"),
+            (dict(capability=RTX), QWEN38_27B_NVFP4, {"AX_TREE": "1"}, "tree rounds .* Use the chain route: AX_TREE=0"),
         )
         for keywords, target, extra, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(LaunchConfigError, message):
-                plan(args(), {**VERIFIED, **extra}, target, DFLASH2, **keywords)
+                plan(chain_args(), {**CHAIN, **extra}, target, DFLASH2, **keywords)
+        with self.assertRaisesRegex(LaunchConfigError, "Use the chain route"):     # the tree is the default route
+            plan(args(), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
 
-    def test_verified_keeps_the_measured_tree_and_chain_sizes(self):
-        chain_args = args(speculative_num_draft_tokens=8)
-        chain = plan(chain_args, {**VERIFIED, "AX_TREE": "0"}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+    def test_verified_keeps_the_measured_chain_sizes(self):
+        chain = plan(chain_args(), CHAIN, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertEqual({name: chain.env[name][0] for name in ("AX_CHAIN_WIDTH", "FC1_TREE_N", "FC1_DRAFT_BLOCK")},
                          {"AX_CHAIN_WIDTH": "8", "FC1_TREE_N": "8", "FC1_DRAFT_BLOCK": "8"})
         self.assertNotIn("AX_CHAIN_GRAPH_WIDTHS", chain.env)
-        PluginConfig.from_env({**VERIFIED, "AX_TREE": "0", **{name: value for name, (value, _) in chain.env.items()}})
-        for block, environ, message in ((16, {"AX_TREE": "0"}, "draft-tokens 8, got 16"),
-                                        (8, {}, "draft-tokens 16, got 8"),
-                                        (None, {}, "draft-tokens 16, got None")):
-            with self.subTest(block=block), self.assertRaisesRegex(LaunchConfigError, message):
-                plan(args(speculative_num_draft_tokens=block), {**VERIFIED, **environ}, QWEN38_27B_NVFP4,
-                     DFLASH2, capability=RTX)
-        tree = plan(args(), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
-        self.assertEqual({name: tree.env[name][0] for name in (
-            "FC1_TREE_N", "AX_CHAIN_WIDTH", "AX_CHAIN_GRAPH_WIDTHS", "AX_CHAIN_DRAFT_WIDTHS", "AX_SSM_POSITIONS")},
-            {"FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8",
-             "AX_CHAIN_DRAFT_WIDTHS": "8", "AX_SSM_POSITIONS": "8"})
         # The settings the launcher derives make a valid final configuration.
-        config = PluginConfig.from_env({**VERIFIED, **{name: value for name, (value, _) in tree.env.items()}})
-        self.assertEqual((config.chain_width, config.graph_widths, config.tree_nodes), (8, (8,), 16))
-        for extra, message in (({"FC1_TREE_N": "32"}, "FC1_TREE_N=16"),
-                               ({"AX_CHAIN_WIDTH": "16"}, "AX_CHAIN_WIDTH=8"),
-                               ({"AX_CHAIN_GRAPH_WIDTHS": "16 8"}, "AX_CHAIN_GRAPH_WIDTHS=8"),
+        config = PluginConfig.from_env({**CHAIN, **{name: value for name, (value, _) in chain.env.items()}})
+        self.assertEqual((config.chain_width, config.tree_nodes, config.tree), (8, 8, False))
+        for block in (16, None):
+            with self.subTest(block=block), self.assertRaisesRegex(LaunchConfigError, f"draft-tokens 8, got {block}"):
+                plan(args(speculative_num_draft_tokens=block), CHAIN, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        for extra, message in (({"AX_CHAIN_WIDTH": "4"}, "AX_CHAIN_WIDTH=8"),
+                               ({"FC1_TREE_N": "16"}, "FC1_TREE_N=8"),
+                               ({"AX_CHAIN_GRAPH_WIDTHS": "8"}, "own graph"),
                                ({"AX_CHAIN_SCHEDULE": "8x2,4x2"}, "AX_CHAIN_SCHEDULE"),
-                               ({"AX_TREE_SAMPLING": "1"}, "greedy"),
-                               ({"AX_TREE": "0", "AX_CHAIN_WIDTH": "4"}, "AX_CHAIN_WIDTH=8"),
-                               ({"AX_TREE": "0", "FC1_TREE_N": "16"}, "FC1_TREE_N=8"),
-                               ({"AX_TREE": "0", "AX_CHAIN_GRAPH_WIDTHS": "8"}, "own graph"),
-                               ({"AX_TREE": "0", "AX_CHAIN_SCHEDULE": "8x2,4x2"}, "AX_CHAIN_SCHEDULE")):
-            block = 8 if extra.get("AX_TREE") == "0" else 16
+                               ({"AX_TREE_SAMPLING": "1"}, "greedy")):
             with self.subTest(extra=extra), self.assertRaisesRegex(LaunchConfigError, message):
-                plan(args(speculative_num_draft_tokens=block), {**VERIFIED, **extra}, QWEN38_27B_NVFP4,
-                     DFLASH2, capability=RTX)
-        explicit = plan(args(), {**VERIFIED, "FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8"},
+                plan(chain_args(), {**CHAIN, **extra}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        explicit = plan(chain_args(), {**CHAIN, "FC1_TREE_N": "8", "AX_CHAIN_WIDTH": "8"},
                         QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertNotIn("AX_CHAIN_WIDTH", explicit.env)
 
     def test_verified_prefills_each_prompt_in_one_pass_without_graphs(self):
-        result = plan(args(), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        result = plan(chain_args(), CHAIN, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertEqual(result.args["chunked_prefill_size"][0], 4096)
         self.assertTrue(result.args["disable_prefill_cuda_graph"][0])
-        given = plan(args(chunked_prefill_size=8192, disable_prefill_cuda_graph=True), VERIFIED,
+        given = plan(chain_args(chunked_prefill_size=8192, disable_prefill_cuda_graph=True), CHAIN,
                      QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertFalse({"chunked_prefill_size", "disable_prefill_cuda_graph"} & set(given.args))
-        self.assertNotIn("chunked_prefill_size", plan(args(chunked_prefill_size=-1), VERIFIED, QWEN38_27B_NVFP4,
+        self.assertNotIn("chunked_prefill_size", plan(chain_args(chunked_prefill_size=-1), CHAIN, QWEN38_27B_NVFP4,
                                                       DFLASH2, capability=RTX).args)
         with self.assertRaisesRegex(LaunchConfigError, "--chunked-prefill-size 4096 or more, got 512"):
-            plan(args(chunked_prefill_size=512), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+            plan(chain_args(chunked_prefill_size=512), CHAIN, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         parity = plan(args(), {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
         self.assertFalse({"chunked_prefill_size", "disable_prefill_cuda_graph"} & set(parity.args))
 
     def test_measured_settings_given_explicitly_pass_the_first_validation(self):
         # The plugin validates before plan() runs; the verified lane's other settings are filled in.
-        for environ, width in (({"AX_SSM_POSITIONS": "8"}, 8),
-                               ({"AX_CHAIN_GRAPH_WIDTHS": "8", "AX_CHAIN_DRAFT_WIDTHS": "8",
-                                 "AX_SSM_POSITIONS": "8"}, 8),
-                               ({"AX_TREE": "0"}, None)):      # no tree setting yet: nothing to fill in
+        for environ, width in (({"FC1_TREE_N": "8", "AX_CHAIN_WIDTH": "8"}, 8), ({}, None)):
             with self.subTest(environ=environ):
-                config, provisional = startup_config({**VERIFIED, **environ}, hooks_available=True)
+                config, provisional = startup_config({**CHAIN, **environ}, hooks_available=True)
                 self.assertTrue(provisional)
                 self.assertEqual(config.chain_width, width)
 
@@ -231,11 +221,21 @@ class DoctorTests(unittest.TestCase):
     TREE_ARGV = ["target", "--speculative-algorithm", TREE, "--speculative-draft-model-path", "draft",
                  "--speculative-num-draft-tokens", "16"]
 
-    def test_a_measured_tree_launch_is_supported(self):
+    CHAIN_ARGV = TREE_ARGV[:-1] + ["8"]
+
+    def test_a_tree_launch_is_supported_without_an_exact_output_claim(self):
         report = self.report(self.TREE_ARGV)
         self.assertEqual((report["status"], report["errors"], report["route"]), ("supported", [], "tree"))
         self.assertEqual(report["derived"]["env"]["AX_GDN_LAYERS"]["value"], "48")
-        self.assertEqual(report["quality"]["exact_output"]["status"], EXACT_MEASURED)
+        self.assertEqual(report["quality"]["exact_output"]["status"], EXPERIMENTAL)
+        self.assertFalse(report["quality"]["claims_exact_output"])
+        chain = self.report(self.CHAIN_ARGV, CHAIN)
+        self.assertEqual((chain["status"], chain["errors"], chain["route"]), ("supported", [], "chain"))
+        self.assertEqual(chain["quality"]["exact_output"]["status"], EXACT_MEASURED)
+        self.assertTrue(chain["quality"]["claims_exact_output"])
+        refused = self.report(self.TREE_ARGV, VERIFIED)
+        self.assertEqual(refused["status"], "unsupported")
+        self.assertIn("Use the chain route", refused["errors"][0])
         self.assertEqual(report["target"]["qualified_as"], "qwen3.8-27b-nvfp4")
         self.assertFalse(report["gdn_chain_replay"]["eligible"])
         json.dumps(report)
@@ -327,7 +327,6 @@ class DoctorTests(unittest.TestCase):
         report = self.report(self.TREE_ARGV, environ)
         self.assertEqual(report["errors"], [])
         self.assertTrue(report["derived"]["args"]["disable_radix_cache"]["value"])
-        self.assertEqual(self.report(self.TREE_ARGV, VERIFIED)["errors"], [])
 
     def test_backend_flags_reach_the_launch_rules(self):
         report = self.report(self.TREE_ARGV + ["--attention-backend", "triton"], {"AX_NVFP4_VERIFY_PARITY": "1"})

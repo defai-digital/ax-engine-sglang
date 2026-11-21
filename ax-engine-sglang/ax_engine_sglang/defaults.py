@@ -35,15 +35,10 @@ PARITY_TREE_ENV = {"FC1_FUSED": "0", "FC1_TREE_N": "16", "AX_GDN_RECURRENT_VERIF
                    "AX_DFLASH_JOINT_SAMPLING": "1"}
 # ServerArgs field: (value, command-line flag).
 # AX_QUALITY_PROFILE=verified: the measured lanes of benchmarks/sglang/bench_27b_nvfp4.py --verify-parity.
-# A tree server ran its chain rounds (two or more requests) on a private width-8 graph; chain rounds
-# on the tree's own graph differed from AR. The chain server drafted and verified 8 tokens.
-VERIFIED_ENV = {
-    "tree": {"FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8",
-             "AX_CHAIN_DRAFT_WIDTHS": "8", "AX_SSM_POSITIONS": "8"},
-    "chain": {"FC1_TREE_N": "8", "AX_CHAIN_WIDTH": "8"},
-    "ar": {},
-}
-VERIFIED_BLOCK = {"tree": 16, "chain": 8}
+# The chain server drafted and verified 8 tokens. The tree route has no entry: its rows do not
+# admit the profile (tree rounds left the AR sequence after a few hundred tokens).
+VERIFIED_ENV = {"chain": {"FC1_TREE_N": "8", "AX_CHAIN_WIDTH": "8"}, "ar": {}}
+VERIFIED_BLOCK = {"chain": 8}
 # One prefill pass per prompt (a 512-token chunk changed a 2,266-token prompt's first token), and
 # no prefill graphs, as in the RTX 5090 lanes.
 VERIFIED_PREFILL_CHUNK = 4096
@@ -90,7 +85,7 @@ def env_defaults(environ: Mapping[str, str], tree: bool) -> dict[str, str]:
         if verified_requested(environ):
             values["AX_NVFP4_VERIFY_PARITY"] = "1"
             if tree:
-                values.update(VERIFIED_ENV[route_of(TREE_ALGORITHM, environ)])
+                values.update(VERIFIED_ENV.get(route_of(TREE_ALGORITHM, environ), {}))
     return values
 
 

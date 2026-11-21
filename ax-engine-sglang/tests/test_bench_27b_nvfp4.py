@@ -65,10 +65,12 @@ class ArgumentTests(unittest.TestCase):
                                        "--context-length", "4314")[0], 0)
 
     def test_the_verified_profile_lanes_leave_the_settings_to_the_launcher(self):
-        self.base[-1:] = ["ar", "tree16", "chain8"]
+        self.base[-1:] = ["ar", "tree16"]
+        self.assertIn("refuses the tree route", self.run_main("--verified-profile")[1])
+        self.base[-1:] = ["ar", "chain8"]
         self.assertEqual(self.run_main("--verified-profile")[0], 0)
         args = self.lanes[0]
-        for lane, block, tree in (("ar", None, None), ("tree16", "16", None), ("chain8", "8", "0")):
+        for lane, block, tree in (("ar", None, None), ("chain8", "8", "0")):
             command, flags, algorithm = bench.launch_config(args, lane)
             self.assertEqual({name: value for name, value in flags.items() if name.startswith(("AX_", "FC1_"))},
                              {"AX_QUALITY_PROFILE": "verified", **({"AX_TREE": tree} if tree else {})})

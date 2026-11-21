@@ -35,21 +35,32 @@ class Qualification:
                 "conditions": list(self.conditions)}
 
 
+_EVIDENCE = ("docs/reports/2026-11-21-verified-profile-gate.md",
+             "results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest",
+             "docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md")
+_CONDITIONS = ("each prompt fits one prefill chunk (set to 4,096 tokens; a 512-token chunk changed a "
+               "2,266-token prompt's first token)",
+               "greedy requests; 10 distinct prompts of 23 to 2,266 tokens were measured")
+
+# RTX PRO 6000, 2026-11-21, launched with the profile alone: every sequence equal to AR at concurrency 1.
 _SM120_27B = Qualification(
     EXACT_MEASURED,
-    "RTX 5090: 100 of 100 sequences equal to serialized AR at concurrency 1 and 2, 128 tokens. "
-    "RTX PRO 6000: 10 of 10 per lane, concurrency 1 and 8. Below the 1,000-sequence release gate; "
-    "concurrency 8 on the RTX 5090 and 1,024-token outputs are not measured",
-    ("results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest",
-     "docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md"),
-    ("each prompt fits one prefill chunk (set to 4,096 tokens; a 512-token chunk changed a "
-     "2,266-token prompt's first token)",
-     "greedy requests of at most 128 output tokens were compared",),
-)
+    "RTX PRO 6000: 1,000 of 1,000 sequences of 128 tokens and 120 of 120 of 1,024 tokens equal to "
+    "serialized AR, at concurrency 1, 2 and 8. RTX 5090: 100 of 100 at concurrency 1 and 2, 128 tokens. "
+    "Below the release gate: 10 distinct prompts, and 120 sequences of 1,024 tokens",
+    _EVIDENCE, _CONDITIONS)
+
+# The tree route (one running request) left the AR sequence after 329 and 492 tokens on 2 of 10 prompts.
+_SM120_27B_TREE = Qualification(
+    EXPERIMENTAL,
+    "tree rounds equalled AR for 128 tokens (1,000 of 1,000 sequences) but not for 1,024: 2 of 10 "
+    "prompts differed from token 329 and 492, the same way in both passes (RTX PRO 6000). "
+    "Use the chain route: AX_TREE=0 with --speculative-num-draft-tokens 8",
+    _EVIDENCE, _CONDITIONS)
 
 # (CUDA compute capability, target, route) -> measured qualification.
 ROWS: Mapping[tuple[tuple[int, int], str, str], Qualification] = {
-    ((12, 0), QWEN38_27B_NVFP4, route): _SM120_27B for route in ROUTES
+    ((12, 0), QWEN38_27B_NVFP4, route): _SM120_27B_TREE if route == "tree" else _SM120_27B for route in ROUTES
 }
 
 

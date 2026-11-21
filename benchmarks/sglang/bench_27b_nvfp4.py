@@ -16,6 +16,7 @@ import urllib.request
 
 DEFAULT_LANES = ("ar", "stock8", "tree32")
 PARITY_LANES = ("ar", "tree16", "chain8")
+VERIFIED_LANES = ("ar", "chain8")      # the routes AX_QUALITY_PROFILE=verified admits
 LANES = (*DEFAULT_LANES, "replay8", "tree16", "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 
@@ -39,10 +40,9 @@ def verified_launch(args, lane):
              "SGLANG_FLASHINFER_WORKSPACE_SIZE": str(64 * 1024 * 1024)}
     if lane == "ar":
         return command, flags, None
-    if lane == "chain8":
-        flags["AX_TREE"] = "0"
+    flags["AX_TREE"] = "0"
     command += ["--speculative-algorithm", "FC1_DFLASH_TREE", "--speculative-draft-model-path",
-                str(args.draft.resolve()), "--speculative-num-draft-tokens", "16" if lane == "tree16" else "8"]
+                str(args.draft.resolve()), "--speculative-num-draft-tokens", "8"]
     return command, flags, "FC1_DFLASH_TREE"
 
 
@@ -190,7 +190,7 @@ def main():
     parser.add_argument("--verify-parity", action="store_true",
                         help="enable AX NVFP4 parity for AR, tree, and chain lanes")
     parser.add_argument("--verified-profile", action="store_true",
-                        help="launch the ar, tree16 and chain8 lanes with AX_QUALITY_PROFILE=verified alone")
+                        help="launch the ar and chain8 lanes with AX_QUALITY_PROFILE=verified alone")
     parser.add_argument("--slots", type=int, choices=(2, 4, 8), default=2)
     parser.add_argument("--kv-tokens", type=int, default=4096)
     parser.add_argument("--context-length", type=int, default=4096)
@@ -209,9 +209,12 @@ def main():
         parser.error("--verify-parity and --verified-profile are separate runs")
     args.verify_parity = args.verify_parity or args.verified_profile   # the same lanes and comparison
     if args.lanes is None:
-        args.lanes = PARITY_LANES if args.verify_parity else DEFAULT_LANES
+        args.lanes = (VERIFIED_LANES if args.verified_profile else PARITY_LANES if args.verify_parity
+                      else DEFAULT_LANES)
+    if args.verified_profile and any(lane not in VERIFIED_LANES for lane in args.lanes):
+        parser.error("--verified-profile supports the ar and chain8 lanes: the profile refuses the tree route")
     if args.verify_parity and any(lane not in PARITY_LANES for lane in args.lanes):
-        parser.error("--verify-parity and --verified-profile support the ar, tree16, and chain8 lanes")
+        parser.error("--verify-parity supports the ar, tree16, and chain8 lanes")
     if not args.verify_parity and "chain8" in args.lanes:
         parser.error("chain8 requires --verify-parity or --verified-profile")
     raw_prompts = args.input_ids.read_bytes()

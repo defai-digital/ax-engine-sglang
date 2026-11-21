@@ -24,7 +24,7 @@ def launch(args, lane):
         "--max-total-tokens", str(args.kv_tokens), "--mem-fraction-static", str(args.mem_fraction_static),
         "--skip-server-warmup", "--random-seed", "42",
         "--speculative-algorithm", "FC1_DFLASH_TREE", "--speculative-draft-model-path",
-        str(args.draft.resolve()), "--speculative-num-draft-tokens", "16",
+        str(args.draft.resolve()), "--speculative-num-draft-tokens", "16", *args.server_args,
     ]
     flags = {"SGLANG_PLUGINS": "ax-engine", "AX_CHAIN_GRAPH_WIDTHS": " ".join(map(str, args.widths)),
              "AX_TIME": "1"}
@@ -47,7 +47,11 @@ def run_lane(args, lane, prompts):
     with (out / "server.log").open("w") as log:
         process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            bench.wait_for_server(process, base_url, args.target, "FC1_DFLASH_TREE")
+            info = bench.wait_for_server(process, base_url, args.target, "FC1_DFLASH_TREE")
+            # SGLang lowers the request limit when the GDN state cache is too small for it.
+            if info.get("max_running_requests", args.slots) < max(args.concurrency):
+                raise RuntimeError(f"the server runs {info.get('max_running_requests')} requests at once, fewer "
+                                   f"than --concurrency {max(args.concurrency)}; see its log")
             bench.run_pass(base_url, prompts[:args.slots], args.slots, 32, True)
             rows = []
             for sweep in range(args.sweeps):
@@ -72,6 +76,8 @@ def main():
     parser.add_argument("--widths", type=int, nargs="+", default=[16, 8])
     parser.add_argument("--lanes", nargs="+", help="w<width> or adaptive; default: every width, then adaptive")
     parser.add_argument("--adaptive-env", nargs="*", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--server-args", default="", type=str.split,
+                        help="more server arguments for every lane, one quoted string")
     parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 2, 4, 8])
     parser.add_argument("--sweeps", type=int, default=2)
     parser.add_argument("--repeat", type=int, default=4)
