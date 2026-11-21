@@ -129,11 +129,39 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
-#### RTX PRO 6000 · Qwen3.8-27B NVFP4
+#### RTX PRO 6000 · Qwen3.8-27B BF16 and NVFP4
 
-All three routes used SGLang 0.5.23, the same target checkpoint, frozen
-inputs and fixed 128-token greedy outputs.
-Rates are end-to-end output tok/s pooled over two passes in speed mode.
+Two passes per route used 128-token greedy outputs. Cells give end-to-end
+output tok/s in code / math / chat order.
+
+![RTX PRO 6000 Qwen3.8-27B BF16 and NVFP4 throughput at concurrency eight by workload and serving route.](docs/figures/rtx-pro-6000-27b-retest-throughput.svg)
+
+##### BF16
+
+| Clients | Stock AR | Stock DFlash2 | AX tree / chain |
+|---:|---:|---:|---:|
+| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | **184.3** / **163.2** / **94.1** |
+| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **510.8** / **572.0** / **335.1** |
+
+##### NVFP4
+
+| Clients | Stock AR | Stock DFlash2 | AX tree / chain | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | **324.7** / **270.9** / **152.2** | 235.8 / 195.2 / 128.9 |
+| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8** / **898.1** / **580.8** |
+
+At eight clients, BF16 chat reached 335.1 tok/s on AX tree/chain and
+333.7 on stock DFlash2. NVFP4 GDN replay raised chat throughput from
+505.3 to **580.8 tok/s (+14.9%)** and matched stock on all 48 greedy chat
+outputs. The reverse-order run measured an 11.2% gain and matched 38 of 48
+stock outputs.
+[RTX PRO 6000 retest and latency results](results/rtx_pro_6000_retest/REPORT.md)
+
+##### RTX PRO 6000 · Qwen3.8-27B NVFP4
+
+The original speed sweep used SGLang 0.5.23, the same target checkpoint,
+ten frozen prompts and fixed 128-token greedy outputs. Rates are end-to-end
+output tok/s pooled over two passes in speed mode.
 
 ![RTX PRO 6000 throughput for stock SGLang AR, stock DFlash2 and the AX Engine add-on at concurrency 1 and 8. The add-on leads at concurrency 1. The two speculative routes are close at concurrency 8.](docs/figures/rtx-27b-nvfp4-throughput.svg)
 
@@ -240,6 +268,23 @@ BF16 used a 384-token limit.
 [Thor workload details and launch settings](docs/performance.md#jetson-thor--qwen38-27b)
 
 ### Qwen3.8-Flash-Next
+
+#### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
+
+One GPU served Flash Next with pinned-host FP8 PLE. Cells give end-to-end
+output tok/s in code / math / chat order on the same prompt sets.
+
+![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3 and AX MTP3 and MTP7 at concurrency eight by workload.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 82.2 / 82.9 / 79.2 | 179.1 / 163.8 / **137.0** | 181.5 / 163.3 / 132.7 | **209.1** / **170.7** / 116.9 |
+| 8 | 412.5 / 415.9 / 376.5 | 621.7 / 572.4 / 423.0 | 650.4 / **576.5** / **452.0** | **679.7** / 555.3 / 356.9 |
+
+At eight clients, AX MTP3 led chat at **452.0 tok/s** (+6.8% over stock
+MTP3). AX MTP7 led code at **679.7 tok/s**. Greedy chat outputs varied
+between repeats on these serving routes.
+[RTX PRO 6000 Flash Next retest](results/rtx_pro_6000_retest/REPORT.md#qwen38-flash-next-nvfp4)
 
 #### Two B300 GPUs · Qwen3.8-Flash-Next BF16
 
