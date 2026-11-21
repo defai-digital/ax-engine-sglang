@@ -88,10 +88,16 @@ checkpoint. Flash Next uses its own NVFP4 MoE and PLE settings.
 The target verifies each speculative proposal on the configured numerical
 path. The RTX speed profile uses batched verification. The opt-in parity
 profile uses matched AR and verification settings, so its speculative
-lanes reproduce its own AR reference. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles)
+lanes reproduce its own AR reference over 128 tokens. Over 1,024 tokens the
+chain route still did and the tree route did not, on an RTX PRO 6000.
+`AX_QUALITY_PROFILE=verified` starts the measured chain or AR settings and
+refuses anything without exact-output evidence. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles) · [Verified profile](../ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
 
 ## Validate a deployment
 
+- `ax-engine-sglang doctor <model> <speculative flags>` applies the launch
+  rules to a planned launch without loading weights and reports whether it is
+  supported, the settings it would derive and its exact-output qualification.
 - [Serving performance](performance.md) compares stock AR, stock speculation and the add-on under the recorded conditions.
 - [SGLang benchmark guide](../benchmarks/sglang/) covers baseline launches,
   mixed requests, cancellation, greedy token identity and sampled distributions.

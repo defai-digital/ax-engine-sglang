@@ -149,6 +149,32 @@ with the same bits. Parity tree 16 reached 128.53 tok/s at C1, tree 32 131.58,
 chain 8 115.43 and tree 64 114.10; AR stayed at 51.82 with the same outputs.
 [Value tile measurements](reports/2026-11-20-rtx-nvfp4-parity-forced-128.md#narrower-gdn-value-tile)
 
+### Verified profile gate
+
+`AX_QUALITY_PROFILE=verified` was then launched by itself on an RTX PRO 6000
+with eight slots, so the launcher derived the parity settings (prefill chunk
+4,096, no prefill graphs, radix cache and autotune off). Each lane sent the ten
+frozen prompts repeatedly; every sequence was compared with AR alone.
+
+| RTX PRO 6000, verified profile, eight slots | Equal to AR, 128 tokens | Equal to AR, 1,024 tokens | C1 tok/s | C8 tok/s, 128 / 1,024 tokens |
+|---|---:|---:|---:|---:|
+| AR | 1,000 of 1,000 | 120 of 120 | 52–54 | 362 / 356 |
+| DFlash2 chain, width 8 | 1,000 of 1,000 | 120 of 120 | 109–113 | 489 / 561 |
+| DFlash2 tree, 16 nodes | 1,000 of 1,000 | 116 of 120 | 126–132 | 499 / 592 |
+
+The tree lane's four unequal sequences are two prompts in two passes at
+concurrency one, from output tokens 329 and 492; its chain rounds (two or more
+requests) matched. The profile now refuses the tree route. The sequences are
+ten distinct prompts repeated at concurrency 1, 2 and 8.
+
+The same session compared `AX_POLICY_MODE=adaptive` with fixed chain widths on
+the speed profile with eight requests running. Width 16 was 8% faster at
+concurrency two (286 against 265 tok/s) and width 8 was 20% faster at
+concurrency eight (699 against 584 tok/s). The adaptive policy reached 706
+tok/s at concurrency eight and 269 tok/s at concurrency two, so it stays
+experimental and off by default.
+[Gate, adaptive comparison and limits](reports/2026-11-21-verified-profile-gate.md)
+
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with

@@ -191,6 +191,16 @@ reached 126.59 tok/s at C1, and no speed-profile lane kept its outputs at
 concurrency eight. The parity AR reference differs from packed AR.
 [RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
 
+Those comparisons cover 128 tokens. With 1,024-token outputs, AR and chain 8
+still equalled the AR reference on every sequence at concurrency 1, 2 and 8,
+but the tree route differed on two of ten prompts, from output tokens 329 and
+492. `AX_QUALITY_PROFILE=verified` applies the measured parity settings and
+starts only on a route with exact-output evidence: AR, or the chain route
+(`AX_TREE=0`, draft block 8) at 109–113 tok/s alone and 489–561 tok/s at
+concurrency eight. It refuses the tree route. `ax-engine-sglang doctor` checks
+a launch against these rules without loading the model.
+[Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Profile settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
+
 ### GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 One 32 GB RTX 5090 ran SGLang 0.5.23 with two GPU request slots. Each

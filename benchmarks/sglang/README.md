@@ -38,7 +38,8 @@ baseline that enters a comparison on one version.
 
 | Entry point | Purpose |
 |---|---|
-| `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark. Use `--verify-parity` to compare AX AR, tree 16 and chain 8 bit for bit. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. |
+| `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark. Use `--verify-parity` to compare AX AR, tree 16 and chain 8 bit for bit, or `--verified-profile` to launch AR and chain 8 with `AX_QUALITY_PROFILE=verified` alone and compare them the same way; `--slots`, `--concurrency`, `--repeat` and `--output-tokens` size the passes. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. |
+| `ab_adaptive_width.py` | Throughput of `AX_POLICY_MODE=adaptive` against each fixed chain width on the same captured graphs. It compares the request limit the server reports with the sweep's concurrency; also check the server log for `max_running_requests is capped`, which SGLang prints when the GDN state cache lowers the limit |
 | `run_stage1a.sh` | Qwen3.8-27B comparison with greedy, sampling and multi-user checks |
 | `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes |
 | `run_paired.sh` | Repeat matched benchmark lanes for paired statistics |
