@@ -349,7 +349,10 @@ partial prefix hits. Prefill graphs stay on. With `FC1_DFLASH_TREE` they also se
 verify backend. Recurrent verification is one launch of SGLang's verify kernel
 per layer, with a parent table that makes it match unpacked decode bit for bit.
 `AX_SSM_POSITIONS=8` lets tree 64 run with eight slots: a tree round serves one
-request and uses the whole capped snapshot buffer as one row. A stock speculative algorithm, another attention or NVFP4 GEMM
+request and uses the whole capped snapshot buffer as one row. On SM12x, GDN
+decode and verification use 8 value columns per program instead of SGLang's 32;
+tiles of 8, 16 and 32 gave the same bits, and parity tree 32 rose from 120.05
+to 131.58 tok/s alone with the same outputs. A stock speculative algorithm, another attention or NVFP4 GEMM
 backend, or `AX_CHAIN_ATTN` stops the launch, because those paths bypass the
 matched verification. The earlier RTX PRO 6000 measurements used the generic
 FP8 path and recorded matches at concurrency two, three and eight.
