@@ -37,8 +37,11 @@ def launch(args, lane):
         flags.update(args.adaptive_env)
     elif lane == "table":
         flags["AX_CHAIN_WIDTH_BY_BATCH"] = args.table
+    elif lane == "schedule":
+        flags["AX_CHAIN_SCHEDULE"] = args.schedule
     else:
         flags["AX_CHAIN_WIDTH"] = lane[1:]
+    flags.update(args.env)
     return command, flags
 
 
@@ -83,9 +86,13 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--widths", type=int, nargs="+", default=[16, 8])
     parser.add_argument("--lanes", nargs="+",
-                        help="w<width>, table or adaptive; default: every width, then table and adaptive")
+                        help="w<width>, table, schedule or adaptive; default: every width, then table and adaptive")
     parser.add_argument("--table", default="1:16,5:8", help="AX_CHAIN_WIDTH_BY_BATCH of the table lane")
+    parser.add_argument("--schedule", default="16x31,8x1",
+                        help="AX_CHAIN_SCHEDULE of the schedule lane: width changes without a policy")
     parser.add_argument("--adaptive-env", nargs="*", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--env", nargs="*", default=[], metavar="NAME=VALUE",
+                        help="more plugin settings for every lane, such as AX_ROUND_DUMP=/path")
     parser.add_argument("--server-args", default="", type=str.split,
                         help="more server arguments for every lane, one quoted string")
     parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 2, 4, 8])
@@ -98,6 +105,7 @@ def main():
     parser.add_argument("--port", type=int, default=30000)
     args = parser.parse_args()
     args.adaptive_env = dict(item.split("=", 1) for item in args.adaptive_env)
+    args.env = dict(item.split("=", 1) for item in args.env)
     lanes = args.lanes or [f"w{width}" for width in args.widths] + ["table", "adaptive"]
     if max(args.concurrency) > args.slots:
         parser.error("--concurrency must not exceed --slots")
