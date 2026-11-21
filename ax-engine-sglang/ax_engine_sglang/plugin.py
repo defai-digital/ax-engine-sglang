@@ -12,13 +12,14 @@ _tree_installed = False
 class TreeSpec(CustomSpecAlgo):
 
     def handle_server_args(self, server_args):
-        if get_config().ssm_positions and not server_args.disable_radix_cache:
+        config = get_config()
+        if config.ssm_positions and not server_args.disable_radix_cache:
             raise ValueError("AX_SSM_POSITIONS requires --disable-radix-cache")
         _install_tree()
         SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
         from sglang.srt.arg_groups.overrides import declare_resolution
-        declare_resolution(server_args, 'fc1_chain_tree', speculative_eagle_topk=2)
-        config = get_config()
+        # A chain-only server captures its main graph with the same backend mode it uses at replay.
+        declare_resolution(server_args, 'fc1_chain_tree', speculative_eagle_topk=2 if config.tree else 1)
         if config.tree64:
             declare_resolution(server_args, 'fc1_tree64', speculative_num_draft_tokens=config.tree_nodes, speculative_num_steps=config.draft_block - 1)
 for name, value in vars(SpeculativeAlgorithm).items():

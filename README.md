@@ -212,6 +212,11 @@ with verification parity disabled. Both speculative routes matched packed
 AR on 0 of 10 complete outputs per pass at concurrency one.
 [Full RTX 5090 benchmark and launch settings](results/rtx_5090_27b_nvfp4/REPORT.md)
 
+The optional FP8 parity retest used the same prompts and 128-token outputs.
+AR, tree 16 and chain 8 each matched all 100 sequences from the serialized
+AR reference across concurrency one and two.
+[RTX 5090 parity results](results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest)
+
 #### Experimental recurrent GDN replay
 
 The width-eight DFlash2 follow-up used the same checkpoint, inputs, and

@@ -80,11 +80,38 @@ class VerifyProjectionTests(unittest.TestCase):
                                         sm120_fp8_alpha=torch.tensor([0.02], device="cuda"),
                                         weight_scale=torch.tensor([1.0], device="cuda"),
                                         use_flashinfer_bmm=True)
-                x = torch.randn(64, inputs, dtype=torch.bfloat16, device="cuda", generator=generator)
-                alone = torch.cat([method.apply(layer, row.contiguous()) for row in x.split(1)])
-                for count in (2, 3, 4, 8, 9, 16, 17, 32, 64):
+                x = torch.randn(512, inputs, dtype=torch.bfloat16, device="cuda", generator=generator)
+                alone = torch.cat([method.apply(layer, row) for row in x.split(1)])
+                for count in (2, 3, 4, 8, 9, 16, 17, 32, 64, 65, 129, 512):
                     with self.subTest(inputs=inputs, outputs=outputs, rows=count):
-                        self.assertTrue(torch.equal(method.apply(layer, x[:count].contiguous()), alone[:count]))
+                        torch.testing.assert_close(method.apply(layer, x[:count]), alone[:count], atol=0, rtol=0)
+            raise RuntimeError("end patch scope")
+
+    def test_invariant_gemm_accepts_prequantized_inputs_in_a_cuda_graph(self):
+        from sglang.kernels.ops.quantization.fp8_kernel import static_quant_fp8
+
+        generator = torch.Generator(device="cuda").manual_seed(4112)
+        x = torch.randn(8, 2, 5120, dtype=torch.bfloat16, device="cuda", generator=generator).transpose(0, 1)
+        weight = torch.randn(8192, 5120, dtype=torch.bfloat16, device="cuda", generator=generator)
+        bias = torch.randn(8192, dtype=torch.bfloat16, device="cuda", generator=generator)
+        scale = torch.tensor([0.02], device="cuda")
+        layer = SimpleNamespace(weight=weight.to(torch.float8_e4m3fn).T,
+                                input_scale=scale, weight_scale=torch.ones_like(scale))
+        method = SimpleNamespace(use_marlin=False, cutlass_fp8_supported=True)
+        quantized, _ = static_quant_fp8(x.reshape(-1, x.shape[-1]), scale)
+        quantized = quantized.reshape(x.shape)
+
+        with self.assertRaisesRegex(RuntimeError, "end patch scope"), installation():
+            ax_nvfp4_verify.install(0)
+            apply = ModelOptFp8LinearMethod.apply
+            expected = apply(method, layer, x, bias)
+            torch.testing.assert_close(apply(method, layer, quantized, bias), expected, atol=0, rtol=0)
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                actual = apply(method, layer, quantized, bias)
+            graph.replay()
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
             raise RuntimeError("end patch scope")
 
     def test_fixed_row_groups_match_between_decode_and_verify(self):

@@ -15,7 +15,8 @@ import urllib.request
 
 
 DEFAULT_LANES = ("ar", "stock8", "tree32")
-LANES = (*DEFAULT_LANES, "replay8", "tree16")
+PARITY_LANES = ("ar", "tree16", "chain8")
+LANES = (*DEFAULT_LANES, "replay8", "tree16", "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 
 
@@ -26,34 +27,45 @@ def write_json(path, value):
 
 
 def launch_config(args, lane):
+    # Fit the entire frozen prompt in one prefill pass for the parity comparison.
+    prefill_size = "4096" if args.verify_parity else "512"
     command = [
         sys.executable, "-m", "sglang.launch_server", "--model-path", str(args.target.resolve()),
         "--host", "127.0.0.1", "--port", str(args.port), "--attention-backend", "flashinfer",
         "--fp4-gemm-backend", "flashinfer_cutlass", "--max-running-requests", str(args.slots),
         "--cuda-graph-max-bs-decode", str(args.slots), "--context-length", "4096",
         "--max-total-tokens", str(args.kv_tokens), "--mem-fraction-static", str(args.mem_fraction_static),
-        "--chunked-prefill-size", "512", "--skip-server-warmup",
+        "--chunked-prefill-size", prefill_size, "--skip-server-warmup",
         "--disable-radix-cache", "--disable-flashinfer-autotune", "--disable-prefill-cuda-graph",
         "--random-seed", "42",
     ]
     flags = {"SGLANG_PLUGINS": "none", "SGLANG_FLASHINFER_WORKSPACE_SIZE": str(64 * 1024 * 1024)}
+    if args.verify_parity:
+        flags.update(SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1", AX_NVFP4_PARITY_ROWS="0")
     if lane == "ar":
         return command, flags, None
     tree = lane in ("tree16", "tree32")
-    algorithm = "FC1_DFLASH_TREE" if tree else "DFLASH"
+    custom_dflash = tree or lane == "chain8"
+    algorithm = "FC1_DFLASH_TREE" if custom_dflash else "DFLASH"
+    draft_block = "16" if tree else "8"
     command += ["--speculative-algorithm", algorithm, "--speculative-draft-model-path",
-                str(args.draft.resolve()), "--speculative-num-draft-tokens", "16" if tree else "8"]
-    if not tree:
+                str(args.draft.resolve()), "--speculative-num-draft-tokens", draft_block]
+    if not custom_dflash:
         command += ["--mamba-ssm-dtype", "float32", "--linear-attn-verify-backend", "triton"]
     if lane == "replay8":
         flags.update(SGLANG_PLUGINS="ax-engine", AX_GDN_CHAIN_REPLAY="1", AX_FI_OFFSET_FIX="0")
-    if tree:
+    if custom_dflash:
         flags.update(
-            SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="0", AX_FAST="1", AX_LATTICE="1",
-            AX_GDN_LAYERS="48", AX_GDN_HEADS="48", FC1_TREE64="1", FC1_TREE_N=lane[4:], FC1_DRAFT_BLOCK="16",
-            FC1_BRANCH_PILOT="1", FC1_OURS="1", FC1_FUSED="1", FC1_COMPILE_BUILD="1", AX_TREE="1",
-            AX_CHAIN_WIDTH="8", AX_CHAIN_GRAPH_WIDTHS="8", AX_CHAIN_DRAFT_WIDTHS="8", AX_SSM_POSITIONS="8",
+            SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1" if args.verify_parity else "0",
+            AX_FAST="1", AX_LATTICE="1", AX_GDN_LAYERS="48", AX_GDN_HEADS="48", FC1_TREE64="1",
+            FC1_TREE_N=lane[4:] if tree else "8", FC1_DRAFT_BLOCK=draft_block,
+            FC1_BRANCH_PILOT="1", FC1_OURS="1", FC1_FUSED="0" if args.verify_parity else "1",
+            FC1_COMPILE_BUILD="1", AX_TREE="1" if tree else "0", AX_CHAIN_WIDTH="8",
         )
+        if tree:
+            flags.update(AX_CHAIN_GRAPH_WIDTHS="8", AX_CHAIN_DRAFT_WIDTHS="8", AX_SSM_POSITIONS="8")
+        if args.verify_parity:
+            flags["AX_GDN_RECURRENT_VERIFY"] = "1"
     return command, flags, algorithm
 
 
@@ -97,6 +109,7 @@ def generate(base_url, input_ids, length, speculative):
 def run_pass(base_url, prompts, concurrency, length, speculative):
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         start = time.perf_counter()
+        # map preserves the frozen prompt order even when requests finish out of order.
         rows = list(pool.map(lambda ids: generate(base_url, ids, length, speculative), prompts))
         wall_s = time.perf_counter() - start
     return {"concurrency": concurrency, "wall_s": wall_s, "output_tokens": length * len(rows),
@@ -140,6 +153,7 @@ def run_lane(args, lane, prompts):
                 print(f"{lane} C{concurrency}: {result['output_tokens'] / result['wall_s']:.2f} output tok/s",
                       flush=True)
             write_json(out / "passes.json", passes)
+            return passes
         finally:
             stop_server(process)
 
@@ -150,18 +164,37 @@ def main():
     parser.add_argument("--draft", type=Path, required=True)
     parser.add_argument("--input-ids", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--lanes", nargs="+", choices=LANES, default=DEFAULT_LANES)
+    parser.add_argument("--lanes", nargs="+", choices=LANES)
+    parser.add_argument("--verify-parity", action="store_true",
+                        help="enable AX NVFP4 parity for AR, tree, and chain lanes")
     parser.add_argument("--slots", type=int, choices=(2, 4, 8), default=2)
     parser.add_argument("--kv-tokens", type=int, default=4096)
     parser.add_argument("--mem-fraction-static", type=float, default=0.94)
     parser.add_argument("--port", type=int, default=30517)
     args = parser.parse_args()
+    if args.lanes is None:
+        args.lanes = PARITY_LANES if args.verify_parity else DEFAULT_LANES
+    if args.verify_parity and any(lane not in PARITY_LANES for lane in args.lanes):
+        parser.error("--verify-parity supports the ar, tree16, and chain8 lanes")
+    if not args.verify_parity and "chain8" in args.lanes:
+        parser.error("chain8 requires --verify-parity")
     raw_prompts = args.input_ids.read_bytes()
     if hashlib.sha256(raw_prompts).hexdigest() != PROMPT_SHA256:
         parser.error("--input-ids must be the published parity-expanded-ids.json asset")
     prompts = json.loads(raw_prompts)
-    for lane in args.lanes:
-        run_lane(args, lane, prompts)
+    runs = {lane: run_lane(args, lane, prompts) for lane in args.lanes}
+    if args.verify_parity:
+        reference_lane = "ar" if "ar" in runs else args.lanes[0]
+        reference = [row["output_ids"] for row in runs[reference_lane][0]["rows"]]
+        failed = False
+        for lane, passes in runs.items():
+            for result in passes:
+                rows = result["rows"]
+                matches = sum(row["output_ids"] == reference[i % len(reference)] for i, row in enumerate(rows))
+                print(f"{lane} C{result['concurrency']} against {reference_lane} C1: {matches}/{len(rows)} exact")
+                failed |= matches != len(rows)
+        if failed:
+            raise SystemExit("Greedy token sequences differ; see the saved passes for each lane")
 
 
 if __name__ == "__main__":

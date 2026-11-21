@@ -322,10 +322,11 @@ The RTX PRO 6000 retest passed real NVFP4 serving and kernel checks. Recurrent
 GDN tree and chain each matched four of seven greedy outputs against RTX AR.
 [RTX PRO 6000 model and kernel results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-27b-nvfp4.md)
 
-For the dense Qwen3.8-27B NVFP4 checkpoint on RTX PRO 6000, the regression
-runner accepts `--nvfp4-verify-parity` for AR, DFlash2 tree and chain.
-It selects FlashInfer paged attention, CUTLASS NVFP4, unpacked GDN
-and an FP8 path that gave a row the same bits at every row count. The serving
+For the dense Qwen3.8-27B NVFP4 checkpoint on SM12x, the regression runner
+accepts `--nvfp4-verify-parity` for AR, DFlash2 tree and chain.
+It selects FlashInfer paged attention, CUTLASS NVFP4 and unpacked GDN.
+The default per-tensor FP8 projection uses a fixed Triton tile in prefill,
+decode and verification to keep the accumulation order stable. The serving
 Python must be able to import `cutlass.cute` from NVIDIA CUTLASS DSL. Use the
 option on both sides of a greedy comparison, because it changes the AR
 numerical reference. `--nvfp4-parity-rows` (`AX_NVFP4_PARITY_ROWS`, default 0)
@@ -333,9 +334,11 @@ must also match on both sides. A value from 1 to 64 keeps SGLang's FP8 kernels
 and pads AR decode and verification to groups of that many rows; that mode
 matched only with one request in flight.
 
-On GeForce RTX 5090, the default FP8 path produced different bits at some
-row counts in the CUDA projection check. The published 5090 throughput
-benchmarks used the speed profile with parity disabled.
+With the current source checkout on GeForce RTX 5090, AR, tree and chain
+each matched the serialized AR reference on 100 of 100 fixed-length
+requests with a 4,096-token prefill chunk limit. A 512-token limit changed
+the 2,266-token prompt's output at concurrency two.
+[RTX 5090 parity retest](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest)
 
 When you launch a server yourself, `AX_NVFP4_VERIFY_PARITY=1` is enough on
 SGLang 0.5.23. The launch defaults add FlashInfer attention, the CUTLASS NVFP4
@@ -348,8 +351,9 @@ per layer, with a parent table that makes it match unpacked decode bit for bit.
 `AX_SSM_POSITIONS=8` lets tree 64 run with eight slots: a tree round serves one
 request and uses the whole capped snapshot buffer as one row. A stock speculative algorithm, another attention or NVFP4 GEMM
 backend, or `AX_CHAIN_ATTN` stops the launch, because those paths bypass the
-matched verification. With the default, outputs under concurrency two, three
-and eight equalled the same requests alone. [Fixed-length results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md) · [One-launch GDN results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-gdn-one-launch.md) · [Invariant GEMM results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-invariant-gemm.md) · [Verification controls](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md) · [Row group results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
+matched verification. The earlier RTX PRO 6000 measurements used the generic
+FP8 path and recorded matches at concurrency two, three and eight.
+[RTX PRO 6000 fixed-length results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md) · [One-launch GDN results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-gdn-one-launch.md) · [Generic FP8 GEMM results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-invariant-gemm.md) · [Verification controls](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-19-rtx-nvfp4-parity.md) · [Row group results](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/reports/2026-11-20-rtx-nvfp4-parity-row-groups.md)
 
 On the Flash Next AR reference server, `AX_GDN_UNPACKED_DECODE=1` selects
 unpacked Triton Gated DeltaNet decode before CUDA graph capture. To reproduce

@@ -104,3 +104,47 @@ follow-up also measured fused tree 16 at 123.88 output tok/s and fused tree
 Use the experimental checkout to run `benchmarks/sglang/bench_27b_nvfp4.py`
 with `--lanes stock8 replay8` at two slots. For the eight-slot run, set
 `--slots 8`. Use the same target, draft and input arguments as above.
+
+## FP8 parity retest
+
+The v0.4.0 FP8 projection differed from singleton decode in 23 of 45
+shape and batch-size combinations on the RTX 5090. The updated parity
+profile uses SGLang's Triton FP8 GEMM with a fixed 64 × 128 × 256 tile for
+per-tensor scales in prefill, decode and target verification.
+
+The chain-only launcher also sets `speculative_eagle_topk=1` during CUDA
+graph capture. A graph captured with tree metadata and replayed in chain
+mode produced different sequences from AR before this fix.
+
+The serving retest used the same Qwen3.8-27B target, DFlash2 drafter and
+ten frozen prompts. Every request generated 128 greedy tokens. Each lane
+ran 10, 40, 40 and 10 requests at concurrency 1, 2, 2 and 1. Every sequence
+was compared to that prompt's result from the first serialized AR pass.
+
+| Parity lane | C1 output tok/s | C1 exact matches | C2 output tok/s | C2 exact matches |
+|---|---:|---:|---:|---:|
+| AR | 53.90 | 20/20 | 103.57 | 80/80 |
+| DFlash2 tree 16 | 123.31 | 20/20 | 184.71 | 80/80 |
+| DFlash2 chain 8 | 105.90 | 20/20 | 180.30 | 80/80 |
+
+The GPU projection suite compared five Qwen projection shapes against
+singleton calls at batch sizes from 2 to 512. It also passed a CUDA graph
+replay check with prequantized FP8 activations and bias. The recurrent GDN
+suite passed 32 chain and tree cases.
+
+Prefill had a 4,096-token chunk limit, large enough for the prompts in
+each batch. An exploratory run with a 512-token limit changed the first
+output token of the 2,266-token prompt on all eight concurrent AR repeats.
+The retest used two slots, a 4,096-token KV budget and 64 MiB FlashInfer
+workspaces. Prefix caching, FlashInfer autotuning and prefill graphs were
+off. Decode and verify graphs were enabled.
+
+Install the plugin from the checkout with the parity fix. With the same
+checkpoint paths and input file as above, run:
+
+```bash
+python -m pip install --no-deps ./ax-engine-sglang
+python benchmarks/sglang/bench_27b_nvfp4.py \
+  --target "$TARGET" --draft "$DRAFT" --input-ids parity-expanded-ids.json \
+  --out results/rtx_5090_27b_nvfp4/parity --verify-parity
+```

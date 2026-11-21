@@ -2,9 +2,9 @@
 
 SGLang selects a different FP8 kernel for each row count, and the SM120 small-row
 kernels and the FlashInfer BMM give a row different bits at different row counts.
-By default (rows 0) every FP8 projection uses SGLang's generic FP8 path. For this
-checkpoint's per-tensor scales that is torch._scaled_mm, which gave a row the same
-bits at every row count, in prefill, decode and verification.
+By default (rows 0), the checkpoint's per-tensor FP8 projections use one Triton
+tile shape in prefill, decode and verification. The tile fixes the accumulation
+order even when cuBLAS would choose a different algorithm for another row count.
 
 A positive row count keeps SGLang's kernel choice instead and pads AR decode and
 verification to fixed groups of that many rows. Prefill is then not matched.
@@ -13,7 +13,7 @@ from contextvars import ContextVar
 import os
 from functools import wraps
 
-from .compat import patch_attribute
+from .compat import patch_attribute, patch_item
 from .defaults import parity_algorithm_error
 
 
@@ -100,19 +100,32 @@ def install(rows=0):
         patch_attribute(method, "apply", wrap_linear(method.apply))
 
     if rows == 0:
-        # SGLang's generic FP8 path (torch._scaled_mm for per-tensor scales) gave a row the
-        # same bits at every row count, unlike the SM120 small-row kernels and the
-        # FlashInfer BMM. Use it in every forward mode, prefill included.
-        # Channelwise scales could otherwise select a Triton tile from the row count.
-        os.environ["SGLANG_ENABLE_FP8_GEMM_CONFIG_TUNE"] = "0"
+        from sglang.kernels.ops.gemm.fp8_kernel import triton_scaled_mm
+        from sglang.kernels.ops.quantization.fp8_kernel import fp8_dtype, static_quant_fp8
+
+        # Keep upstream's generic fallback for other scale layouts and empty inputs.
+        patch_item(os.environ, "SGLANG_ENABLE_FP8_GEMM_CONFIG_TUNE", "0")
         fp8_apply = ModelOptFp8LinearMethod.apply
 
         @wraps(fp8_apply)
         def invariant_fp8(self, layer, x, bias=None):
             if self.use_marlin or not self.cutlass_fp8_supported or not isinstance(x, torch.Tensor):
                 raise RuntimeError("AX_NVFP4_PARITY_ROWS=0 needs SGLang's generic FP8 GEMM, not Marlin")
-            return apply_fp8_linear(input=x, weight=layer.weight, weight_scale=layer.weight_scale,
-                                    input_scale=layer.input_scale, bias=bias, cutlass_fp8_supported=True)
+            scale = layer.input_scale
+            if scale is None or scale.numel() != 1 or scale.ndim >= 2 or layer.weight_scale.numel() != 1 or not x.numel():
+                return apply_fp8_linear(input=x, weight=layer.weight, weight_scale=layer.weight_scale,
+                                        input_scale=scale, bias=bias, cutlass_fp8_supported=True)
+
+            flat = x.reshape(-1, x.shape[-1]).contiguous()
+            if flat.dtype == fp8_dtype:
+                # Match apply_fp8_linear's default for prequantized activations.
+                quantized, out_dtype = flat, torch.bfloat16
+            else:
+                quantized, scale = static_quant_fp8(flat, scale)
+                out_dtype = flat.dtype
+            output = triton_scaled_mm(quantized, layer.weight, scale, layer.weight_scale, out_dtype, bias,
+                                      block_size_m=64, block_size_n=128, block_size_k=256, use_heuristic=False)
+            return output.view(*x.shape[:-1], layer.weight.shape[1])
 
         patch_attribute(ModelOptFp8LinearMethod, "apply", invariant_fp8)
 
