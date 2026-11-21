@@ -34,6 +34,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-running-requests", type=int)
     result.add_argument("--disable-radix-cache", action="store_true")
     result.add_argument("--speculative-adaptive", action="store_true")
+    result.add_argument("--attention-backend")
+    result.add_argument("--fp4-gemm-backend", dest="fp4_gemm_runner_backend")
+    result.add_argument("--linear-attn-verify-backend")
+    result.add_argument("--mamba-ssm-dtype")
+    result.add_argument("--disable-flashinfer-autotune", action="store_true")
     result.add_argument("--sm", help="CUDA compute capability to check, such as 12.0 (default: this machine's GPU)")
     result.add_argument("--json", action="store_true", help="print the report as JSON")
     return result
@@ -66,34 +71,59 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
         max_running_requests=options.max_running_requests, cuda_graph_max_bs_decode=None,
         moe_runner_backend="auto", speculative_moe_runner_backend=None,
         disable_radix_cache=options.disable_radix_cache,
-        speculative_adaptive=options.speculative_adaptive)
+        speculative_adaptive=options.speculative_adaptive,
+        attention_backend=options.attention_backend,
+        fp4_gemm_runner_backend=options.fp4_gemm_runner_backend,
+        linear_attn_verify_backend=options.linear_attn_verify_backend,
+        mamba_ssm_dtype=options.mamba_ssm_dtype,
+        disable_flashinfer_autotune=options.disable_flashinfer_autotune)
     target = load(model, "config.json", options.revision)
     quant = load(model, "hf_quant_config.json", options.revision)
     drafter = load(options.speculative_draft_model_path, "config.json", options.speculative_draft_model_revision)
     algorithm = (options.speculative_algorithm or "").upper()
     errors, warnings = [], []
 
-    if model and target is None:
+    if not model:
+        errors.append("no target model: pass the model directory or repository of the launch")
+    elif target is None:
         warnings.append(f"could not read config.json of {model}")
+    # SGLang 0.5.22 has no resolution hooks: the launcher derives nothing and settings must be explicit.
+    hooks = sglang is None or sglang.split("+")[0] != "0.5.22"
     if sglang is None:
-        warnings.append("SGLang is not installed in this environment")
+        warnings.append("SGLang is not installed in this environment; assuming 0.5.23")
     elif sglang.split("+")[0] not in TESTED_SGLANG:
-        warnings.append(f"SGLang {sglang} is untested (tested: {', '.join(TESTED_SGLANG)})")
+        message = f"SGLang {sglang} is untested (tested: {', '.join(TESTED_SGLANG)})"
+        if environ.get("AX_ALLOW_UNTESTED_SGLANG") == "1":
+            warnings.append(message)
+        else:
+            errors.append(message + "; the plugin refuses to load without AX_ALLOW_UNTESTED_SGLANG=1")
 
-    settings = Plan()
+    # The launcher validates the environment when the plugin loads, before SGLang resolves the
+    # server arguments, and again with the derived defaults.
     try:
-        settings = plan(args, environ, target, drafter, quant, capability)
-    except LaunchConfigError as error:
-        errors.append(str(error))
+        startup_config(dict(environ), hooks_available=hooks)
+    except ValueError as error:
+        errors.append(f"{error} (checked when the plugin loads, before the launch defaults: "
+                      f"set the variables it names explicitly)")
+    settings = Plan()
+    if hooks and not errors:
+        try:
+            settings = plan(args, environ, target, drafter, quant, capability)
+        except LaunchConfigError as error:
+            errors.append(str(error))
     resolved = {**environ, **{name: value for name, (value, _) in settings.env.items()}}
     config = None
     try:
-        config, _ = startup_config(resolved, hooks_available=True)
+        config, _ = startup_config(resolved, hooks_available=hooks)
     except ValueError as error:
         if not errors:   # a refused plan leaves its defaults unset; report the first cause only
             errors.append(str(error))
-    if config and config.policy_mode == "adaptive" and options.speculative_adaptive:
-        errors.append("AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one")
+    if config and algorithm == "FC1_DFLASH_TREE":   # TreeSpec.handle_server_args
+        radix_off = options.disable_radix_cache or settings.args.get("disable_radix_cache", (False,))[0]
+        if config.ssm_positions and not radix_off:
+            errors.append("AX_SSM_POSITIONS requires --disable-radix-cache")
+        if config.policy_mode == "adaptive" and options.speculative_adaptive:
+            errors.append("AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one")
 
     replay = {"requested": environ.get("AX_GDN_CHAIN_REPLAY") == "1", "eligible": True, "reason": None}
     try:
@@ -117,6 +147,7 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
         "errors": errors,
         "warnings": warnings,
         "experimental_features": experimental,
+        "unchecked_flags": list(getattr(options, "unchecked", None) or ()),
         "versions": {"ax_engine_sglang": __version__, "sglang": sglang, "tested_sglang": list(TESTED_SGLANG)},
         "gpu": {"compute_capability": list(capability) if capability else None},
         "target": {
@@ -161,13 +192,15 @@ def render(report: dict) -> str:
             lines.append(f"  auto {name}={item['value']}  [{item['reason']}]")
     lines.extend(f"  note: {note}" for note in report["derived"]["notes"])
     lines.extend(f"experimental: {name}" for name in report["experimental_features"])
+    if report["unchecked_flags"]:
+        lines.append("not checked (flags outside the launch rules): " + " ".join(report["unchecked_flags"]))
     lines.extend(f"warning: {warning}" for warning in report["warnings"])
     lines.extend(f"error: {error}" for error in report["errors"])
     return "\n".join(lines)
 
 
 def main(argv) -> int:
-    options = parser().parse_args(argv)
+    options, options.unchecked = parser().parse_known_args(argv)
     capability = _capability(options.sm) if options.sm else device_capability(SimpleNamespace(device="cuda"))
     report = diagnose(options, os.environ, capability=capability, sglang=_sglang_version())
     print(json.dumps(report, indent=2) if options.json else render(report))

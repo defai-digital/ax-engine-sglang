@@ -191,6 +191,16 @@ def main():
     if hashlib.sha256(raw_prompts).hexdigest() != PROMPT_SHA256:
         parser.error("--input-ids must be the published parity-expanded-ids.json asset")
     prompts = json.loads(raw_prompts)
+    lengths = sorted((len(prompt) for prompt in prompts), reverse=True)
+    if lengths[0] + args.output_tokens > args.context_length:
+        parser.error(f"--context-length must cover the longest prompt and its output "
+                     f"({lengths[0] + args.output_tokens} tokens)")
+    widest = max(concurrency for concurrency, _ in args.concurrent_passes)
+    needed = sum(lengths[:widest]) + widest * args.output_tokens
+    if needed > args.kv_tokens:
+        # A smaller pool queues requests, and the pass would run below its stated concurrency.
+        parser.error(f"--kv-tokens must be at least {needed} for {widest} concurrent requests "
+                     f"of {args.output_tokens} output tokens")
     runs = {lane: run_lane(args, lane, prompts) for lane in args.lanes}
     if args.verify_parity:
         reference_lane = "ar" if "ar" in runs else args.lanes[0]

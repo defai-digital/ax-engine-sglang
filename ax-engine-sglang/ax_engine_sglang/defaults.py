@@ -34,6 +34,9 @@ PARITY_ENV = {"AX_GDN_UNPACKED_DECODE": "1"}
 PARITY_TREE_ENV = {"FC1_FUSED": "0", "FC1_TREE_N": "16", "AX_GDN_RECURRENT_VERIFY": "1",
                    "AX_DFLASH_JOINT_SAMPLING": "1"}
 # ServerArgs field: (value, command-line flag).
+# AX_QUALITY_PROFILE=verified, tree route: the rest of the measured tree-16 lane.
+VERIFIED_TREE_ENV = {"FC1_TREE_N": "16", "AX_CHAIN_GRAPH_WIDTHS": "8", "AX_CHAIN_DRAFT_WIDTHS": "8",
+                     "AX_SSM_POSITIONS": "8"}
 PARITY_ARGS = {"attention_backend": ("flashinfer", "--attention-backend"),
                "fp4_gemm_runner_backend": (CUTLASS, "--fp4-gemm-backend")}
 PARITY_TREE_ARGS = {"linear_attn_verify_backend": ("triton", "--linear-attn-verify-backend")}
@@ -234,6 +237,23 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
             if not row.admits_verified:
                 raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified refused: {row.reason}. "
                                         f"Unset it (or use fast) to run without an exact-output claim")
+            # The rows were measured with 16 tree nodes and chain rounds of width 8. A tree server
+            # ran its chain rounds (two or more requests) on a private width-8 graph: chain rounds
+            # on the tree's own graph differed from AR.
+            measured = {} if route == "ar" else {"AX_CHAIN_WIDTH": "8"}
+            if route == "tree":
+                measured.update(VERIFIED_TREE_ENV)
+            for name, value in measured.items():
+                if environ.get(name) not in (None, "", value):
+                    raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with "
+                                            f"{name}={value}, got {environ[name]}; unset it")
+            if environ.get("AX_CHAIN_SCHEDULE") or (route == "chain" and any(
+                    environ.get(name) for name in ("AX_CHAIN_GRAPH_WIDTHS", "AX_CHAIN_DRAFT_WIDTHS"))):
+                raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified was measured with chain rounds "
+                                        "of width 8 on the server's own graph; unset AX_CHAIN_SCHEDULE, "
+                                        "AX_CHAIN_GRAPH_WIDTHS and AX_CHAIN_DRAFT_WIDTHS")
+            for name, value in measured.items():
+                result.default_env(environ, name, value, "AX_QUALITY_PROFILE=verified: the measured lane")
             result.default_env(environ, "AX_NVFP4_VERIFY_PARITY", "1", "AX_QUALITY_PROFILE=verified")
             result.notes.append(f"verified profile ({route}): {row.status}. {row.reason}")
             result.notes.extend(f"verified profile requires: {condition}" for condition in row.conditions)
@@ -384,7 +404,8 @@ def resolve(server_args, *, environ=None, load: Callable = read_json, capability
     if getattr(server_args, "_ax_defaults_resolved", False):
         return Plan()
     server_args._ax_defaults_resolved = True   # private marker, like SGLang's own _resolved_overrides
-    if environ.get("AX_AUTO_DEFAULTS", "1") == "0" and environ.get("AX_GDN_CHAIN_REPLAY") != "1":
+    if (environ.get("AX_AUTO_DEFAULTS", "1") == "0" and environ.get("AX_GDN_CHAIN_REPLAY") != "1"
+            and not verified_requested(environ)):   # plan() refuses verified without the defaults
         return Plan()
     revision = getattr(server_args, "revision", None)
     target = load(getattr(server_args, "model_path", None), "config.json", revision)

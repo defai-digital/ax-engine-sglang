@@ -197,7 +197,8 @@ class PluginConfig:
         if any(w not in self.graph_widths or w >= self.draft_block for w in self.draft_widths):
             raise ValueError("AX_CHAIN_DRAFT_WIDTHS needs graph widths below FC1_DRAFT_BLOCK")
         if self.ssm_positions:
-            if not (self.fused or self.gdn_recurrent_verify) or not self.tree or self.chain_width is None:
+            if (not (self.fused or self.gdn_recurrent_verify) or not self.tree
+                    or (self.chain_width is None and self.policy_mode != "adaptive")):
                 raise ValueError("AX_SSM_POSITIONS needs FC1_FUSED=1 or AX_GDN_RECURRENT_VERIFY=1, "
                                  "AX_TREE=1 and AX_CHAIN_WIDTH")
             if max((*chain, *self.graph_widths)) > self.ssm_positions:

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE))
+from ax_engine_sglang import runtime
 from ax_engine_sglang.config import get_config
 
 ENV = {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8", "FC1_DRAFT_BLOCK": "16", "FC1_FUSED": "1",
@@ -62,6 +63,7 @@ class AdaptiveChainTests(unittest.TestCase):
         self.enterContext(patch.object(self.chain.time, "perf_counter", lambda: self.clock))
         self.worker = SimpleNamespace(block_size=16, _ax_draft_sets={})
         Tensor.readbacks = 0
+        self.addCleanup(runtime._active.reset, runtime._active.set(None))
 
     def round(self, accepted, seconds, requests=1):
         """One chain decode round: begin, choose the width as `narrow` does, accept, then time passes."""

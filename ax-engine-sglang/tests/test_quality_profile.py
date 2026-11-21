@@ -68,6 +68,7 @@ class VerifiedProfileTests(unittest.TestCase):
     def test_verified_covers_autoregressive_serving(self):
         result = plan(args(None), VERIFIED, QWEN38_27B_NVFP4, None, capability=RTX)
         self.assertEqual(result.env["AX_NVFP4_VERIFY_PARITY"][0], "1")
+        self.assertFalse(any(name.startswith(("AX_CHAIN", "FC1_", "AX_SSM")) for name in result.env))
 
     def test_verified_refuses_unmeasured_launches(self):
         cases = (
@@ -82,6 +83,37 @@ class VerifiedProfileTests(unittest.TestCase):
         for keywords, target, extra, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(LaunchConfigError, message):
                 plan(args(), {**VERIFIED, **extra}, target, DFLASH2, **keywords)
+
+    def test_verified_keeps_the_measured_tree_and_chain_sizes(self):
+        chain = plan(args(), {**VERIFIED, "AX_TREE": "0"}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        self.assertEqual(chain.env["AX_CHAIN_WIDTH"][0], "8")
+        self.assertNotIn("AX_CHAIN_GRAPH_WIDTHS", chain.env)
+        tree = plan(args(), VERIFIED, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        self.assertEqual({name: tree.env[name][0] for name in (
+            "FC1_TREE_N", "AX_CHAIN_WIDTH", "AX_CHAIN_GRAPH_WIDTHS", "AX_CHAIN_DRAFT_WIDTHS", "AX_SSM_POSITIONS")},
+            {"FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8",
+             "AX_CHAIN_DRAFT_WIDTHS": "8", "AX_SSM_POSITIONS": "8"})
+        # The settings the launcher derives make a valid final configuration.
+        config = PluginConfig.from_env({**VERIFIED, **{name: value for name, (value, _) in tree.env.items()}})
+        self.assertEqual((config.chain_width, config.graph_widths, config.tree_nodes), (8, (8,), 16))
+        for extra, message in (({"FC1_TREE_N": "32"}, "FC1_TREE_N=16"),
+                               ({"AX_CHAIN_WIDTH": "16"}, "AX_CHAIN_WIDTH=8"),
+                               ({"AX_CHAIN_GRAPH_WIDTHS": "16 8"}, "AX_CHAIN_GRAPH_WIDTHS=8"),
+                               ({"AX_CHAIN_SCHEDULE": "8x2,4x2"}, "AX_CHAIN_SCHEDULE"),
+                               ({"AX_TREE": "0", "AX_CHAIN_WIDTH": "16"}, "AX_CHAIN_WIDTH=8"),
+                               ({"AX_TREE": "0", "AX_CHAIN_GRAPH_WIDTHS": "8"}, "own graph"),
+                               ({"AX_TREE": "0", "AX_CHAIN_SCHEDULE": "8x2,4x2"}, "AX_CHAIN_SCHEDULE")):
+            with self.subTest(extra=extra), self.assertRaisesRegex(LaunchConfigError, message):
+                plan(args(), {**VERIFIED, **extra}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        explicit = plan(args(), {**VERIFIED, "FC1_TREE_N": "16", "AX_CHAIN_WIDTH": "8"},
+                        QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
+        self.assertNotIn("AX_CHAIN_WIDTH", explicit.env)
+
+    def test_the_resolver_does_not_skip_a_verified_launch(self):
+        from ax_engine_sglang.defaults import resolve
+        with self.assertRaisesRegex(LaunchConfigError, "AX_AUTO_DEFAULTS"):
+            resolve(args(), environ={**VERIFIED, "AX_AUTO_DEFAULTS": "0"}, capability=RTX,
+                    load=lambda *_: QWEN38_27B_NVFP4)
 
     def test_verified_refuses_stock_speculative_algorithms(self):
         with self.assertRaisesRegex(LaunchConfigError, "DFLASH verifies"):
@@ -147,7 +179,11 @@ class DoctorTests(unittest.TestCase):
                                {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
         self.assertEqual((adaptive["status"], adaptive["policy_mode"]), ("experimental", "adaptive"))
         self.assertEqual(adaptive["experimental_features"], ["AX_POLICY_MODE=adaptive"])
-        self.assertEqual(self.report(self.TREE_ARGV, sglang="0.6.0")["status"], "experimental")
+        untested = self.report(self.TREE_ARGV, sglang="0.6.0")
+        self.assertEqual(untested["status"], "unsupported")
+        self.assertIn("AX_ALLOW_UNTESTED_SGLANG=1", untested["errors"][0])
+        allowed = self.report(self.TREE_ARGV, {"AX_ALLOW_UNTESTED_SGLANG": "1"}, sglang="0.6.0")
+        self.assertEqual((allowed["status"], allowed["errors"]), ("experimental", []))
         self.assertEqual(self.report(self.TREE_ARGV, sglang=None)["status"], "experimental")
         self.assertEqual(self.report(self.TREE_ARGV, capability=None)["status"], "experimental")
 
@@ -168,6 +204,53 @@ class DoctorTests(unittest.TestCase):
         both = self.report(self.TREE_ARGV + ["--speculative-adaptive"],
                            {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
         self.assertIn("--speculative-adaptive", both["errors"][0])
+
+    def test_settings_refused_when_the_plugin_loads_are_refused_here(self):
+        # The plugin validates before SGLang resolves --speculative-num-draft-tokens (block 24 until then).
+        argv = ["target", "--speculative-algorithm", TREE, "--speculative-draft-model-path", "draft",
+                "--speculative-num-draft-tokens", "32"]
+        report = self.report(argv, {"AX_CHAIN_WIDTH": "32"})
+        self.assertEqual(report["status"], "unsupported")
+        self.assertIn("chain width 32 outside 2..24", report["errors"][0])
+        explicit = self.report(argv, {"AX_CHAIN_WIDTH": "32", "FC1_DRAFT_BLOCK": "32"})
+        self.assertEqual((explicit["status"], explicit["errors"]), ("supported", []))
+
+    def test_the_ssm_cap_needs_the_radix_cache_off(self):
+        environ = {"AX_SSM_POSITIONS": "8", "AX_CHAIN_WIDTH": "8"}
+        report = self.report(self.TREE_ARGV, environ)
+        self.assertEqual(report["errors"], ["AX_SSM_POSITIONS requires --disable-radix-cache"])
+        self.assertEqual(self.report(self.TREE_ARGV + ["--disable-radix-cache"], environ)["errors"], [])
+
+    def test_the_ssm_cap_sees_the_radix_cache_the_launcher_turns_off(self):
+        environ = {"AX_NVFP4_VERIFY_PARITY": "1", "AX_SSM_POSITIONS": "8", "AX_CHAIN_WIDTH": "8"}
+        report = self.report(self.TREE_ARGV, environ)
+        self.assertEqual(report["errors"], [])
+        self.assertTrue(report["derived"]["args"]["disable_radix_cache"]["value"])
+        self.assertEqual(self.report(self.TREE_ARGV, VERIFIED)["errors"], [])
+
+    def test_backend_flags_reach_the_launch_rules(self):
+        report = self.report(self.TREE_ARGV + ["--attention-backend", "triton"], {"AX_NVFP4_VERIFY_PARITY": "1"})
+        self.assertEqual(report["status"], "unsupported")
+        self.assertIn("--attention-backend flashinfer, got triton", report["errors"][0])
+
+    def test_flags_outside_the_rules_are_named(self):
+        options, options.unchecked = doctor.parser().parse_known_args(self.TREE_ARGV + ["--port", "30001"])
+        report = doctor.diagnose(options, {}, load=lambda path, name, revision=None: QWEN38_27B_NVFP4
+                                 if path == "target" else DFLASH2, capability=RTX, sglang="0.5.23")
+        self.assertEqual((report["status"], report["unchecked_flags"]), ("supported", ["--port", "30001"]))
+        self.assertIn("not checked (flags outside the launch rules): --port 30001", doctor.render(report))
+
+    def test_sglang_0_5_22_derives_nothing(self):
+        report = self.report(self.TREE_ARGV, VERIFIED, sglang="0.5.22")
+        self.assertEqual(report["status"], "unsupported")
+        self.assertIn("needs the launch defaults", report["errors"][0])
+        plain = self.report(self.TREE_ARGV, sglang="0.5.22")
+        self.assertEqual((plain["errors"], plain["derived"]["env"]), ([], {}))
+
+    def test_a_launch_needs_a_target(self):
+        report = self.report(["--speculative-algorithm", TREE, "--speculative-num-draft-tokens", "16"])
+        self.assertEqual(report["status"], "unsupported")
+        self.assertIn("no target model", report["errors"][0])
 
     def test_an_unreadable_target_is_reported(self):
         report = self.report(["missing", "--speculative-algorithm", TREE, "--speculative-num-draft-tokens", "16"])

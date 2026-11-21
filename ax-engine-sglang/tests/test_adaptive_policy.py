@@ -72,10 +72,43 @@ class WidthControllerTests(unittest.TestCase):
         self.assertEqual(controller.snapshot()["buckets"][0]["width"], 16)
 
     def test_cooldown_spaces_the_switches(self):
-        controller = self.controller(cooldown=50, explore=4)
-        for phase in range(6):
-            drive(controller, 30, accepted=3 if phase % 2 else 15, seconds={8: 0.010, 16: 0.014})
-        self.assertLessEqual(controller.snapshot()["buckets"][0]["switches"], 180 // 50)
+        def switches(cooldown):
+            controller = self.controller(cooldown=cooldown, explore=4, window=8)
+            for phase in range(8):
+                drive(controller, 60, accepted=15 if phase % 2 else 3, seconds={8: 0.010, 16: 0.014})
+            return controller.snapshot()["buckets"][0]["switches"]
+        self.assertGreaterEqual(switches(0), 6)       # acceptance flips every 60 rounds
+        self.assertLessEqual(switches(200), 480 // 200)
+
+    def test_a_slowdown_of_every_width_does_not_switch(self):
+        controller = self.controller(explore=32)
+        drive(controller, 600, accepted=15, seconds={8: 0.010, 16: 0.014})
+        # Both widths take twice as long (a busier GPU); the narrow one is timed once in 32 rounds.
+        chosen = drive(controller, 600, accepted=15, seconds={8: 0.020, 16: 0.028})
+        bucket = controller.snapshot()["buckets"][0]
+        self.assertEqual((bucket["width"], bucket["switches"]), (16, 0))
+        self.assertLessEqual(chosen.count(8), 600 // 32 + 1)   # samples only
+
+    def test_one_large_readback_does_not_replace_the_average(self):
+        controller = self.controller()
+        drive(controller, 400, accepted=15, seconds={8: 0.010, 16: 0.014})
+        before = controller.buckets[0].arms[16].tokens
+        controller.observe_accepts(0, 16, [0, 0, 64] + [0] * 13)   # 16 rounds of 4 requests, 2 accepted
+        after = controller.buckets[0].arms[16].tokens
+        self.assertAlmostEqual(before, 16.0)
+        self.assertGreater(after, 7.0)    # weight 1 - (1 - 2/129)^64, about 0.63
+        self.assertLess(after, 9.0)
+        self.assertEqual(controller.choose(0), 16)
+
+    def test_a_lasting_longer_round_time_is_learned(self):
+        controller = self.controller()
+        for _ in range(8):
+            controller.observe_cost(5, 16, 0.020)     # 17 requests
+        for _ in range(200):
+            controller.observe_cost(5, 16, 0.100)     # 64 requests, the same bucket
+        arm = controller.buckets[5].arms[16]
+        self.assertEqual(arm.cost_samples, 8 + 198)   # the first two long rounds count as stalls
+        self.assertGreater(arm.cost, 0.09)
 
     def test_buckets_decide_separately(self):
         controller = self.controller()
@@ -143,6 +176,14 @@ class AdaptiveConfigTests(unittest.TestCase):
         self.assertEqual((config.graph_widths, config.draft_block), ((16, 8), 24))
         with self.assertRaisesRegex(ValueError, "AX_CHAIN_GRAPH_WIDTHS runner"):
             PluginConfig.from_env({**ADAPTIVE, "AX_CHAIN_WIDTH": "12"})
+
+    def test_adaptive_works_with_the_ssm_cap_without_a_pinned_width(self):
+        config = PluginConfig.from_env({**ADAPTIVE, "AX_SSM_POSITIONS": "16"})
+        self.assertEqual((config.ssm_positions, config.chain_width), (16, None))
+        with self.assertRaisesRegex(ValueError, "exceed AX_SSM_POSITIONS"):
+            PluginConfig.from_env({**ADAPTIVE, "AX_SSM_POSITIONS": "8"})
+        with self.assertRaisesRegex(ValueError, "AX_CHAIN_WIDTH"):
+            PluginConfig.from_env({**ADAPTIVE, "AX_POLICY_MODE": "static", "AX_SSM_POSITIONS": "16"})
 
     def test_static_is_the_default(self):
         self.assertEqual(PluginConfig.from_env({}).policy_mode, "static")

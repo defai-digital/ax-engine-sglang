@@ -43,11 +43,11 @@ def batch_bucket(requests: int) -> int:
 
 
 class _Arm:
-    __slots__ = ("cost", "cost_samples", "tokens", "token_samples")
+    __slots__ = ("cost", "cost_samples", "tokens", "token_samples", "ratio", "ratio_samples", "outliers")
 
     def __init__(self):
-        self.cost = self.tokens = 0.0
-        self.cost_samples = self.token_samples = 0
+        self.cost = self.tokens = self.ratio = 0.0
+        self.cost_samples = self.token_samples = self.ratio_samples = self.outliers = 0
 
 
 class _Bucket:
@@ -66,6 +66,9 @@ class WidthController:
       acceptance does not depend on later positions, so the same round at a narrower width V would
       have committed min(a, V - 1) + 1: wide rounds also measure the narrower widths. Widths in
       `direct_only` draft with their own graph (other draft tokens) and use their own rounds only.
+    - The bucket's current width is timed every round, the others only when sampled. Their round
+      time is kept as a ratio to the current width's at the moment of the sample, so a slowdown
+      common to all widths (more requests, a busier GPU) does not favour the rarely timed ones.
     - Until every width has `min_samples` round times and accept samples, the bucket stays on
       `fallback` and samples the other widths every fourth round.
     - Afterwards it switches when another width scores more than `margin` above the current one,
@@ -94,9 +97,15 @@ class WidthController:
     def _ready(self, arm):
         return arm.cost_samples >= self.min_samples and arm.token_samples >= self.min_samples
 
-    @staticmethod
-    def _score(arm):
-        return arm.tokens / arm.cost if arm.cost > 0 else 0.0
+    def _cost(self, state, width):
+        arm, current = state.arms[width], state.arms[state.width]
+        if width != state.width and arm.ratio_samples and current.cost > 0:
+            return arm.ratio * current.cost
+        return arm.cost
+
+    def _score(self, state, width):
+        cost = self._cost(state, width)
+        return state.arms[width].tokens / cost if cost > 0 else 0.0
 
     def choose(self, bucket: int) -> int:
         state = self._bucket(bucket)
@@ -112,31 +121,51 @@ class WidthController:
         elif state.since_switch <= self.cooldown:
             reason, width = "cooldown", state.width
         else:
-            best = max(self.widths, key=lambda w: (self._score(state.arms[w]), w == state.width))
-            if best != state.width and (self._score(state.arms[best])
-                                        > self._score(state.arms[state.width]) * (1 + self.margin)):
+            best = max(self.widths, key=lambda w: (self._score(state, w), w == state.width))
+            if best != state.width and self._score(state, best) > self._score(state, state.width) * (1 + self.margin):
                 reason = "switch"
-                state.width, state.since_switch = best, 0
-                state.switches += 1
+                self._switch(state, best)
             else:
                 reason = "hold"
             width = state.width
         self.reasons[reason] = self.reasons.get(reason, 0) + 1
         return width
 
+    def _switch(self, state, width):
+        # Re-express the round-time ratios against the new current width.
+        base = state.arms[width].ratio if state.arms[width].ratio_samples else 0.0
+        for other, arm in state.arms.items():
+            if other == width or not base:
+                arm.ratio, arm.ratio_samples = 0.0, 0
+            elif other == state.width:
+                arm.ratio, arm.ratio_samples = 1.0 / base, state.arms[width].ratio_samples
+            elif arm.ratio_samples:
+                arm.ratio /= base
+        state.width, state.since_switch = width, 0
+        state.switches += 1
+
     def _blend(self, mean, samples, value, count):
-        weight = max(count / (samples + count), min(1.0, count * self.alpha))
+        """Moving average after `count` more samples of `value`; a plain mean while it has few."""
+        weight = max(count / (samples + count), 1.0 - (1.0 - self.alpha) ** count)
         return mean + (value - mean) * weight
 
     def observe_cost(self, bucket: int, width: int, seconds: float):
         """Host time from the start of a chain round to the start of the next round."""
-        arm = self._bucket(bucket).arms[width]
-        # A gap with no running request is not a round time.
-        if not 0 < seconds <= self.max_gap or (arm.cost_samples >= 8 and seconds > 4 * arm.cost):
+        state = self._bucket(bucket)
+        arm = state.arms[width]
+        # A gap with no running request is not a round time. One long round is dropped as a stall;
+        # three in a row are the new round time (a bucket spans several batch sizes).
+        stall = arm.cost_samples >= 8 and seconds > 4 * arm.cost
+        arm.outliers = arm.outliers + 1 if stall else 0
+        if not 0 < seconds <= self.max_gap or (stall and arm.outliers < 3):
             self.reasons["cost_dropped"] = self.reasons.get("cost_dropped", 0) + 1
             return
         arm.cost = self._blend(arm.cost, arm.cost_samples, seconds, 1)
         arm.cost_samples += 1
+        current = state.arms[state.width]
+        if width != state.width and current.cost > 0:
+            arm.ratio = self._blend(arm.ratio, arm.ratio_samples, seconds / current.cost, 1)
+            arm.ratio_samples += 1
 
     def observe_accepts(self, bucket: int, width: int, counts):
         """counts[a]: requests of rounds at `width` that accepted `a` draft tokens."""
@@ -155,7 +184,6 @@ class WidthController:
         return {
             "reasons": dict(self.reasons),
             "buckets": {bucket: {"width": state.width, "switches": state.switches, "rounds": state.rounds,
-                                 "tokens_per_second": {w: round(self._score(arm), 1)
-                                                       for w, arm in state.arms.items()}}
+                                 "tokens_per_second": {w: round(self._score(state, w), 1) for w in state.arms}}
                         for bucket, state in sorted(self.buckets.items())},
         }
