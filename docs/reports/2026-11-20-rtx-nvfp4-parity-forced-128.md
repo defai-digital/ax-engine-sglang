@@ -122,6 +122,41 @@ projections from 2 rows, `in_proj_ba` from 8). Batch-invariant mode keeps them
 equal at the same speed for the large projections and 1.5× slower for
 `in_proj_ba`.
 
+## Narrower GDN value tile
+
+SGLang's recurrent GDN kernel gives each program 32 value columns on SM120:
+192 one-warp programs per layer, which step through a tree's candidates in
+order. Under `AX_NVFP4_VERIFY_PARITY=1` the plugin now selects 8 columns for
+both decode and verification (GDN, 128×128 heads, SM12x).
+
+Tiles of 8, 16 and 32 gave identical outputs and states in FP32 and BF16 for
+decode with one and eight requests and for verification windows of 8, 16 and
+64. A tile of 4 changed bits. The 32-case bit check passed with the new tile.
+
+| GDN kernel time per layer, CUDA graph | Tile 32 | Tile 16 | Tile 8 |
+|---|---:|---:|---:|
+| Decode, 1 request | 6.3 µs | 6.0 µs | 6.3 µs |
+| Decode, 8 requests | 16.6 µs | 14.6 µs | 14.5 µs |
+| Verify tree 16 | 53.7 µs | 30.6 µs | 25.1 µs |
+| Verify tree 64 | 236.2 µs | 205.8 µs | 165.5 µs |
+| Verify 8 requests × chain 8 | 226.3 µs | 167.8 µs | 163.7 µs |
+
+End to end, same pod, plugin parity defaults, exactly 128 tokens:
+
+| Lane | C1 tok/s, tile 32 | C1 tok/s, tile 8 | C8 passes, tile 8 | Same as AR |
+|---|---:|---:|---|---:|
+| Parity AR | 51.79 | 51.82 | 240.6, 242.6 | AR outputs unchanged, 10/10 |
+| Parity tree 16 | 118.09 | 128.53 | 472.9, 459.7 | 10/10 |
+| Parity tree 32 | 120.05 | 131.58 | 534.9, 542.4 | 10/10 |
+| Parity chain 8 | 109.76 | 115.43 | 426.7, 535.5 | 10/10 |
+| Parity tree 64, `AX_SSM_POSITIONS=8` | 102.34 | 114.10 | 337.5, 525.4 | 10/10 |
+
+C1 rose 5–11% on the speculative lanes; parity tree 32 at 131.58 tok/s is
+above speed-profile tree 16 (126.59) on this pod. C8 passes of one lane
+differed by up to 45%, and the slower pass always had a request of 3.3–4.8 s,
+also with tile 32 in a control that kept it for several requests. C8 is not
+compared here. Every request in both C8 passes equalled the same request alone.
+
 ## Conditions
 
 - One NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120), RunPod US-PA-1,
@@ -134,5 +169,6 @@ equal at the same speed for the large projections and 1.5× slower for
 - Inputs: the ten frozen prompts in `parity-expanded-ids.json` (23–2,266 tokens).
   Warm-up: one request, then eight concurrent 32-token requests. Rates include
   prefill and local HTTP and exclude startup.
-- Local results: `results/rtx-nvfp4-parity-forced-128/` (per-lane launch
-  settings, server logs, output IDs, profiler summaries, and the drivers).
+- Local results: `results/rtx-nvfp4-parity-forced-128/` and
+  `results/rtx-nvfp4-parity-value-tile/` (per-lane launch settings, server logs,
+  output IDs, profiler summaries, and the drivers).

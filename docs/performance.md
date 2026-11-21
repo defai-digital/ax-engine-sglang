@@ -144,6 +144,11 @@ On the same pod with the speed sweep's flags, speed-profile tree 16 reached
 126.59 and 449.86 tok/s and parity tree 16 112.70 and 387.57 tok/s.
 [Fixed-length comparison and profile](reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
 
+A narrower GDN value tile then gave GDN verification four times the programs
+with the same bits. Parity tree 16 reached 128.53 tok/s at C1, tree 32 131.58,
+chain 8 115.43 and tree 64 114.10; AR stayed at 51.82 with the same outputs.
+[Value tile measurements](reports/2026-11-20-rtx-nvfp4-parity-forced-128.md#narrower-gdn-value-tile)
+
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with

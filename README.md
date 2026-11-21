@@ -178,15 +178,17 @@ all 28 sampled distribution checks.
 
 | Parity profile, 10 requests of exactly 128 tokens | C1 tok/s | C8 tok/s |
 |---|---:|---:|
-| Parity AR | 51.79 | 226.78 |
-| Parity DFlash2 chain, width 8 | 109.76 | 507.35 |
-| Parity DFlash2 tree, 16 nodes | **118.09** | 493.03 |
-| Parity DFlash2 tree, 64 nodes, `AX_SSM_POSITIONS=8` | 102.34 | **508.50** |
+| Parity AR | 51.82 | 241.60 |
+| Parity DFlash2 chain, width 8 | 115.43 | 474.94 |
+| Parity DFlash2 tree, 16 nodes | 128.53 | 466.20 |
+| Parity DFlash2 tree, 32 nodes | **131.58** | **538.61** |
+| Parity DFlash2 tree, 64 nodes, `AX_SSM_POSITIONS=8` | 114.10 | 411.01 |
 
 Every lane equalled parity AR on all ten inputs, and at concurrency eight
-every request equalled the same request alone. On the same pod, speed-profile
-tree 16 reached 126.59 and 449.86 tok/s, and no speed-profile lane kept its
-outputs at concurrency eight. The parity AR reference differs from packed AR.
+every request equalled the same request alone. The two C8 passes of one lane
+differed by up to 45%, so compare C1. On the same pod, speed-profile tree 16
+reached 126.59 tok/s at C1, and no speed-profile lane kept its outputs at
+concurrency eight. The parity AR reference differs from packed AR.
 [RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
 
 ### GeForce RTX 5090 · Qwen3.8-27B NVFP4

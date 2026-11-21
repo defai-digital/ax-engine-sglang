@@ -18,7 +18,8 @@ from .compat import patch_attribute, patch_item
 
 # Value columns per program in SGLang's recurrent GDN kernel under the parity profile.
 # On SM120 SGLang uses 32 (192 one-warp programs for 48 heads); 8 gives four times
-# the programs, and decode and verify still match bit for bit. 4 does not.
+# the programs. Tiles of 8, 16 and 32 gave the same bits in FP32 and BF16 state, so
+# AR outputs do not change; 4 changed bits.
 PARITY_VALUE_TILE = 8
 
 
