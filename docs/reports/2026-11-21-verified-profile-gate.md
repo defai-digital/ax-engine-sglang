@@ -5,7 +5,9 @@ RTX PRO 6000 (SM120, 97 GB) with Qwen3.8-27B NVFP4, the DFlash2 drafter and
 SGLang 0.5.23. The chain route and AR equalled serialized AR on every sequence.
 The tree route equalled it for 128 tokens but not for 1,024, so the profile now
 refuses the tree route. The adaptive chain width did not beat the best fixed
-width and stays experimental and off by default.
+width and stays experimental and off by default. A rerun with 200 distinct
+prompts measured the chain width table and found no measurable cost in
+switching widths between rounds, which a ten-prompt run had suggested.
 
 Source: branch `v0.5.0-qa2` at `1c0df1d`. Raw outputs are in
 `results/m2_v0.5.0/pro6000/` (not in Git).
@@ -83,17 +85,21 @@ Output tok/s, first / second sweep:
 | 4 | 467.8 / 468.2 | 468.0 / 468.2 | 460.1 / 464.0 | 474.9 / 449.6 |
 | 8 | 583.9 / 584.9 | 698.6 / 699.4 | 678.2 / 706.3 | 665.2 / 714.2 |
 
-These lanes ran with `--disable-radix-cache` (see below).
+These lanes ran with `--disable-radix-cache` (see below). The 40 requests are
+the ten frozen prompts repeated, and the launch defaults make no exact-output
+claim, so each lane generated different text; the 200-prompt rerun below
+replaces the conclusions that depend on small differences.
 
 - The best fixed width depends on the batch: width 16 is 8% faster with two
-  requests, width 8 is 20% faster with eight.
+  requests, width 8 is 20% faster with eight (4.9% and 9.8% on 200 prompts).
 - At concurrency eight the adaptive policy was 3% below fixed width 8 in its
   first sweep and 1% above in its second; the 16-sample lane spread from 665 to
   714 tok/s, so the lanes are not separable there.
 - At concurrency two it stayed on width 16 (no switch in that batch-size group)
   and used about as many rounds as fixed width 16 (about 960 for 10,240
   tokens), yet ran 6% below it: about 2.4 ms more per round. Exploration
-  rounds (6% of rounds, each about 3 ms slower) account for about 0.2 ms.
+  rounds (6% of rounds, each about 3 ms slower) account for about 0.2 ms. The
+  rest was not explained; on 200 prompts the gap was 2.3%.
 - It switched 7 times in the three-to-four request group, where the two widths
   are equal: its score estimates crossed the 8% margin from noise.
 - `AX_ADAPTIVE_MIN_SAMPLES=16` was not better than 32. The default stays 32.
@@ -105,24 +111,84 @@ than 5% slower) is not met.
 ### Review after the run
 
 Two reviewers (gpt-6.2-sol and Qwen4 Max, given the code and the round
-statistics) named the same cause for the per-round loss: `torch.bincount` in the
-accept counter, which on CUDA reads the input's range back to the host and so
-waits for the round's GPU work every round. This was inferred from PyTorch's
-source and was not confirmed on the GPU. They also found the switch rule biased
-rather than only noisy: another width's cost is one sampled round divided by the
-current width's last two rounds, a bucket mixes batch sizes three and four, and
-four such comparisons allowed a switch.
+statistics) found the switch rule biased rather than only noisy: another
+width's cost is one sampled round divided by the current width's last two
+rounds, a bucket mixes batch sizes three and four, and four such comparisons
+allowed a switch.
 
-Changes after this run, none measured on a GPU:
+Changes after this run:
 
 - `AX_CHAIN_WIDTH_BY_BATCH` selects the chain width by batch size from a fixed
-  table (`1:16,5:8` for this checkpoint and GPU; five and six requests were not
-  measured). vLLM offers the same form as
-  `num_speculative_tokens_per_batch_size`.
-- The accept counter uses `scatter_add_`.
+  table (`1:16,5:8` for this checkpoint and GPU). vLLM offers the same form as
+  `num_speculative_tokens_per_batch_size`. Measured below.
+- The accept counter uses `scatter_add_` instead of `torch.bincount`, which on
+  CUDA reads the input's range back to the host every round. The reviewers named
+  it as the cause of the per-round loss. Its effect was not measured on its own
+  (the rerun has no `bincount` lane); on ten prompts a similar loss appeared in a
+  lane that runs no accept counter, and on 200 prompts the adaptive lane was
+  2.3% below width 16 with two requests.
 - A switch needs `AX_ADAPTIVE_MIN_SAMPLES` comparisons instead of four. The
   sampling every fourth round that collects them stops after four times the
   samples a clean warm-up needs, then falls back to the normal rate.
+- The worker's `replay` statistics counted each target verify they saw twice:
+  SGLang 0.5.23 asks `can_run_graph` in `prepare_for_verify` and again in
+  `ModelRunner._forward_raw` with the same batch. They now count it once. No
+  figure in this report was taken from them.
+
+### Rerun with 200 prompts
+
+Source: branch `chain-width-table` at `20e1492`, on another RTX PRO 6000 pod
+with the same model, drafter and SGLang. Raw outputs are in
+`results/m3_width_table/pro6000/` (not in Git).
+
+A first rerun with the ten prompts (four times each) disagreed with the run
+above: width 8 beat width 16 with two, three and four requests, and a fixed
+schedule alternating 31 rounds of width 16 with one of width 8
+(`AX_CHAIN_SCHEDULE=16x31,8x1`, no adaptive policy and no accept counter) was 4%
+to 9% below width 16 with two requests (252 and 267 against about 278 tok/s).
+Diagnostics on that loss:
+
+- Round times did not change after a switch (25.9 ms at width 16, 24.1 ms at
+  width 8). The loss was in accepted tokens per round, spread over all rounds of
+  the schedule lane, not concentrated after switches.
+- SGLang's coarse overlap barrier (`SGLANG_FORCE_COARSE_WAR_BARRIER=1`) left it
+  unchanged.
+- The greedy outputs differed between lanes and between repeats of one prompt
+  within a lane. At the same text position the drafts of the schedule lane
+  matched width 16's in 98% of cases before its first width-8 round and 35%
+  after it, while accept lengths stayed equal in 94%. This fits a width-8 verify
+  that differs numerically from a width-16 one, which changes the drafter's
+  context and then the text; it was not traced further.
+
+The comparison was therefore rerun on 200 distinct chat-templated prompts (80
+UltraChat, 60 GSM8K, 60 HumanEval; up to 1,089 tokens), 256 output tokens each,
+radix cache off, two sweeps. Every pass produced all 51,200 tokens. Output
+tok/s, mean of the two sweeps, change against width 16:
+
+| Lane | C2 | C4 | C8 |
+|---|---:|---:|---:|
+| width 16 | 346.3 | 565.9 | 782.5 |
+| width 8 | 330.2 (−4.7%) | 582.8 (+3.0%) | 859.1 (+9.8%) |
+| schedule `16x31,8x1` | 344.2 (−0.6%) | 562.6 (−0.6%) | 789.6 (+0.9%) |
+| table `1:16,5:8` | 351.0 (+1.4%) | 567.9 (+0.3%) | 865.7 (+10.6%) |
+| adaptive | 338.4 (−2.3%) | 590.1 (+4.3%) | 853.7 (+9.1%) |
+
+- With two switches every 32 rounds, switching has no measurable cost: the
+  schedule lane is within 1% of width 16 at every concurrency. The ten-prompt
+  loss did not reproduce; the differences in generated text found above are
+  the likely cause, but this was not isolated.
+- The table matches the better fixed width with two and eight requests. With
+  four it runs width 16, 2.6% below width 8; a split at three or four requests
+  was not measured.
+- The adaptive policy is 2.3% below width 16 with two requests, 1.2% above
+  width 8 with four (sweeps 582.0 and 598.2) and 0.6% below width 8 with eight.
+  It does not meet the release condition.
+- The two concurrency-two sweeps of a lane differ by up to 3.4%: in every lane
+  the first pass after the server starts is the slower one.
+
+The comparison of the design with vLLM's dynamic speculative decoding (which
+picks the token count per batch size in the scheduler, before the step) found no
+reason to move the decision: the cost it would avoid was not measured.
 
 Two gaps found in the review of these changes are older than them and remain
 open: with `AX_SSM_POSITIONS` and `FC1_TREE64=1`, a chain width above the tree
