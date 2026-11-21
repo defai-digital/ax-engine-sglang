@@ -64,6 +64,20 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(self.run_main("--output-tokens", "2048", "--kv-tokens", "65536",
                                        "--context-length", "4314")[0], 0)
 
+    def test_the_verified_profile_lanes_leave_the_settings_to_the_launcher(self):
+        self.base[-1:] = ["ar", "tree16", "chain8"]
+        self.assertEqual(self.run_main("--verified-profile")[0], 0)
+        args = self.lanes[0]
+        for lane, block, tree in (("ar", None, None), ("tree16", "16", None), ("chain8", "8", "0")):
+            command, flags, algorithm = bench.launch_config(args, lane)
+            self.assertEqual({name: value for name, value in flags.items() if name.startswith(("AX_", "FC1_"))},
+                             {"AX_QUALITY_PROFILE": "verified", **({"AX_TREE": tree} if tree else {})})
+            self.assertFalse({"--chunked-prefill-size", "--disable-radix-cache", "--attention-backend"} & set(command))
+            self.assertEqual(algorithm, None if lane == "ar" else "FC1_DFLASH_TREE")
+            if block:
+                self.assertEqual(command[command.index("--speculative-num-draft-tokens") + 1], block)
+        self.assertIn("separate runs", self.run_main("--verified-profile", "--verify-parity")[1])
+
     def test_concurrency_stays_within_the_slots(self):
         self.assertIn("between 1 and --slots", self.run_main("--concurrency", "4")[1])
 

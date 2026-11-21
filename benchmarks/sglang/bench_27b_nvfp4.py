@@ -26,7 +26,29 @@ def write_json(path, value):
     temporary.replace(path)
 
 
+def verified_launch(args, lane):
+    """AX_QUALITY_PROFILE=verified: only the lane's route is given; the launcher derives the rest."""
+    command = [
+        sys.executable, "-m", "sglang.launch_server", "--model-path", str(args.target.resolve()),
+        "--host", "127.0.0.1", "--port", str(args.port), "--max-running-requests", str(args.slots),
+        "--cuda-graph-max-bs-decode", str(args.slots), "--context-length", str(args.context_length),
+        "--max-total-tokens", str(args.kv_tokens), "--mem-fraction-static", str(args.mem_fraction_static),
+        "--skip-server-warmup", "--random-seed", "42",
+    ]
+    flags = {"SGLANG_PLUGINS": "ax-engine", "AX_QUALITY_PROFILE": "verified",
+             "SGLANG_FLASHINFER_WORKSPACE_SIZE": str(64 * 1024 * 1024)}
+    if lane == "ar":
+        return command, flags, None
+    if lane == "chain8":
+        flags["AX_TREE"] = "0"
+    command += ["--speculative-algorithm", "FC1_DFLASH_TREE", "--speculative-draft-model-path",
+                str(args.draft.resolve()), "--speculative-num-draft-tokens", "16" if lane == "tree16" else "8"]
+    return command, flags, "FC1_DFLASH_TREE"
+
+
 def launch_config(args, lane):
+    if args.verified_profile:
+        return verified_launch(args, lane)
     # Fit the entire frozen prompt in one prefill pass for the parity comparison.
     prefill_size = "4096" if args.verify_parity else "512"
     command = [
@@ -167,6 +189,8 @@ def main():
     parser.add_argument("--lanes", nargs="+", choices=LANES)
     parser.add_argument("--verify-parity", action="store_true",
                         help="enable AX NVFP4 parity for AR, tree, and chain lanes")
+    parser.add_argument("--verified-profile", action="store_true",
+                        help="launch the ar, tree16 and chain8 lanes with AX_QUALITY_PROFILE=verified alone")
     parser.add_argument("--slots", type=int, choices=(2, 4, 8), default=2)
     parser.add_argument("--kv-tokens", type=int, default=4096)
     parser.add_argument("--context-length", type=int, default=4096)
@@ -181,12 +205,15 @@ def main():
     if any(not 1 <= value <= args.slots for value in args.concurrency or ()):
         parser.error("--concurrency values must be between 1 and --slots")
     args.concurrent_passes = [(value, args.repeat) for value in args.concurrency or (args.slots, args.slots)]
+    if args.verify_parity and args.verified_profile:
+        parser.error("--verify-parity and --verified-profile are separate runs")
+    args.verify_parity = args.verify_parity or args.verified_profile   # the same lanes and comparison
     if args.lanes is None:
         args.lanes = PARITY_LANES if args.verify_parity else DEFAULT_LANES
     if args.verify_parity and any(lane not in PARITY_LANES for lane in args.lanes):
-        parser.error("--verify-parity supports the ar, tree16, and chain8 lanes")
+        parser.error("--verify-parity and --verified-profile support the ar, tree16, and chain8 lanes")
     if not args.verify_parity and "chain8" in args.lanes:
-        parser.error("chain8 requires --verify-parity")
+        parser.error("chain8 requires --verify-parity or --verified-profile")
     raw_prompts = args.input_ids.read_bytes()
     if hashlib.sha256(raw_prompts).hexdigest() != PROMPT_SHA256:
         parser.error("--input-ids must be the published parity-expanded-ids.json asset")

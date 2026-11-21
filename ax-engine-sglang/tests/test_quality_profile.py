@@ -147,6 +147,41 @@ class VerifiedProfileTests(unittest.TestCase):
                 self.assertTrue(provisional)
                 self.assertEqual(config.chain_width, width)
 
+    def test_graph_settings_reach_the_record_sglang_already_built(self):
+        # SGLang builds cuda_graph_config before the plugin's hook runs; a late flag alone is ignored.
+        import sys
+        from types import ModuleType
+        from unittest.mock import patch
+        from ax_engine_sglang import defaults
+
+        declared, hooks = {}, {}
+        built = {"prefill": {"backend": "breakable"}, "decode": {"max_bs": 8}}
+        fake = {name: ModuleType(name) for name in (
+            "sglang", "sglang.srt", "sglang.srt.arg_groups", "sglang.srt.arg_groups.overrides",
+            "sglang.srt.arg_groups.resolution_hooks", "sglang.srt.model_executor",
+            "sglang.srt.model_executor.cuda_graph_config")}
+        overrides = fake["sglang.srt.arg_groups.overrides"]
+        overrides.declare_resolution = lambda server_args, source, **fields: declared.update(fields)
+        overrides.resolving_view = lambda server_args: SimpleNamespace(cuda_graph_config=built)
+        fake["sglang.srt.arg_groups.resolution_hooks"].register_resolution_hook = (
+            lambda name: lambda hook: hooks.setdefault(name, hook))
+        graph = fake["sglang.srt.model_executor.cuda_graph_config"]
+        graph.Backend, graph.Phase = SimpleNamespace(DISABLED="disabled"), SimpleNamespace(PREFILL="prefill",
+                                                                                         DECODE="decode")
+        graph.with_phase = lambda config, phase, **changes: {**config, phase: {**config[phase], **changes}}
+        result = defaults.Plan()
+        result.args.update(disable_prefill_cuda_graph=(True, ""), cuda_graph_max_bs_decode=(1, ""))
+        with patch.dict(sys.modules, fake), patch.object(defaults, "plan", return_value=result), \
+                patch.object(defaults, "read_json", return_value=None), \
+                patch.object(defaults, "device_capability", return_value=RTX), \
+                patch.object(defaults, "describe", return_value=""), patch.dict("os.environ", {}, clear=False):
+            self.assertTrue(defaults.install())
+            hooks["handle_moe_kernel_config"](SimpleNamespace(), lambda server_args: None)
+        self.assertEqual(declared["cuda_graph_config"],
+                         {"prefill": {"backend": "disabled"}, "decode": {"max_bs": 1}})
+        self.assertTrue(declared["disable_prefill_cuda_graph"])
+        self.assertEqual(built["prefill"]["backend"], "breakable")   # SGLang's record is replaced, not edited
+
     def test_the_resolver_does_not_skip_a_verified_launch(self):
         from ax_engine_sglang.defaults import resolve
         with self.assertRaisesRegex(LaunchConfigError, "AX_AUTO_DEFAULTS"):

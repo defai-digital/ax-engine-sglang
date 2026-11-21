@@ -475,8 +475,24 @@ def install():
         return False
     from .config import get_config
 
+    def declare(server_args, source, **fields):
+        # SGLang builds cuda_graph_config from the graph flags before these hooks run, so a flag
+        # set here changes nothing by itself: write the built record too (as SGLang's own late
+        # steps do). Found on the first GPU start of the verified profile: prefill graphs were captured.
+        from sglang.srt.arg_groups.overrides import resolving_view
+        from sglang.srt.model_executor.cuda_graph_config import Backend, Phase, with_phase
+
+        config = resolving_view(server_args).cuda_graph_config
+        if fields.get("disable_prefill_cuda_graph"):
+            config = with_phase(config, Phase.PREFILL, backend=Backend.DISABLED)
+        if fields.get("cuda_graph_max_bs_decode") is not None:
+            config = with_phase(config, Phase.DECODE, max_bs=fields["cuda_graph_max_bs_decode"])
+        if config is not resolving_view(server_args).cuda_graph_config:
+            fields["cuda_graph_config"] = config
+        declare_resolution(server_args, source, **fields)
+
     def hook(server_args, previous):
-        resolve(server_args, declare=declare_resolution, on_env_change=get_config.cache_clear)
+        resolve(server_args, declare=declare, on_env_change=get_config.cache_clear)
         # The plugin may have loaded with a provisional configuration (config.startup_config);
         # read the resolved environment from here on, even when resolution wrote nothing.
         get_config.cache_clear()
