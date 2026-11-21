@@ -228,6 +228,7 @@ whether the launch could use GDN replay. It does not estimate GPU memory.
 |---|---|
 | `AX_QUALITY_PROFILE=verified` | run the parity path (`AX_NVFP4_VERIFY_PARITY=1` and its defaults) and refuse to start unless `qualification.py` lists an exact-output measurement for the GPU, target and route. Needs SGLang 0.5.23 launch defaults. It sets the measured lane and refuses other values. Speculative serving needs the chain route: `AX_TREE=0` with `--speculative-num-draft-tokens 8` (the launcher sets `FC1_TREE_N=8` and `AX_CHAIN_WIDTH=8`); the tree route is refused. Every route: `--chunked-prefill-size 4096` (larger is accepted) and `--disable-prefill-cuda-graph`; `AX_TREE_SAMPLING=1` is refused. The launcher prints how many sequences were measured and the conditions of the measurement |
 | `AX_QUALITY_PROFILE=fast` | the launcher prints that the launch makes no exact-output claim; refuses `AX_NVFP4_VERIFY_PARITY=1` |
+| `AX_CHAIN_WIDTH_BY_BATCH` | chain width by the number of requests in the round, as `requests:width` entries from 1 request upwards: `1:16,5:8` verifies 16 tokens with up to four requests and 8 with five or more. Every width needs a graph in `AX_CHAIN_GRAPH_WIDTHS`. Replaces `AX_CHAIN_WIDTH`; refuses `AX_CHAIN_SCHEDULE`, `AX_POLICY_MODE=adaptive`, `AX_NVFP4_VERIFY_PARITY=1`, the verified profile, `--dp-size` above 1 and `--disable-decode-cuda-graph`. Needs `--max-running-requests` above 1 to have an effect. The doctor reports it as experimental. The table has not run on a GPU; the fixed widths it selects were each measured |
 | `AX_POLICY_MODE=adaptive` | experimental: choose each chain round's width among `AX_CHAIN_GRAPH_WIDTHS` (at least two) from measured accepted tokens and round time, per batch-size group. `AX_CHAIN_WIDTH`, else the widest graph width, serves until every width is measured. One GPU (TP1, PP1, DP1). Refuses `AX_CHAIN_SCHEDULE`, `AX_NVFP4_VERIFY_PARITY=1`, `AX_GDN_CHAIN_REPLAY=1`, `--speculative-adaptive` and a graph width above the draft block |
 | `AX_ADAPTIVE_MIN_SAMPLES`, `AX_ADAPTIVE_MARGIN`, `AX_ADAPTIVE_COOLDOWN`, `AX_ADAPTIVE_EXPLORE` | adaptive policy: samples per width before a decision (32), gain needed to switch (0.08), rounds between switches (50), rounds between samples of the other widths (32) |
 
@@ -238,11 +239,20 @@ of 1,024 tokens, ten distinct prompts). The tree route is `experimental`: it
 matched for 128 tokens, and two of ten prompts differed in 1,024-token outputs.
 See `docs/reports/2026-11-21-verified-profile-gate.md`.
 
-The adaptive policy stays experimental and the default stays `static`. On the
-same GPU it matched the better fixed width at concurrency 8 (width 8, 20% above
-width 16) but ran 6% below fixed width 16 at concurrency 2, and it switched on
-noise where the widths are equal. Its choices appear under `adaptive` in the
-round statistics the worker prints every 1,000 rounds.
+On the same GPU with eight requests running, the better fixed chain width
+depended on the batch: width 16 was 8% faster with two requests and width 8 was
+20% faster with eight. `AX_CHAIN_WIDTH_BY_BATCH="1:16,5:8"` with
+`AX_CHAIN_GRAPH_WIDTHS="16 8"` selects them by batch size. The split at five
+requests is provisional: two, four and eight were measured, five and six were
+not, and the table itself has not run on a GPU.
+
+The adaptive policy stays experimental and the default stays `static`. In that
+run it was about 2.4 ms per round slower than fixed width 16 with two requests
+(6%). With eight it was 3% below fixed width 8 in one sweep and 1% above in the
+other, and it switched where the widths are equal. Its accept counter has since stopped
+waiting for the GPU every round and a switch now needs `AX_ADAPTIVE_MIN_SAMPLES`
+comparisons; neither change has been measured. Its choices appear under
+`adaptive` in the round statistics the worker prints every 1,000 rounds.
 
 With the radix cache on, SGLang may run fewer requests than
 `--max-running-requests`: it logs `max_running_requests is capped to N by the

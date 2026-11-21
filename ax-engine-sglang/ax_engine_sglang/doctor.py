@@ -154,6 +154,7 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
 
     route = route_of(algorithm, resolved) if algorithm in ("", "FC1_DFLASH_TREE") else algorithm.lower()
     experimental = [name for name, on in (
+        ("AX_CHAIN_WIDTH_BY_BATCH (not run on a GPU)", bool(config and config.chain_width_table)),
         ("AX_GDN_CHAIN_REPLAY=1", replay["requested"]),
         ("AX_POLICY_MODE=adaptive", bool(config and config.policy_mode == "adaptive")),
     ) if on]

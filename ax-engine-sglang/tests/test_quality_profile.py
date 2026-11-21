@@ -108,6 +108,7 @@ class VerifiedProfileTests(unittest.TestCase):
                                ({"FC1_TREE_N": "16"}, "FC1_TREE_N=8"),
                                ({"AX_CHAIN_GRAPH_WIDTHS": "8"}, "own graph"),
                                ({"AX_CHAIN_SCHEDULE": "8x2,4x2"}, "AX_CHAIN_SCHEDULE"),
+                               ({"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8"}, "unset AX_CHAIN_WIDTH_BY_BATCH"),
                                ({"AX_TREE_SAMPLING": "1"}, "greedy")):
             with self.subTest(extra=extra), self.assertRaisesRegex(LaunchConfigError, message):
                 plan(chain_args(), {**CHAIN, **extra}, QWEN38_27B_NVFP4, DFLASH2, capability=RTX)
@@ -252,6 +253,12 @@ class DoctorTests(unittest.TestCase):
                                {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
         self.assertEqual((adaptive["status"], adaptive["policy_mode"]), ("experimental", "adaptive"))
         self.assertEqual(adaptive["experimental_features"], ["AX_POLICY_MODE=adaptive"])
+        table = self.report(self.TREE_ARGV + ["--max-running-requests", "8"],
+                            {"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
+        self.assertEqual((table["status"], table["errors"]), ("experimental", []))
+        self.assertEqual(table["experimental_features"], ["AX_CHAIN_WIDTH_BY_BATCH (not run on a GPU)"])
+        single = self.report(self.TREE_ARGV, {"AX_CHAIN_WIDTH_BY_BATCH": "1:16,5:8", "AX_CHAIN_GRAPH_WIDTHS": "16 8"})
+        self.assertTrue(any("no effect with one running request" in note for note in single["derived"]["notes"]), single)
         untested = self.report(self.TREE_ARGV, sglang="0.6.0")
         self.assertEqual(untested["status"], "unsupported")
         self.assertIn("AX_ALLOW_UNTESTED_SGLANG=1", untested["errors"][0])

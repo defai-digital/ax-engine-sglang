@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Throughput of AX_POLICY_MODE=adaptive against each fixed chain width, same graphs, one GPU.
+"""Throughput of the batch-size width table and the adaptive policy against each fixed chain width.
 
 Each lane starts one server with the launch defaults (no exact-output claim) and the same captured
 chain graphs; only the width policy differs. The concurrency sweep runs twice per lane: the second
@@ -8,12 +8,16 @@ sweep shows the run-to-run spread, and for the adaptive lane the rate after its 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_27b_nvfp4 as bench  # noqa: E402
+
+
+CAPPED = re.compile(r"max_running_requests is capped to (\d+)")
 
 
 def launch(args, lane):
@@ -31,6 +35,8 @@ def launch(args, lane):
     if lane == "adaptive":
         flags["AX_POLICY_MODE"] = "adaptive"
         flags.update(args.adaptive_env)
+    elif lane == "table":
+        flags["AX_CHAIN_WIDTH_BY_BATCH"] = args.table
     else:
         flags["AX_CHAIN_WIDTH"] = lane[1:]
     return command, flags
@@ -47,11 +53,13 @@ def run_lane(args, lane, prompts):
     with (out / "server.log").open("w") as log:
         process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            info = bench.wait_for_server(process, base_url, args.target, "FC1_DFLASH_TREE")
-            # SGLang lowers the request limit when the GDN state cache is too small for it.
-            if info.get("max_running_requests", args.slots) < max(args.concurrency):
-                raise RuntimeError(f"the server runs {info.get('max_running_requests')} requests at once, fewer "
-                                   f"than --concurrency {max(args.concurrency)}; see its log")
+            bench.wait_for_server(process, base_url, args.target, "FC1_DFLASH_TREE")
+            # SGLang lowers the request limit when the GDN state cache is too small for it, and
+            # says so in its log; the concurrency passes would then run fewer requests than named.
+            capped = CAPPED.findall((out / "server.log").read_text(errors="replace"))
+            if capped and int(capped[-1]) < max(args.concurrency):
+                raise RuntimeError(f"the server runs {capped[-1]} requests at once, fewer than "
+                                   f"--concurrency {max(args.concurrency)}: {out / 'server.log'}")
             bench.run_pass(base_url, prompts[:args.slots], args.slots, 32, True)
             rows = []
             for sweep in range(args.sweeps):
@@ -74,7 +82,9 @@ def main():
     parser.add_argument("--input-ids", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--widths", type=int, nargs="+", default=[16, 8])
-    parser.add_argument("--lanes", nargs="+", help="w<width> or adaptive; default: every width, then adaptive")
+    parser.add_argument("--lanes", nargs="+",
+                        help="w<width>, table or adaptive; default: every width, then table and adaptive")
+    parser.add_argument("--table", default="1:16,5:8", help="AX_CHAIN_WIDTH_BY_BATCH of the table lane")
     parser.add_argument("--adaptive-env", nargs="*", default=[], metavar="NAME=VALUE")
     parser.add_argument("--server-args", default="", type=str.split,
                         help="more server arguments for every lane, one quoted string")
@@ -88,9 +98,13 @@ def main():
     parser.add_argument("--port", type=int, default=30000)
     args = parser.parse_args()
     args.adaptive_env = dict(item.split("=", 1) for item in args.adaptive_env)
-    lanes = args.lanes or [f"w{width}" for width in args.widths] + ["adaptive"]
+    lanes = args.lanes or [f"w{width}" for width in args.widths] + ["table", "adaptive"]
     if max(args.concurrency) > args.slots:
         parser.error("--concurrency must not exceed --slots")
+    if "table" in lanes and not {int(e.split(":")[1]) for e in args.table.split(",")} <= set(args.widths):
+        parser.error("--table uses a width that --widths does not capture")
+    if "adaptive" in lanes and len(args.widths) < 2:
+        parser.error("the adaptive lane needs two --widths")
     prompts = json.loads(args.input_ids.read_text())
     results = {lane: run_lane(args, lane, prompts) for lane in lanes}
     bench.write_json(args.out / "summary.json", results)

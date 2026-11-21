@@ -11,6 +11,8 @@ fused tree hooks (fc1_fused, fc1_conv, fc1_plan) run only in tree rounds:
 
 Stage 0 has no width rule. The width is pinned with `AX_CHAIN_WIDTH` (8 or 16, default B), or a
 forced schedule `AX_CHAIN_SCHEDULE="16x5,8x3"` (width x rounds, cycled) for the switching checks.
+`AX_CHAIN_WIDTH_BY_BATCH="1:16,5:8"` chooses it by the number of requests in the round, and
+`AX_POLICY_MODE=adaptive` from measured accept lengths and round times (experimental).
 `AX_TREE=0` turns tree rounds off (every round is a chain round, also with one request).
 
 A chain round of width W = B runs the stock code unchanged. For W < B, `narrow` cuts the drafted
@@ -98,7 +100,7 @@ def _check_alloc(batch):
 def width(block, requests=1):
     """Verify width of this chain round (anchor included)."""
     if not _ADAPTIVE:
-        return chain_width(_CONFIG, block, current_runtime().round_index)
+        return chain_width(_CONFIG, block, current_runtime().round_index, requests)
     state = current_runtime()
     if state.controller is None:
         state.controller = WidthController(
@@ -124,15 +126,20 @@ def _settle_round_time(state):
 
 def _count_accepts(state, accept_len):
     """Adaptive policy: add this round's accept lengths on the GPU; read them back every few rounds."""
-    counts = torch.bincount(accept_len.reshape(-1).to(torch.int64).clamp(0, state.pending[1] - 1),
-                            minlength=max(_GRAPH_WIDTHS))
+    # Not torch.bincount: on CUDA it reads the input's range back to the host, which waits for the
+    # round's GPU work every round. The adaptive lane ran about 2.4 ms per round slower than fixed
+    # width 16 with two requests; bincount is the suspected cause, not yet confirmed on a GPU.
+    lengths = accept_len.reshape(-1).to(torch.int64).clamp(0, state.pending[1] - 1)
     held = state.accept_counts.get(state.pending)
-    state.accept_counts[state.pending] = counts if held is None else held + counts
+    if held is None:
+        held = state.accept_counts[state.pending] = torch.zeros(
+            max(_GRAPH_WIDTHS), dtype=torch.int64, device=lengths.device)
+    held.scatter_add_(0, lengths, torch.ones_like(lengths))
     state.accept_rounds += 1
     if state.accept_rounds % _ACCEPT_READBACK == 0:
         for (bucket, wid), total in state.accept_counts.items():
             state.controller.observe_accepts(bucket, wid, total.tolist())
-        state.accept_counts.clear()
+        state.accept_counts.clear()   # the next round starts new counters
         state.stats["adaptive"] = state.controller.snapshot()
 
 
@@ -140,6 +147,8 @@ def _configured_widths(block):
     """Chain widths this server can choose (Stage 0: pinned, schedule or the block)."""
     if _ADAPTIVE:
         return sorted(_GRAPH_WIDTHS)
+    if _CONFIG.chain_width_table:
+        return sorted({wid for _, wid in _CONFIG.chain_width_table})
     if _SCHED:
         return sorted(set(_SCHED))
     if _PINNED:
@@ -404,6 +413,8 @@ def _build_chain_runners(w, R):
     if mr.decode_cuda_graph_runner is None:
         if _CHAIN_ATTN:
             raise RuntimeError("ax-engine: AX_CHAIN_ATTN needs CUDA graphs (no private chain runner is built without them)")
+        if _CONFIG.chain_width_table:
+            raise RuntimeError("ax-engine: AX_CHAIN_WIDTH_BY_BATCH needs decode CUDA graphs (one runner per width)")
         return
     missing = [x for x in _configured_widths(int(w.block_size)) if x not in _GRAPH_WIDTHS]
     if missing:

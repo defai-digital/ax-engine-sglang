@@ -87,9 +87,13 @@ These lanes ran with `--disable-radix-cache` (see below).
 
 - The best fixed width depends on the batch: width 16 is 8% faster with two
   requests, width 8 is 20% faster with eight.
-- The adaptive policy reached width 8's rate at concurrency eight in its second
-  sweep. At concurrency two it stayed on width 16 (no switch in that batch-size
-  group) yet ran 6% below fixed width 16. That loss was not explained.
+- At concurrency eight the adaptive policy was 3% below fixed width 8 in its
+  first sweep and 1% above in its second; the 16-sample lane spread from 665 to
+  714 tok/s, so the lanes are not separable there.
+- At concurrency two it stayed on width 16 (no switch in that batch-size group)
+  and used about as many rounds as fixed width 16 (about 960 for 10,240
+  tokens), yet ran 6% below it: about 2.4 ms more per round. Exploration
+  rounds (6% of rounds, each about 3 ms slower) account for about 0.2 ms.
 - It switched 7 times in the three-to-four request group, where the two widths
   are equal: its score estimates crossed the 8% margin from noise.
 - `AX_ADAPTIVE_MIN_SAMPLES=16` was not better than 32. The default stays 32.
@@ -97,6 +101,34 @@ These lanes ran with `--disable-radix-cache` (see below).
 
 The release condition (5% above the best fixed configuration, no group more
 than 5% slower) is not met.
+
+### Review after the run
+
+Two reviewers (gpt-6.2-sol and Qwen4 Max, given the code and the round
+statistics) named the same cause for the per-round loss: `torch.bincount` in the
+accept counter, which on CUDA reads the input's range back to the host and so
+waits for the round's GPU work every round. This was inferred from PyTorch's
+source and was not confirmed on the GPU. They also found the switch rule biased
+rather than only noisy: another width's cost is one sampled round divided by the
+current width's last two rounds, a bucket mixes batch sizes three and four, and
+four such comparisons allowed a switch.
+
+Changes after this run, none measured on a GPU:
+
+- `AX_CHAIN_WIDTH_BY_BATCH` selects the chain width by batch size from a fixed
+  table (`1:16,5:8` for this checkpoint and GPU; five and six requests were not
+  measured). vLLM offers the same form as
+  `num_speculative_tokens_per_batch_size`.
+- The accept counter uses `scatter_add_`.
+- A switch needs `AX_ADAPTIVE_MIN_SAMPLES` comparisons instead of four. The
+  sampling every fourth round that collects them stops after four times the
+  samples a clean warm-up needs, then falls back to the normal rate.
+
+Two gaps found in the review of these changes are older than them and remain
+open: with `AX_SSM_POSITIONS` and `FC1_TREE64=1`, a chain width above the tree
+width passes the launch check although the state pool is sized for the tree
+width; and with `AX_CHAIN_DRAFT_WIDTHS`, a narrow draft round keeps full-width
+position offsets if SGLang falls back from its Triton block preparation.
 
 ### Fewer running requests than asked
 

@@ -21,8 +21,11 @@ def use_tree(config: PluginConfig, features: RoundFeatures) -> bool:
     return features.greedy or (config.tree_sampling and not features.min_p)
 
 
-def chain_width(config: PluginConfig, block: int, round_index: int) -> int:
-    if config.chain_schedule:
+def chain_width(config: PluginConfig, block: int, round_index: int, requests: int = 1) -> int:
+    if config.chain_width_table:
+        # AX_CHAIN_WIDTH_BY_BATCH: the last entry whose first batch size is not above this round's.
+        width = next(w for first, w in reversed(config.chain_width_table) if first <= max(requests, 1))
+    elif config.chain_schedule:
         width = config.chain_schedule[round_index % len(config.chain_schedule)]
     else:
         width = config.chain_width if config.chain_width is not None else block
@@ -54,7 +57,7 @@ class _Arm:
 class _Bucket:
     def __init__(self, widths, width):
         self.width = width
-        self.rounds = self.since_switch = self.switches = 0
+        self.rounds = self.since_switch = self.switches = self.probes = 0   # probes: warm-up samples
         self.recent = 0.0   # the current width's round time over its last few rounds
         self.arms = {w: _Arm() for w in widths}
 
@@ -71,8 +74,9 @@ class WidthController:
     - The bucket's current width is timed every round, the others only when sampled. Their round
       time is kept as a ratio to the current width's over its last few rounds, so a slowdown
       common to all widths (more requests, a busier GPU) does not favour the rarely timed ones.
-    - Until every width has `min_samples` round times and accept samples, the bucket stays on
-      `fallback` and samples the other widths in turn every fourth round.
+    - Until every width has `min_samples` round times and accept samples, and was timed against
+      the current width `min_samples` times, the bucket keeps its width (`fallback` at first)
+      and samples the other widths in turn every fourth round.
     - Afterwards it switches when another width scores more than `margin` above the current one,
       at most once per `cooldown` rounds, and samples the other widths in turn every `explore` rounds.
     """
@@ -106,8 +110,11 @@ class WidthController:
         return arm.cost
 
     def _comparable(self, state, width):
-        """A width can replace the current one once it was timed against it a few times."""
-        return width == state.width or state.arms[width].ratio_samples >= min(self.min_samples, 4)
+        """A width can replace the current one once it was timed against it `min_samples` times.
+
+        One sampled round is compared with the current width's last few rounds, and a bucket spans
+        several batch sizes, so a few comparisons can be off by more than the margin."""
+        return width == state.width or state.arms[width].ratio_samples >= self.min_samples
 
     def _score(self, state, width):
         cost = self._cost(state, width)
@@ -117,9 +124,14 @@ class WidthController:
         state = self._bucket(bucket)
         state.rounds += 1
         state.since_switch += 1
-        ready = all(self._ready(arm) for arm in state.arms.values())
-        if state.rounds % (self.explore if ready else min(4, self.explore)) == 0:
+        ready = (all(self._ready(arm) for arm in state.arms.values())
+                 and all(self._comparable(state, w) for w in self.widths))
+        # Warm-up samples every fourth round, for as many samples as four clean warm-ups need. A width
+        # whose round times keep being rejected would otherwise hold the bucket at that rate.
+        fast = not ready and state.probes < 4 * self.min_samples * (len(self.widths) - 1)
+        if state.rounds % (min(4, self.explore) if fast else self.explore) == 0:
             reason = "explore"
+            state.probes += not ready
             width = min((w for w in self.widths if w != state.width),
                         key=lambda w: (state.arms[w].sampled, w))
             state.arms[width].sampled = state.rounds
@@ -151,7 +163,7 @@ class WidthController:
             elif arm.ratio_samples:
                 arm.ratio /= base
         state.recent *= base
-        state.width, state.since_switch = width, 0
+        state.width, state.since_switch, state.probes = width, 0, 0
         state.switches += 1
 
     def _blend(self, mean, samples, value, count):
