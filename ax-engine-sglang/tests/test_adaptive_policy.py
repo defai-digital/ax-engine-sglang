@@ -1,0 +1,167 @@
+"""AX_POLICY_MODE=adaptive: the chain-width controller (ax_engine_sglang/policy.py), offline."""
+from pathlib import Path
+import sys
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ax_engine_sglang.config import PluginConfig
+from ax_engine_sglang.policy import WidthController, batch_bucket
+
+ADAPTIVE = {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8", "FC1_DRAFT_BLOCK": "16",
+            "FC1_FUSED": "1"}
+
+
+def accept_counts(accepted, width, requests=1):
+    counts = [0] * 16
+    counts[min(accepted, width - 1)] = requests
+    return counts
+
+
+def drive(controller, rounds, *, accepted, seconds, bucket=0):
+    """Serve `rounds` chain rounds whose drafts would be accepted up to `accepted` tokens."""
+    chosen = []
+    for _ in range(rounds):
+        width = controller.choose(bucket)
+        controller.observe_cost(bucket, width, seconds[width])
+        controller.observe_accepts(bucket, width, accept_counts(accepted, width))
+        chosen.append(width)
+    return chosen
+
+
+class BucketTests(unittest.TestCase):
+    def test_batch_sizes_map_to_buckets(self):
+        self.assertEqual([batch_bucket(n) for n in (1, 2, 3, 4, 5, 8, 9, 16, 17, 64)],
+                         [0, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+
+
+class WidthControllerTests(unittest.TestCase):
+    def controller(self, **values):
+        settings = dict(min_samples=8, cooldown=4, explore=8)
+        settings.update(values)
+        return WidthController((8, 16), 16, **settings)
+
+    def test_stays_on_the_fallback_until_every_width_is_measured(self):
+        controller = self.controller(min_samples=64)
+        chosen = drive(controller, 40, accepted=3, seconds={8: 0.010, 16: 0.020})
+        self.assertEqual({w for i, w in enumerate(chosen, 1) if i % 4}, {16})
+        self.assertEqual(chosen[3::4], [8] * 10)   # every fourth round samples the other width
+        self.assertEqual(controller.snapshot()["buckets"][0]["switches"], 0)
+
+    def test_switches_to_the_narrow_width_when_drafts_are_rejected_early(self):
+        controller = self.controller()
+        chosen = drive(controller, 200, accepted=3, seconds={8: 0.010, 16: 0.014})
+        self.assertEqual(controller.snapshot()["buckets"][0]["width"], 8)
+        self.assertGreater(chosen[-64:].count(8), 50)
+        self.assertEqual(controller.snapshot()["buckets"][0]["switches"], 1)
+
+    def test_keeps_the_wide_width_when_long_drafts_are_accepted(self):
+        controller = self.controller()
+        drive(controller, 200, accepted=15, seconds={8: 0.010, 16: 0.014})
+        self.assertEqual(controller.snapshot()["buckets"][0]["width"], 16)
+
+    def test_returns_to_the_wide_width_when_acceptance_recovers(self):
+        controller = self.controller()
+        drive(controller, 200, accepted=3, seconds={8: 0.010, 16: 0.014})
+        drive(controller, 2000, accepted=15, seconds={8: 0.010, 16: 0.014})
+        self.assertEqual(controller.snapshot()["buckets"][0]["width"], 16)
+
+    def test_a_gain_below_the_margin_does_not_switch(self):
+        controller = self.controller(margin=0.08)
+        # width 8: 4 tokens / 10.0 ms; width 16: 4 tokens / 10.5 ms (5% slower).
+        drive(controller, 400, accepted=3, seconds={8: 0.0100, 16: 0.0105})
+        self.assertEqual(controller.snapshot()["buckets"][0]["width"], 16)
+
+    def test_cooldown_spaces_the_switches(self):
+        controller = self.controller(cooldown=50, explore=4)
+        for phase in range(6):
+            drive(controller, 30, accepted=3 if phase % 2 else 15, seconds={8: 0.010, 16: 0.014})
+        self.assertLessEqual(controller.snapshot()["buckets"][0]["switches"], 180 // 50)
+
+    def test_buckets_decide_separately(self):
+        controller = self.controller()
+        drive(controller, 200, accepted=3, seconds={8: 0.010, 16: 0.014}, bucket=0)
+        drive(controller, 200, accepted=15, seconds={8: 0.020, 16: 0.022}, bucket=3)
+        buckets = controller.snapshot()["buckets"]
+        self.assertEqual((buckets[0]["width"], buckets[3]["width"]), (8, 16))
+
+    def test_wide_rounds_measure_the_narrow_width(self):
+        controller = self.controller()
+        controller.observe_accepts(0, 16, [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0])
+        arms = controller.buckets[0].arms
+        self.assertAlmostEqual(arms[16].tokens, (3 + 3 * 13) / 4)
+        self.assertAlmostEqual(arms[8].tokens, (3 + 3 * 8) / 4)   # capped at the anchor's 7 drafts + bonus
+        self.assertEqual((arms[16].token_samples, arms[8].token_samples), (4, 4))
+
+    def test_narrow_rounds_do_not_measure_the_wide_width(self):
+        controller = self.controller()
+        controller.observe_accepts(0, 8, accept_counts(7, 8))
+        self.assertEqual(controller.buckets[0].arms[16].token_samples, 0)
+
+    def test_a_width_with_its_own_draft_graph_uses_its_own_rounds_only(self):
+        controller = self.controller(direct_only=(8,))
+        controller.observe_accepts(0, 16, accept_counts(12, 16))
+        self.assertEqual(controller.buckets[0].arms[8].token_samples, 0)
+        controller.observe_accepts(0, 8, accept_counts(5, 8))
+        self.assertAlmostEqual(controller.buckets[0].arms[8].tokens, 6)
+
+    def test_idle_gaps_are_not_round_times(self):
+        controller = self.controller()
+        for _ in range(10):
+            controller.observe_cost(0, 16, 0.010)
+        for seconds in (0.9, 0.2, 0.0, -1.0):   # idle server, 20 x the mean, clock noise
+            controller.observe_cost(0, 16, seconds)
+        arm = controller.buckets[0].arms[16]
+        self.assertEqual(arm.cost_samples, 10)
+        self.assertAlmostEqual(arm.cost, 0.010)
+        self.assertEqual(controller.snapshot()["reasons"]["cost_dropped"], 4)
+
+    def test_without_round_times_the_fallback_stays(self):
+        controller = self.controller()
+        for _ in range(500):
+            width = controller.choose(0)
+            controller.observe_accepts(0, width, accept_counts(1, width))
+        self.assertEqual(controller.snapshot()["buckets"][0]["width"], 16)
+
+    def test_the_fallback_must_be_a_candidate(self):
+        with self.assertRaisesRegex(ValueError, "fallback"):
+            WidthController((8, 16), 12)
+        with self.assertRaisesRegex(ValueError, "two entries"):
+            WidthController((8,), 8)
+
+
+class AdaptiveConfigTests(unittest.TestCase):
+    def test_adaptive_reads_its_settings(self):
+        config = PluginConfig.from_env({**ADAPTIVE, "AX_ADAPTIVE_MARGIN": "0.1", "AX_ADAPTIVE_COOLDOWN": "20"})
+        self.assertEqual((config.policy_mode, config.adaptive_margin, config.adaptive_cooldown,
+                          config.adaptive_min_samples, config.adaptive_explore), ("adaptive", 0.1, 20, 64, 32))
+
+    def test_adaptive_starts_before_the_draft_block_is_resolved(self):
+        # The launcher validates once before SGLang resolves --speculative-num-draft-tokens.
+        from ax_engine_sglang.config import startup_config
+        environ = {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16 8"}
+        config, _ = startup_config(environ, hooks_available=True)
+        self.assertEqual((config.graph_widths, config.draft_block), ((16, 8), 24))
+        with self.assertRaisesRegex(ValueError, "AX_CHAIN_GRAPH_WIDTHS runner"):
+            PluginConfig.from_env({**ADAPTIVE, "AX_CHAIN_WIDTH": "12"})
+
+    def test_static_is_the_default(self):
+        self.assertEqual(PluginConfig.from_env({}).policy_mode, "static")
+
+    def test_adaptive_refuses_settings_it_cannot_combine_with(self):
+        cases = (
+            ({"AX_CHAIN_GRAPH_WIDTHS": "16"}, "at least two widths"),
+            ({"AX_CHAIN_SCHEDULE": "16x4,8x4"}, "AX_CHAIN_SCHEDULE"),
+            ({"AX_NVFP4_VERIFY_PARITY": "1", "AX_GDN_UNPACKED_DECODE": "1", "FC1_FUSED": "0",
+              "AX_GDN_RECURRENT_VERIFY": "1"}, "fixed chain width"),
+            ({"AX_ADAPTIVE_EXPLORE": "1"}, "AX_ADAPTIVE_EXPLORE"),
+            ({"AX_ADAPTIVE_MARGIN": "nan"}, "AX_ADAPTIVE_MARGIN"),
+            ({"AX_ADAPTIVE_MARGIN": "wide"}, "must be a number"),
+            ({"AX_POLICY_MODE": "auto"}, "static or adaptive"),
+        )
+        for extra, message in cases:
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, message):
+                PluginConfig.from_env({**ADAPTIVE, **extra})
+
+
+if __name__ == "__main__":
+    unittest.main()

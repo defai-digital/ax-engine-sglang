@@ -46,11 +46,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import torch
 
 from ax_engine_sglang.config import get_config
-from ax_engine_sglang.policy import RoundFeatures, chain_width, use_tree
+from ax_engine_sglang.policy import RoundFeatures, WidthController, batch_bucket, chain_width, use_tree
 from ax_engine_sglang.runtime import activate_worker, current_runtime, runtime_statistics
 from ax_engine_sglang.compat import patch_attribute
 
@@ -63,6 +64,8 @@ _GRAPH_WIDTHS = _CONFIG.graph_widths
 _DRAFT_WIDTHS = _CONFIG.draft_widths
 _CHECK = _CONFIG.chain_check
 _CHAIN_ATTN = _CONFIG.chain_attention
+_ADAPTIVE = _CONFIG.policy_mode == "adaptive"
+_ACCEPT_READBACK = 16   # rounds between host reads of the accept-length counts
 
 
 def is_tree():
@@ -92,13 +95,51 @@ def _check_alloc(batch):
             current_runtime().alloc_seen.pop(req.rid, None)
 
 
-def width(block):
+def width(block, requests=1):
     """Verify width of this chain round (anchor included)."""
-    return chain_width(_CONFIG, block, current_runtime().round_index)
+    if not _ADAPTIVE:
+        return chain_width(_CONFIG, block, current_runtime().round_index)
+    state = current_runtime()
+    if state.controller is None:
+        state.controller = WidthController(
+            _GRAPH_WIDTHS, _PINNED or max(_GRAPH_WIDTHS), min_samples=_CONFIG.adaptive_min_samples,
+            margin=_CONFIG.adaptive_margin, cooldown=_CONFIG.adaptive_cooldown,
+            explore=_CONFIG.adaptive_explore, direct_only=_DRAFT_WIDTHS)
+    bucket = batch_bucket(requests)
+    wid = state.controller.choose(bucket)
+    if not 2 <= wid <= block:
+        raise ValueError(f"ax-engine: chain width {wid} outside 2..{block} (drafter block)")
+    state.pending = (bucket, wid)
+    return wid
+
+
+def _settle_round_time(state):
+    """Adaptive policy: charge the chain round that just ended with the host time it took."""
+    now = time.perf_counter()
+    if state.pending is not None and state.round_started is not None:
+        state.controller.observe_cost(*state.pending, now - state.round_started)
+    state.pending = None
+    state.round_started = now
+
+
+def _count_accepts(state, accept_len):
+    """Adaptive policy: add this round's accept lengths on the GPU; read them back every few rounds."""
+    counts = torch.bincount(accept_len.reshape(-1).to(torch.int64).clamp(0, state.pending[1] - 1),
+                            minlength=max(_GRAPH_WIDTHS))
+    held = state.accept_counts.get(state.pending)
+    state.accept_counts[state.pending] = counts if held is None else held + counts
+    state.accept_rounds += 1
+    if state.accept_rounds % _ACCEPT_READBACK == 0:
+        for (bucket, wid), total in state.accept_counts.items():
+            state.controller.observe_accepts(bucket, wid, total.tolist())
+        state.accept_counts.clear()
+        state.stats["adaptive"] = state.controller.snapshot()
 
 
 def _configured_widths(block):
     """Chain widths this server can choose (Stage 0: pinned, schedule or the block)."""
+    if _ADAPTIVE:
+        return sorted(_GRAPH_WIDTHS)
     if _SCHED:
         return sorted(set(_SCHED))
     if _PINNED:
@@ -125,6 +166,8 @@ def begin_round(w, batch=None):
     drafter's state after a round drafted at a narrower width. Then, for a decode round that will be
     a chain round drafted at width W (AX_CHAIN_DRAFT_WIDTHS), switch the drafter to W."""
     state = activate_worker(w)
+    if _ADAPTIVE:
+        _settle_round_time(state)
     _leave_draft_width(w)
     block = getattr(w, "_ax_block", None)
     if block is None:
@@ -146,7 +189,7 @@ def begin_round(w, batch=None):
     w._ax_tree_round = (id(batch), tree_round(batch))
     if w._ax_tree_round[1]:
         return
-    wid = width(block)
+    wid = width(block, len(batch.reqs))
     w._ax_round_width = wid
     if wid in sets:
         _enter_draft_width(w, wid)
@@ -560,7 +603,7 @@ def _swap_accept_buffers(w, wid):
 def narrow(w, batch, draft_tokens, positions, cache_loc_2d, prefix_lens, kv_loc_plan, block):
     """Cut the round to its chain width. Returns the stock locals the verify uses next."""
     bs = draft_tokens.shape[0]
-    wid = w._ax_round_width or width(block)   # decided in begin_round when the round drafted at its width
+    wid = w._ax_round_width or width(block, bs)   # decided in begin_round when the round drafted at its width
     current_runtime().stats["chain_width"][wid] = current_runtime().stats["chain_width"].get(wid, 0) + 1
     current_runtime().round_info["width"] = wid
     _swap_accept_buffers(w, wid)
@@ -595,6 +638,8 @@ def record_accept(w, batch, candidates, accept_len):
     """After the stock accept of a chain round: token before the next anchor, per request; oracle dump."""
     if current_runtime().kind != "chain":
         return
+    if _ADAPTIVE and current_runtime().pending is not None:
+        _count_accepts(current_runtime(), accept_len)
     if _TREE and not _CONFIG.lattice:
         before = candidates.gather(1, accept_len.to(torch.int64)[:, None])[:, 0]
         for i, req in enumerate(batch.reqs):

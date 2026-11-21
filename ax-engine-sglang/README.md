@@ -203,6 +203,41 @@ on a served model (their kernel-level checks pass on SM110), and `AX_QSA_STABLE_
 served model. All `tests/gpu_*.py` checks pass on SM110; the NVFP4 parity check is SM120 only and
 skips.
 
+## Launch check, quality profile and adaptive chain width
+
+`ax-engine-sglang doctor` applies the launcher's rules to the target's and
+drafter's `config.json` without loading weights or starting SGLang. It takes
+the model and the speculative flags of the launch and reads the same `AX_*`
+variables. `--sm 12.0` checks another GPU's compute capability and `--json`
+prints the report for scripts. The command exits with status 1 when the launch
+would be refused.
+
+```bash
+AX_QUALITY_PROFILE=verified ax-engine-sglang doctor RadixArk/Qwen3.8-27B-NVFP4 \
+  --speculative-algorithm FC1_DFLASH_TREE \
+  --speculative-draft-model-path incoai/Qwen3.8-27B-DFlash2 \
+  --speculative-num-draft-tokens 16
+```
+
+The report gives `supported`, `experimental` or `unsupported`, the derived
+settings, the exact-output qualification of the GPU, target and route, and
+whether the launch could use GDN replay. It does not estimate GPU memory.
+
+| Variable | Meaning |
+|---|---|
+| `AX_QUALITY_PROFILE=verified` | run the parity path (`AX_NVFP4_VERIFY_PARITY=1` and its defaults) and refuse to start unless `qualification.py` lists an exact-output measurement for the GPU, target and route. Needs SGLang 0.5.23 launch defaults. The launcher prints how many sequences were measured and the conditions of the measurement |
+| `AX_QUALITY_PROFILE=fast` | state that the launch makes no exact-output claim; refuses `AX_NVFP4_VERIFY_PARITY=1` |
+| `AX_POLICY_MODE=adaptive` | experimental: choose each chain round's width among `AX_CHAIN_GRAPH_WIDTHS` (at least two) from measured accepted tokens and round time, per batch-size group. `AX_CHAIN_WIDTH`, else the widest graph width, serves until every width is measured. Refuses `AX_CHAIN_SCHEDULE`, `AX_NVFP4_VERIFY_PARITY=1`, `AX_GDN_CHAIN_REPLAY=1` and `--speculative-adaptive` |
+| `AX_ADAPTIVE_MIN_SAMPLES`, `AX_ADAPTIVE_MARGIN`, `AX_ADAPTIVE_COOLDOWN`, `AX_ADAPTIVE_EXPLORE` | adaptive policy: samples per width before a decision (64), gain needed to switch (0.08), rounds between switches (50), rounds between samples of the other widths (32) |
+
+The qualification rows cover Qwen3.8-27B NVFP4 on SM120 (RTX 5090 and RTX PRO
+6000) for AR, tree 16 and chain 8. Their status is `exact_measured`: every
+measured sequence equalled the AR reference, on fewer sequences than the
+1,000-sequence release gate. The adaptive policy has CPU tests only. Its
+throughput and its outputs under width changes have not been measured on a GPU,
+and the default stays `static`. Its choices appear under `adaptive` in the
+round statistics the worker prints every 1,000 rounds.
+
 ## Maintenance and validation
 
 Startup parses and validates the tree/chain configuration before installing

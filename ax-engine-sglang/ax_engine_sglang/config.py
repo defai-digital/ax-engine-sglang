@@ -39,6 +39,12 @@ class PluginConfig:
     gdn_chain_replay: bool = False
     nvfp4_verify_parity: bool = False
     nvfp4_parity_rows: int = 0
+    quality_profile: str | None = None
+    policy_mode: str = "static"
+    adaptive_min_samples: int = 64
+    adaptive_margin: float = 0.08
+    adaptive_cooldown: int = 50
+    adaptive_explore: int = 32
 
     @property
     def tree_requested(self) -> bool:
@@ -81,10 +87,13 @@ class PluginConfig:
                 if count <= 0 or len(schedule) + count > 10000:
                     raise ValueError("AX_CHAIN_SCHEDULE needs positive counts, at most 10000 rounds")
                 schedule.extend([width] * count)
-        try:
-            share = float(env.get("AX_SSM_CONV_SHARE") or 0.05)
-        except ValueError as error:
-            raise ValueError("AX_SSM_CONV_SHARE must be a number") from error
+        def number(name, default):
+            try:
+                return float(env.get(name) or default)
+            except ValueError as error:
+                raise ValueError(f"{name} must be a number") from error
+
+        share = number("AX_SSM_CONV_SHARE", 0.05)
         config = cls(
             tree=flag("AX_TREE", True), tree_sampling=flag("AX_TREE_SAMPLING"),
             tree64=flag("FC1_TREE64"), branch_pilot=flag("FC1_BRANCH_PILOT"),
@@ -107,6 +116,12 @@ class PluginConfig:
             gdn_chain_replay=flag("AX_GDN_CHAIN_REPLAY"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
             nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
+            quality_profile=env.get("AX_QUALITY_PROFILE") or None,
+            policy_mode=env.get("AX_POLICY_MODE") or "static",
+            adaptive_min_samples=integer("AX_ADAPTIVE_MIN_SAMPLES", 64),
+            adaptive_margin=number("AX_ADAPTIVE_MARGIN", 0.08),
+            adaptive_cooldown=integer("AX_ADAPTIVE_COOLDOWN", 50),
+            adaptive_explore=integer("AX_ADAPTIVE_EXPLORE", 32),
         )
         if validate:
             if env.get("AX_NVFP4_PARITY_ROWS") not in (None, "") and not config.nvfp4_verify_parity:
@@ -115,6 +130,30 @@ class PluginConfig:
         return config
 
     def validate(self):
+        if self.quality_profile not in (None, "verified", "fast"):
+            raise ValueError(f"AX_QUALITY_PROFILE must be verified or fast, got {self.quality_profile!r}")
+        if self.quality_profile == "verified" and not self.nvfp4_verify_parity:
+            raise ValueError("AX_QUALITY_PROFILE=verified runs the parity path: it needs the launch defaults or "
+                             "AX_NVFP4_VERIFY_PARITY=1, and AX_NVFP4_VERIFY_PARITY=0 contradicts it")
+        if self.quality_profile == "fast" and self.nvfp4_verify_parity:
+            raise ValueError("AX_QUALITY_PROFILE=fast contradicts AX_NVFP4_VERIFY_PARITY=1; use verified or unset one")
+        if self.policy_mode not in ("static", "adaptive"):
+            raise ValueError(f"AX_POLICY_MODE must be static or adaptive, got {self.policy_mode!r}")
+        if self.policy_mode == "adaptive":
+            if self.gdn_chain_replay:
+                raise ValueError("AX_POLICY_MODE=adaptive does not apply to AX_GDN_CHAIN_REPLAY (fixed width eight)")
+            if len(self.graph_widths) < 2:
+                raise ValueError("AX_POLICY_MODE=adaptive chooses among AX_CHAIN_GRAPH_WIDTHS; list at least two widths")
+            if self.chain_schedule:
+                raise ValueError("AX_POLICY_MODE=adaptive and AX_CHAIN_SCHEDULE both choose the chain width; unset one")
+            if self.nvfp4_verify_parity:
+                raise ValueError("AX_POLICY_MODE=adaptive is not measured with AX_NVFP4_VERIFY_PARITY "
+                                 "(parity results cover a fixed chain width)")
+            if self.adaptive_min_samples < 1 or self.adaptive_cooldown < 0 or self.adaptive_explore < 2:
+                raise ValueError("AX_ADAPTIVE_MIN_SAMPLES must be at least 1, AX_ADAPTIVE_COOLDOWN at least 0 "
+                                 "and AX_ADAPTIVE_EXPLORE at least 2")
+            if not math.isfinite(self.adaptive_margin) or not 0 <= self.adaptive_margin <= 1:
+                raise ValueError("AX_ADAPTIVE_MARGIN must be finite and between 0 and 1")
         if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
                                       or self.nvfp4_verify_parity or self.gdn_unpacked_decode):
             raise ValueError("AX_GDN_CHAIN_REPLAY uses the stock width-eight DFLASH worker without AX tree or parity options")
@@ -148,6 +187,8 @@ class PluginConfig:
             raise ValueError("AX_CHAIN_ATTN needs AX_CHAIN_GRAPH_WIDTHS")
         chain = self.chain_schedule or ((self.chain_width,) if self.chain_width is not None
                                         else (self.draft_block,))
+        if self.policy_mode == "adaptive" and self.chain_width is None:
+            chain = self.graph_widths   # the policy chooses among the graph widths, widest first
         for width in (*chain, *self.graph_widths, *self.draft_widths):
             if not 2 <= width <= self.draft_block:
                 raise ValueError(f"chain width {width} outside 2..{self.draft_block}")
@@ -179,7 +220,16 @@ def startup_config(environ=None, hooks_available=None):
     from .defaults import env_defaults, parity_requested, resolution_hooks_available
 
     try:
-        return PluginConfig.from_env(environ), False
+        config = PluginConfig.from_env(environ)
+        if config.quality_profile == "verified":
+            if hooks_available is None:
+                hooks_available = resolution_hooks_available()
+            if not hooks_available or environ.get("AX_AUTO_DEFAULTS", "1") == "0":
+                raise LookupError("AX_QUALITY_PROFILE=verified needs SGLang 0.5.23 launch defaults "
+                                  "(resolution hooks, AX_AUTO_DEFAULTS on) to check the qualification")
+        return config, False
+    except LookupError as error:
+        raise ValueError(str(error)) from None
     except ValueError:
         if hooks_available is None:
             hooks_available = resolution_hooks_available()

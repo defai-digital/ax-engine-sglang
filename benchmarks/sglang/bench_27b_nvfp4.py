@@ -33,7 +33,7 @@ def launch_config(args, lane):
         sys.executable, "-m", "sglang.launch_server", "--model-path", str(args.target.resolve()),
         "--host", "127.0.0.1", "--port", str(args.port), "--attention-backend", "flashinfer",
         "--fp4-gemm-backend", "flashinfer_cutlass", "--max-running-requests", str(args.slots),
-        "--cuda-graph-max-bs-decode", str(args.slots), "--context-length", "4096",
+        "--cuda-graph-max-bs-decode", str(args.slots), "--context-length", str(args.context_length),
         "--max-total-tokens", str(args.kv_tokens), "--mem-fraction-static", str(args.mem_fraction_static),
         "--chunked-prefill-size", prefill_size, "--skip-server-warmup",
         "--disable-radix-cache", "--disable-flashinfer-autotune", "--disable-prefill-cuda-graph",
@@ -93,7 +93,7 @@ def generate(base_url, input_ids, length, speculative):
     request = urllib.request.Request(f"{base_url}/generate", data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})
     started = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=240) as response:
+    with urllib.request.urlopen(request, timeout=240 + length) as response:
         result = json.load(response)
     wall_s = time.perf_counter() - started
     output_ids = result["output_ids"]
@@ -147,8 +147,8 @@ def run_lane(args, lane, prompts):
             run_pass(base_url, [max(prompts, key=len)], 1, 32, speculative)
             run_pass(base_url, prompts[:args.slots], args.slots, 32, speculative)
             passes = []
-            for concurrency, repeat in ((1, 1), (args.slots, 4), (args.slots, 4), (1, 1)):
-                result = run_pass(base_url, prompts * repeat, concurrency, 128, speculative)
+            for concurrency, repeat in ((1, 1), *args.concurrent_passes, (1, 1)):
+                result = run_pass(base_url, prompts * repeat, concurrency, args.output_tokens, speculative)
                 passes.append(result)
                 print(f"{lane} C{concurrency}: {result['output_tokens'] / result['wall_s']:.2f} output tok/s",
                       flush=True)
@@ -169,9 +169,18 @@ def main():
                         help="enable AX NVFP4 parity for AR, tree, and chain lanes")
     parser.add_argument("--slots", type=int, choices=(2, 4, 8), default=2)
     parser.add_argument("--kv-tokens", type=int, default=4096)
+    parser.add_argument("--context-length", type=int, default=4096)
+    parser.add_argument("--output-tokens", type=int, default=128, help="tokens generated per request")
+    parser.add_argument("--concurrency", type=int, nargs="+",
+                        help="concurrency of the passes between the two serialized passes (default: --slots twice)")
+    parser.add_argument("--repeat", type=int, default=4,
+                        help="times each concurrent pass sends the prompt list")
     parser.add_argument("--mem-fraction-static", type=float, default=0.94)
     parser.add_argument("--port", type=int, default=30517)
     args = parser.parse_args()
+    if any(not 1 <= value <= args.slots for value in args.concurrency or ()):
+        parser.error("--concurrency values must be between 1 and --slots")
+    args.concurrent_passes = [(value, args.repeat) for value in args.concurrency or (args.slots, args.slots)]
     if args.lanes is None:
         args.lanes = PARITY_LANES if args.verify_parity else DEFAULT_LANES
     if args.verify_parity and any(lane not in PARITY_LANES for lane in args.lanes):

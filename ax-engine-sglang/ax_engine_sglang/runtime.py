@@ -14,6 +14,13 @@ class WorkerRuntime:
     fused_context: object | None = None
     round_info: dict = field(default_factory=lambda: {"backend": None, "graph": None, "width": None})
     alloc_seen: dict = field(default_factory=dict)
+    # AX_POLICY_MODE=adaptive: the worker's WidthController, the (bucket, width) of the chain round
+    # in flight, when that round began, and accept-length counts not yet read back from the GPU.
+    controller: object | None = None
+    pending: tuple[int, int] | None = None
+    round_started: float | None = None
+    accept_counts: dict = field(default_factory=dict)
+    accept_rounds: int = 0
     stats: dict = field(default_factory=lambda: {
         "tree": 0, "chain": 0, "chain_width": {}, "hook_tree": 0, "hook_chain": 0,
         "alloc_checked": 0, "alloc_short": 0, "alloc_shrunk": 0, "replay": {},

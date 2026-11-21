@@ -59,8 +59,12 @@ class Plan:
             self.env[name] = (str(value), reason)
 
 
+def verified_requested(environ: Mapping[str, str]) -> bool:
+    return environ.get("AX_QUALITY_PROFILE") == "verified"
+
+
 def parity_requested(environ: Mapping[str, str]) -> bool:
-    return environ.get("AX_NVFP4_VERIFY_PARITY") == "1"
+    return environ.get("AX_NVFP4_VERIFY_PARITY") == "1" or verified_requested(environ)
 
 
 def env_defaults(environ: Mapping[str, str], tree: bool) -> dict[str, str]:
@@ -68,6 +72,8 @@ def env_defaults(environ: Mapping[str, str], tree: bool) -> dict[str, str]:
     values = dict(TREE_ENV) if tree else {}
     if parity_requested(environ):
         values.update(PARITY_ENV)
+        if verified_requested(environ):
+            values["AX_NVFP4_VERIFY_PARITY"] = "1"
         if tree:
             values.update(PARITY_TREE_ENV)
     return values
@@ -121,6 +127,21 @@ def has_nvfp4_moe(config: Mapping, quant: Mapping | None) -> bool:
     return bool(experts) and method == "modelopt" and algo.upper() in ("NVFP4", "MIXED_PRECISION")
 
 
+def is_nvfp4(config: Mapping, quant: Mapping | None) -> bool:
+    """ModelOpt NVFP4 weights, dense or MoE (the dense 27B lists MIXED_PRECISION)."""
+    text = text_config(config)
+    embedded = config.get("quantization_config") or text.get("quantization_config") or {}
+    method = str(embedded.get("quant_method") or ("modelopt" if quant else "")).lower()
+    algo = str(embedded.get("quant_algo") or ((quant or {}).get("quantization") or {}).get("quant_algo") or "")
+    return method == "modelopt" and algo.upper() in ("NVFP4", "MIXED_PRECISION")
+
+
+def route_of(algorithm: str, environ: Mapping[str, str]) -> str:
+    if not algorithm:
+        return "ar"
+    return "tree" if environ.get("AX_TREE", "1") != "0" else "chain"
+
+
 def _int_env(environ, name):
     value = environ.get(name)
     if value in (None, ""):
@@ -165,6 +186,15 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
          target_quant: Mapping | None = None, capability: tuple[int, int] | None = None) -> Plan:
     """Decide defaults for one launch. `args` is the raw (unresolved) ServerArgs."""
     result = Plan()
+    verified = verified_requested(environ)
+    if verified and environ.get("AX_GDN_CHAIN_REPLAY") == "1":
+        raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified does not cover "
+                                "AX_GDN_CHAIN_REPLAY=1 (replay was compared with stock DFlash2, not with AR)")
+    if verified and environ.get("AX_NVFP4_VERIFY_PARITY") == "0":
+        raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified contradicts AX_NVFP4_VERIFY_PARITY=0")
+    if verified and environ.get("AX_AUTO_DEFAULTS", "1") == "0":
+        raise LaunchConfigError("ax-engine-sglang: AX_QUALITY_PROFILE=verified needs the launch defaults "
+                                "(AX_AUTO_DEFAULTS=0 skips the qualification check)")
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         return result
@@ -196,6 +226,17 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         error = parity_algorithm_error(algorithm)
         if error:
             raise LaunchConfigError(error)
+        if verified:
+            from .qualification import lookup, target_key
+
+            route = route_of(algorithm, environ)
+            row = lookup(capability, target_key(target, target_quant), route)
+            if not row.admits_verified:
+                raise LaunchConfigError(f"ax-engine-sglang: AX_QUALITY_PROFILE=verified refused: {row.reason}. "
+                                        f"Unset it (or use fast) to run without an exact-output claim")
+            result.default_env(environ, "AX_NVFP4_VERIFY_PARITY", "1", "AX_QUALITY_PROFILE=verified")
+            result.notes.append(f"verified profile ({route}): {row.status}. {row.reason}")
+            result.notes.extend(f"verified profile requires: {condition}" for condition in row.conditions)
         wanted = {**PARITY_ARGS, **(PARITY_TREE_ARGS if algorithm == TREE_ALGORITHM else {})}
         for name, (value, flag) in wanted.items():
             given = getattr(args, name, None)
@@ -281,7 +322,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
     for name, value in env_defaults(environ, tree=True).items():
         reason = ("AX_NVFP4_VERIFY_PARITY=1: measured parity tree" if parity and name in PARITY_TREE_ENV
                   else "measured tree configuration")
-        if name not in PARITY_ENV:
+        if name not in PARITY_ENV and name not in result.env:
             result.default_env(environ, name, value, reason)
 
     if getattr(args, "max_running_requests", None) is None:

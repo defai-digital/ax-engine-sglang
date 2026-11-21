@@ -1,4 +1,4 @@
-"""Launch the SGLang language-model server with the AX plugin enabled."""
+"""Launch the SGLang language-model server with the AX plugin enabled, or check a launch."""
 
 import argparse
 import os
@@ -9,15 +9,21 @@ from . import __version__
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, epilog="Run ax-engine-sglang serve MODEL [SGLang server flags]."
+        description=__doc__, epilog="Run ax-engine-sglang serve MODEL [SGLang server flags]. "
+                                "Run ax-engine-sglang doctor MODEL [flags] to check a launch without loading weights."
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("command", nargs="?", choices=["serve"], help="start serving a model")
+    parser.add_argument("command", nargs="?", choices=["serve", "doctor"],
+                        help="serve: start serving a model; doctor: report whether a launch is supported")
     parser.add_argument("server_args", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
         return
+    if args.command == "doctor":
+        from .doctor import main as doctor
+
+        raise SystemExit(doctor(args.server_args))
     return serve(args.server_args)
 
 
@@ -55,3 +61,7 @@ def serve(argv):
         run_server(prepare_server_args(argv))
     finally:
         kill_process_tree(os.getpid(), include_parent=False)
+
+
+if __name__ == "__main__":
+    main()

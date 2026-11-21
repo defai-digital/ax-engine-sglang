@@ -15,6 +15,8 @@ class TreeSpec(CustomSpecAlgo):
         config = get_config()
         if config.ssm_positions and not server_args.disable_radix_cache:
             raise ValueError("AX_SSM_POSITIONS requires --disable-radix-cache")
+        if config.policy_mode == "adaptive" and getattr(server_args, "speculative_adaptive", False):
+            raise ValueError("AX_POLICY_MODE=adaptive and --speculative-adaptive both change the draft length; use one")
         _install_tree()
         SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
         from sglang.srt.arg_groups.overrides import declare_resolution
