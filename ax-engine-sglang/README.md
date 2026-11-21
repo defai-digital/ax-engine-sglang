@@ -228,7 +228,7 @@ whether the launch could use GDN replay. It does not estimate GPU memory.
 |---|---|
 | `AX_QUALITY_PROFILE=verified` | run the parity path (`AX_NVFP4_VERIFY_PARITY=1` and its defaults) and refuse to start unless `qualification.py` lists an exact-output measurement for the GPU, target and route. Needs SGLang 0.5.23 launch defaults. It sets the measured lane and refuses other values. Speculative serving needs the chain route: `AX_TREE=0` with `--speculative-num-draft-tokens 8` (the launcher sets `FC1_TREE_N=8` and `AX_CHAIN_WIDTH=8`); the tree route is refused. Every route: `--chunked-prefill-size 4096` (larger is accepted) and `--disable-prefill-cuda-graph`; `AX_TREE_SAMPLING=1` is refused. The launcher prints how many sequences were measured and the conditions of the measurement |
 | `AX_QUALITY_PROFILE=fast` | the launcher prints that the launch makes no exact-output claim; refuses `AX_NVFP4_VERIFY_PARITY=1` |
-| `AX_CHAIN_WIDTH_BY_BATCH` | chain width by the number of requests in the round, as `requests:width` entries from 1 request upwards: `1:16,5:8` verifies 16 tokens with up to four requests and 8 with five or more. Every width needs a graph in `AX_CHAIN_GRAPH_WIDTHS`. Replaces `AX_CHAIN_WIDTH`; refuses `AX_CHAIN_SCHEDULE`, `AX_POLICY_MODE=adaptive`, `AX_NVFP4_VERIFY_PARITY=1`, the verified profile, `--dp-size` above 1 and `--disable-decode-cuda-graph`. Needs `--max-running-requests` above 1 to have an effect. The doctor reports it as experimental. `1:16,5:8` was measured on one RTX PRO 6000 (below) |
+| `AX_CHAIN_WIDTH_BY_BATCH` | chain width by the number of requests in the round, as `requests:width` entries from 1 request upwards: `1:16,4:8` verifies 16 tokens with up to three requests and 8 with four or more. Every width needs a graph in `AX_CHAIN_GRAPH_WIDTHS`. Replaces `AX_CHAIN_WIDTH`; refuses `AX_CHAIN_SCHEDULE`, `AX_POLICY_MODE=adaptive`, `AX_NVFP4_VERIFY_PARITY=1`, the verified profile, `--dp-size` above 1 and `--disable-decode-cuda-graph`. Needs `--max-running-requests` above 1 to have an effect. The doctor reports it as experimental. `1:16,4:8` and `1:16,5:8` were measured on RTX PRO 6000 (below) |
 | `AX_POLICY_MODE=adaptive` | experimental: choose each chain round's width among `AX_CHAIN_GRAPH_WIDTHS` (at least two) from measured accepted tokens and round time, per batch-size group. `AX_CHAIN_WIDTH`, else the widest graph width, serves until every width is measured. One GPU (TP1, PP1, DP1). Refuses `AX_CHAIN_SCHEDULE`, `AX_NVFP4_VERIFY_PARITY=1`, `AX_GDN_CHAIN_REPLAY=1`, `--speculative-adaptive` and a graph width above the draft block |
 | `AX_ADAPTIVE_MIN_SAMPLES`, `AX_ADAPTIVE_MARGIN`, `AX_ADAPTIVE_COOLDOWN`, `AX_ADAPTIVE_EXPLORE` | adaptive policy: samples per width before a decision (32), gain needed to switch (0.08), rounds between switches (50), rounds between samples of the other widths (32) |
 
@@ -244,9 +244,14 @@ distinct prompts (256 tokens each, radix cache off, two sweeps), width 8 was
 4.7% slower than width 16 with two requests, 3.0% faster with four and 9.8%
 faster with eight. `AX_CHAIN_WIDTH_BY_BATCH="1:16,5:8"` with
 `AX_CHAIN_GRAPH_WIDTHS="16 8"` matched width 16 with two requests (+1.4%) and
-four (+0.3%) and was the fastest lane with eight (+10.6% over width 16). With
-four requests it still runs width 16, 2.6% below width 8; a split at three or
-four requests was not measured. A schedule alternating 31 rounds of width 16
+four (+0.3%) and was the fastest lane with eight (+10.6% over width 16), but
+with four requests it still ran width 16, 2.6% below width 8.
+
+Use `AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` on this GPU and checkpoint. On a
+second RTX PRO 6000 with the same prompts it was within 1% of the better fixed
+width with two, three, four and eight requests (+0.7% over width 16 with three,
+−0.2% against width 8 with four). `1:16,3:8` was 1.8% below width 16 with
+three requests, where width 16 is still slightly faster than width 8. A schedule alternating 31 rounds of width 16
 with one of width 8 (two switches every 32 rounds) stayed within 1% of fixed
 width 16, so switches at that rate cost nothing measurable.
 

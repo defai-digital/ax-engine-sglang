@@ -119,8 +119,9 @@ allowed a switch.
 Changes after this run:
 
 - `AX_CHAIN_WIDTH_BY_BATCH` selects the chain width by batch size from a fixed
-  table (`1:16,5:8` for this checkpoint and GPU). vLLM offers the same form as
-  `num_speculative_tokens_per_batch_size`. Measured below.
+  table (`1:16,4:8` for this checkpoint and GPU, after first trying `1:16,5:8`).
+  vLLM offers the same form as `num_speculative_tokens_per_batch_size`.
+  Measured below.
 - The accept counter uses `scatter_add_` instead of `torch.bincount`, which on
   CUDA reads the input's range back to the host every round. The reviewers named
   it as the cause of the per-round loss. Its effect was not measured on its own
@@ -178,13 +179,36 @@ tok/s, mean of the two sweeps, change against width 16:
   loss did not reproduce; the differences in generated text found above are
   the likely cause, but this was not isolated.
 - The table matches the better fixed width with two and eight requests. With
-  four it runs width 16, 2.6% below width 8; a split at three or four requests
-  was not measured.
+  four it runs width 16, 2.6% below width 8 (the split is measured below).
 - The adaptive policy is 2.3% below width 16 with two requests, 1.2% above
   width 8 with four (sweeps 582.0 and 598.2) and 0.6% below width 8 with eight.
   It does not meet the release condition.
 - The two concurrency-two sweeps of a lane differ by up to 3.4%: in every lane
   the first pass after the server starts is the slower one.
+
+### Where the table switches to width 8
+
+Source: `4c112bc`, on a third RTX PRO 6000 pod, the same 200 prompts and
+settings, with concurrency three added: `1:16,3:8` and `1:16,4:8` differ only
+when exactly three requests run. Raw outputs are in
+`results/m3_width_table/pro6000_split/` (not in Git). Output tok/s, mean of
+two sweeps, except concurrency two: the second sweep, because width 16's first
+pass after its server started was 10% slower than its second (314.9 against
+347.9).
+
+| Lane | C2 | C3 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| width 16 | 347.9 | 470.7 | 570.9 | 792.6 |
+| width 8 | 334.3 (−3.9%) | 467.0 (−0.8%) | 588.7 (+3.1%) | 864.0 (+9.0%) |
+| table `1:16,3:8` | 348.1 (+0.1%) | 462.1 (−1.8%) | 593.4 (+3.9%) | 863.2 (+8.9%) |
+| table `1:16,4:8` | 348.1 (+0.1%) | 474.2 (+0.7%) | 587.8 (+3.0%) | 866.0 (+9.3%) |
+
+- With three requests width 16 is still slightly faster than width 8, and
+  `1:16,3:8` is 1.8% below width 16 there, against `1:16,4:8` 0.7% above. Each
+  table's two C3 sweeps differ by less than 0.4% (width 8's by 1.1%).
+- `1:16,4:8` is within 1% of the better fixed width at every measured
+  concurrency. It replaces `1:16,5:8` as the recommended table for this GPU and
+  checkpoint; their four-request results come from different pods.
 
 The comparison of the design with vLLM's dynamic speculative decoding (which
 picks the token count per batch size in the scheduler, before the step) found no

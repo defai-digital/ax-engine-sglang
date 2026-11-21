@@ -97,10 +97,10 @@ class PluginConfig:
                 first, width = (int(x) for x in part.strip().split(":"))
             except ValueError as error:
                 raise ValueError("AX_CHAIN_WIDTH_BY_BATCH must contain requests:width entries, "
-                                 "such as 1:16,5:8") from error
+                                 "such as 1:16,4:8") from error
             table.append((first, width))
         if (env.get("AX_CHAIN_WIDTH_BY_BATCH") or "").strip() and not table:
-            raise ValueError("AX_CHAIN_WIDTH_BY_BATCH must contain requests:width entries, such as 1:16,5:8")
+            raise ValueError("AX_CHAIN_WIDTH_BY_BATCH must contain requests:width entries, such as 1:16,4:8")
 
         def number(name, default):
             try:
@@ -172,7 +172,7 @@ class PluginConfig:
             firsts = [first for first, _ in self.chain_width_table]
             if firsts[0] != 1 or any(b <= a for a, b in zip(firsts, firsts[1:])):
                 raise ValueError("AX_CHAIN_WIDTH_BY_BATCH entries are requests:width, starting at 1 request "
-                                 "and ascending, such as 1:16,5:8")
+                                 "and ascending, such as 1:16,4:8")
             if self.chain_width is not None or self.chain_schedule or self.policy_mode == "adaptive":
                 raise ValueError("AX_CHAIN_WIDTH_BY_BATCH chooses the chain width; unset AX_CHAIN_WIDTH, "
                                  "AX_CHAIN_SCHEDULE and AX_POLICY_MODE=adaptive")
