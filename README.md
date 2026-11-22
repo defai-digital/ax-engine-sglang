@@ -330,6 +330,12 @@ code / math / chat output tok/s.
 On both platforms, MTP7 with the QSA fix led on code and math. Stock MTP3
 was faster than MTP7 on chat. The Thor study also measured MTP3 with the QSA
 fix at **25.7 tok/s** on chat.
+
+On one Thor, vLLM with ax-engine-vllm's adaptive MTP length measured **62.4 / 53.3 / 36.9** tok/s
+(code / math / chat, one request) and 131.4 / 117.2 / 82.7 at four requests, ahead of SGLang's
+adaptive MTP with ax-engine-sglang and a draft vocabulary map (59.8 / 49.1 / 33.6 and
+123.3 / 103.1 / 70.5).
+[Single-Thor results](docs/reports/2026-11-21-flash-next-single-thor.md)
 [Flash Next benchmark conditions and all routes](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
 
 ## Documentation and repository layout

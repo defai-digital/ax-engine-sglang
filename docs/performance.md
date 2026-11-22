@@ -292,6 +292,23 @@ The two add-on routes used a 16-slot QSA pending ring. MTP7 gave the highest
 code and math throughput. The MTP3 add-on route led the four measured chat
 lanes. [Thor Flash Next configuration and accepted tokens](reports/2026-11-19-jetson-thor.md#5-qwen38-flash-next-nvfp4-over-two-thors)
 
+### One Jetson Thor with adaptive MTP
+
+One Thor served the same checkpoint alone. Rates are output tok/s at concurrency one / four, greedy,
+48 prompts per workload, 256-token limit.
+
+| Configuration | Code | Math | Chat |
+|---|---:|---:|---:|
+| Stock SGLang MTP3 | 42.3 / 96.2 | 38.8 / 92.2 | 28.9 / 65.4 |
+| Stock vLLM MTP3 | 42.4 / 101.0 | 41.2 / 101.5 | 31.3 / 75.8 |
+| SGLang adaptive MTP + ax-engine-sglang + 64k draft vocabulary map | 59.8 / 123.3 | 49.1 / 103.1 | 33.6 / 70.5 |
+| vLLM adaptive K + ax-engine-vllm + NVFP4 draft lm_head | **62.4 / 131.4** | **53.3 / 117.2** | **36.9 / 82.7** |
+
+vLLM needed two ax-engine-vllm changes: a QSA block alignment that lets MTP 5–8 start, and an
+adaptive K that picks 3, 5 or 7 draft tokens each step from accepted drafts. Optuna tuning of either
+engine's adaptive policy did not beat the defaults on held-out prompts.
+[Single-Thor setup, all lanes, Optuna and the QSA fix](reports/2026-11-21-flash-next-single-thor.md)
+
 ## Reproduce
 
 - [Run the GeForce RTX 5090 comparison](../results/rtx_5090_27b_nvfp4/REPORT.md#reproduce-the-comparison).

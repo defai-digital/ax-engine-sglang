@@ -14,7 +14,8 @@ GPU=0 PORT=30000 MODES="ar mtp3 mtp7" bash benchmarks/sglang/run_baselines.sh
 GPU=1 PORT=30001 MODES="dflash dspark mtp5 mtp2" bash benchmarks/sglang/run_baselines.sh
 python benchmarks/baselines/summarize.py results/track_a_baselines > results/track_a_baselines/REPORT.md
 ```
-Each mode runs greedy without thinking and the model card sampling (temperature 1.0, top-p 0.95,
+`READY_TIMEOUT` (seconds, default 1800) bounds the wait for each server to answer; Flash Next on
+one Jetson Thor needed 3600. Each mode runs greedy without thinking and the model card sampling (temperature 1.0, top-p 0.95,
 top-k 20) with thinking, on code (HumanEval), math (GSM8K) and chat prompts at concurrency 1, 8
 and 32. Every mode sees the same 64 requests per set (prompt i, seed i). All modes run with
 FlashInfer autotune and the radix prefix cache off, so the comparison uses one kernel policy
@@ -41,6 +42,8 @@ baseline that enters a comparison on one version.
 | `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark. Use `--verify-parity` to compare AX AR, tree 16 and chain 8 bit for bit, or `--verified-profile` to launch AR and chain 8 with `AX_QUALITY_PROFILE=verified` alone and compare them the same way; `--slots`, `--concurrency`, `--repeat` and `--output-tokens` size the passes. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. |
 | `ab_adaptive_width.py` | Throughput of chain-width policies on the same captured graphs, one server per lane: `w<W>` (fixed width), `table` (`AX_CHAIN_WIDTH_BY_BATCH`, `--table`, default `1:16,4:8`), `schedule` (`AX_CHAIN_SCHEDULE`, `--schedule`, default `16x31,8x1`) and `adaptive` (`--adaptive-env` for its settings). `--env NAME=VALUE` applies to every lane. Without the verified profile the generated text differs between lanes, so use many distinct prompts (`--input-ids`, about 200) and `--repeat 1`; ten prompts moved lanes by several percent. It compares the request limit the server reports with the sweep's concurrency; also check the server log for `max_running_requests is capped`, which SGLang prints when the GDN state cache lowers the limit |
 | `run_stage1a.sh` | Qwen3.8-27B comparison with greedy, sampling and multi-user checks |
+| `optuna_spec.py` | Optuna (TPE) tuning of the adaptive speculative-length policy on a running server: SGLang with ax-engine-sglang `AX_ADAPTIVE_LIVE`, or vLLM with ax-engine-vllm `AX_VLLM_ADAPTIVE_K`. `prompts` writes held-out tuning prompts, `tune` scores each policy by the geometric mean of output tok/s, `evaluate` runs the standard prompts with chosen policies. Requires `optuna` |
+| `build_token_map.py` | Hot-token lists for `--speculative-token-map` from UltraChat and GSM8K training text plus special tokens; `--coverage ids.jsonl` reports how many generated tokens a list covers |
 | `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes |
 | `run_paired.sh` | Repeat matched benchmark lanes for paired statistics |
 | `run_trtllm_dflash2.sh` | TensorRT-LLM DFlash2 comparison |

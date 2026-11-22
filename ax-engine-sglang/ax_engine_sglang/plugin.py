@@ -78,6 +78,10 @@ def _install_fixes(config):
         install_value_tile()
     import ax_qsa   # ax-engine-sglang: AX_QSA_RING widens the QSA pending ring (Qwen4-Exp verify windows)
     ax_qsa.install()
+    import ax_ple   # ax-engine-sglang: fresh sparse PLE table file per boot (AX_PLE_FRESH_FILE=0 disables)
+    ax_ple.install()
+    import ax_adaptive_live   # ax-engine-sglang: AX_ADAPTIVE_LIVE reloads the adaptive spec policy at runtime
+    ax_adaptive_live.install()
 
 
 def _install_tree():
