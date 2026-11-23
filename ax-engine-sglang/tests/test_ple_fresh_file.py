@@ -86,6 +86,13 @@ class FreshPleFileTests(unittest.TestCase):
         self.install(extra={"sglang.srt.models.qwen4_exp": model})
         self.assertIs(self.table.allocate_ple_host_table, fresh)
 
+    def test_more_than_one_rank_keeps_the_file(self):
+        path = self.existing_file()
+        fresh = ax_ple._fresh(self.table.allocate_ple_host_table, self.table, world_size=lambda: 2)
+        fresh((8, 4), "fp8", backend="file", tag="rows0-8")
+        self.assertTrue(path.exists())
+        self.assertEqual(self.calls, [("file", True)])
+
     def test_without_the_ple_module_nothing_happens(self):
         with patch.dict(sys.modules, {"sglang.srt.models.qwen4_exp_ple_table": None}):
             ax_ple.install()

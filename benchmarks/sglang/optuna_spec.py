@@ -14,7 +14,8 @@ evaluation stays unseen.
   python benchmarks/sglang/optuna_spec.py prompts --out tune_prompts.json
   python benchmarks/sglang/optuna_spec.py tune --live /w/live.json --steps 1 2 3 4 5 6 7 \
       --base-url http://127.0.0.1:30000 --prompt-file tune_prompts.json --out /w/optuna --trials 24
-  python benchmarks/sglang/optuna_spec.py apply --live /w/live.json --config best.json --base-url ...
+  python benchmarks/sglang/optuna_spec.py evaluate --live /w/live.json --configs /w/optuna/best.json \
+      --base-url http://127.0.0.1:30000 --out /w/optuna/eval
 """
 from __future__ import annotations
 
@@ -116,10 +117,11 @@ def chat_once(base_url: str, timeout: float = 120) -> None:
 
 def apply_policy(live: Path, cfg: dict, base_url: str, timeout: float = 300) -> dict:
     """Write `cfg`, then send short requests until the server acknowledges its version."""
+    ack_path = Path(f"{live}.ack")
+    ack_path.unlink(missing_ok=True)   # an ack left by the previous policy must not answer for this one
     tmp = live.with_suffix(".tmp")
     tmp.write_text(json.dumps(cfg))
     os.replace(tmp, live)
-    ack_path = Path(f"{live}.ack")
     deadline = time.time() + timeout
     while time.time() < deadline:
         chat_once(base_url)
@@ -128,10 +130,11 @@ def apply_policy(live: Path, cfg: dict, base_url: str, timeout: float = 300) -> 
                 ack = json.loads(ack_path.read_text())
             except json.JSONDecodeError:
                 continue
-            if not ack.get("applied") and ack.get("error"):
-                raise RuntimeError(f"policy rejected: {ack['error']}")
-            if ack.get("applied") and ack.get("version") == cfg["version"]:
-                return ack
+            if ack.get("version") != cfg["version"]:
+                continue
+            if not ack.get("applied"):
+                raise RuntimeError(f"policy rejected: {ack.get('error')}")
+            return ack
     raise TimeoutError(f"server did not acknowledge policy version {cfg['version']}")
 
 

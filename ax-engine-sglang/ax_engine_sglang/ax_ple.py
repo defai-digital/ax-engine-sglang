@@ -12,6 +12,10 @@ Before SGLang maps the file, this hook unlinks an existing table file so SGLang 
 sparse one. The contents are rewritten in full on every boot either way. Unlinking instead of
 truncating in place leaves a server that still maps the old file on its own inode, so it cannot
 fault past the end of a shrunk file. AX_PLE_FRESH_FILE=0 leaves SGLang as is.
+
+The file name depends only on shape, dtype and tag, so with more than one rank (torch.distributed
+world size above one) the ranks could share a name; one rank unlinking it while another writes it
+would split them onto separate inodes. The hook therefore acts only in a single-rank server.
 """
 import os
 import sys
@@ -19,9 +23,20 @@ import sys
 from ax_engine_sglang.compat import patch_attribute
 
 
-def _fresh(allocate, table_module):
+def _world_size():
+    try:
+        import torch.distributed as dist
+    except ImportError:
+        return 1
+    return dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+
+
+def _fresh(allocate, table_module, world_size=_world_size):
     def allocate_ple_host_table(shape, dtype, backend="pinned", table_dir=None, tag=None):
-        if backend == "file":
+        ranks = world_size() if backend == "file" else 1
+        if ranks > 1:
+            print(f"ax-engine-sglang: PLE table file kept with {ranks} ranks", file=sys.stderr)
+        elif backend == "file":
             directory = os.path.expanduser(
                 table_dir or table_module.envs.SGLANG_QWEN4_PLE_FILE_DIR.get())
             path = os.path.join(directory, table_module.ple_table_file_name(shape, dtype, tag))

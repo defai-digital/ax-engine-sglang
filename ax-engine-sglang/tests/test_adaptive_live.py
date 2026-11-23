@@ -48,7 +48,7 @@ class TestAdaptiveLive(unittest.TestCase):
         self.now = [0.0]
         self.state = ax_adaptive_live.LiveState(self.path, 0.5)
         self.verify = ax_adaptive_live._wrap(Params.on_verify_complete, module(), self.state,
-                                             clock=lambda: self.now[0])
+                                             clock=lambda: self.now[0], world_size=lambda: 1)
 
     def tearDown(self):
         self.dir.cleanup()
@@ -80,7 +80,8 @@ class TestAdaptiveLive(unittest.TestCase):
         self.assertEqual(params._slots[1].candidate_steps, [3, 5, 7])
         self.assertEqual(params._slots[1].current_steps, 3)   # keeps the running step when allowed
         self.assertEqual(params._slots[1].ema_alpha, 0.5)     # shared keys apply to every slot
-        self.assertEqual(self.ack(), {"version": 7, "applied": True, "step_counts": {"3": 2}})
+        # the batch that triggered the reload ran at step 3 under the old policy and counts there
+        self.assertEqual(self.ack(), {"version": 7, "applied": True, "step_counts": {"3": 3}})
 
     def test_polls_at_most_every_interval_and_only_on_mtime_change(self):
         params = Params()
@@ -104,6 +105,50 @@ class TestAdaptiveLive(unittest.TestCase):
         ack = self.ack()
         self.assertFalse(ack["applied"])
         self.assertIn("subset of the boot candidates", ack["error"])
+
+    def test_malformed_json_is_rejected_without_raising(self):
+        for mtime, cfg in enumerate([[], {"1": [1, 2]}, "x"], start=1):
+            params = Params()
+            boot = params._slots
+            self.write(cfg, mtime * 10**9)
+            self.now[0] = mtime
+            self.verify(params, [1], 1)   # must not raise on the verify path
+            self.assertIs(params._slots, boot)
+            self.assertFalse(self.ack()["applied"])
+
+    def test_rejected_ack_names_the_attempted_version(self):
+        self.write({"version": 9, "1": {"candidate_steps": [8]}}, 10**9)
+        self.verify(Params(), [1], 1)
+        self.assertEqual(self.ack()["version"], 9)
+
+    def test_steps_must_have_been_captured_for_each_graph_batch_size(self):
+        params = Params()
+        params._slots = {1: Slot(3, {"candidate_steps": [1, 2, 3, 4, 5, 6, 7]}),
+                         4: Slot(3, {"candidate_steps": [3, 5, 7]})}
+        params._cuda_graph_bs = [1, 2, 4, 8]
+        boot = params._slots
+        # batch sizes 4 and 8 had graphs only for 3, 5 and 7 at boot
+        self.write({"version": 1, "1": {"candidate_steps": [1, 2, 3]}}, 10**9)
+        self.verify(params, [1], 1)
+        self.assertIs(params._slots, boot)
+        self.assertIn("CUDA-graph batch size 4", self.ack()["error"])
+        self.write({"version": 2, "1": {"candidate_steps": [1, 2, 3]}, "4": {"candidate_steps": [3, 5]}},
+                   2 * 10**9)
+        self.now[0] = 1.0
+        self.verify(params, [1], 1)
+        self.assertEqual(params._bs_list, [1, 4])
+        self.assertTrue(self.ack()["applied"])
+
+    def test_more_than_one_rank_keeps_the_boot_policy(self):
+        verify = ax_adaptive_live._wrap(Params.on_verify_complete, module(), self.state,
+                                        clock=lambda: self.now[0], world_size=lambda: 2)
+        params = Params()
+        boot = params._slots
+        self.write({"version": 1, "1": {"candidate_steps": [5]}}, 10**9)
+        verify(params, [1], 1)
+        self.assertIs(params._slots, boot)
+        self.assertEqual(params.calls, [([1], 1)])
+        self.assertFalse(os.path.exists(self.path + ".ack"))
 
     def test_install_needs_the_environment(self):
         with mock.patch.dict(os.environ, {}, clear=True), \
