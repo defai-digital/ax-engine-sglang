@@ -67,7 +67,9 @@ def build_prompts(n: int, offsets: dict[str, int]) -> dict[str, list[str]]:
 def slot_steps(lo: int, hi: int, stride: int, allowed: list[int]) -> list[int]:
     lo, hi = min(lo, hi), max(lo, hi)
     steps = sorted({*range(lo, hi + 1, stride), hi} & set(allowed))
-    return steps or [hi]
+    # With gaps in the captured steps the range can miss them all; the server would reject any
+    # uncaptured step, so fall back to the captured step nearest to hi.
+    return steps or [min(allowed, key=lambda s: (abs(s - hi), s))]
 
 
 def policy_from_params(params: dict, allowed: list[int], version) -> dict:
@@ -99,14 +101,15 @@ def fixed(k: int) -> dict:
 
 def baselines(allowed: list[int]) -> dict[str, dict]:
     """Starting points: the engine default adaptive policy and fixed lengths."""
-    lo = min(allowed)
-    default = {**DEFAULTS, **{f"{p}{s}": v for s in SLOTS for p, v in (("lo", 1 if lo == 1 else 3),
-                                                                        ("hi", 7), ("stride", 2))}}
-    return {"default": default, "fixed3": fixed(3), "fixed4": fixed(4)}
+    lo = 1 if min(allowed) == 1 else 3
+    hi = 7 if 7 in allowed else max(allowed)
+    default = {**DEFAULTS, **{f"{p}{s}": v for s in SLOTS for p, v in (("lo", lo), ("hi", hi), ("stride", 2))}}
+    # Fixed lengths only where the boot captured them; anything else would be rejected.
+    return {"default": default, **{f"fixed{k}": fixed(k) for k in (3, 4) if k in allowed}}
 
 
-def chat_once(base_url: str, timeout: float = 120) -> None:
-    body = json.dumps({"model": "qwen", "messages": [{"role": "user", "content": "Count from 1 to 40."}],
+def chat_once(base_url: str, model: str, timeout: float = 120) -> None:
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": "Count from 1 to 40."}],
                        "max_tokens": 64, "temperature": 0,
                        "chat_template_kwargs": {"enable_thinking": False}}).encode()
     req = urllib.request.Request(f"{base_url}/v1/chat/completions", data=body,
@@ -115,7 +118,7 @@ def chat_once(base_url: str, timeout: float = 120) -> None:
         resp.read()
 
 
-def apply_policy(live: Path, cfg: dict, base_url: str, timeout: float = 300) -> dict:
+def apply_policy(live: Path, cfg: dict, base_url: str, model: str, timeout: float = 300) -> dict:
     """Write `cfg`, then send short requests until the server acknowledges its version."""
     ack_path = Path(f"{live}.ack")
     ack_path.unlink(missing_ok=True)   # an ack left by the previous policy must not answer for this one
@@ -124,7 +127,7 @@ def apply_policy(live: Path, cfg: dict, base_url: str, timeout: float = 300) -> 
     os.replace(tmp, live)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        chat_once(base_url)
+        chat_once(base_url, model)
         if ack_path.exists():
             try:
                 ack = json.loads(ack_path.read_text())
@@ -144,7 +147,8 @@ def run_bench(mode: str, args, prompt_file: Path | None, n: int, out: Path) -> l
            "--n-requests", str(n), "--concurrency", *map(str, args.concurrency)]
     if prompt_file is not None:
         cmd += ["--prompt-file", str(prompt_file)]
-    subprocess.run(cmd, check=True, cwd=ROOT)
+    # bench_speed reads the served model name from SERVED_MODEL.
+    subprocess.run(cmd, check=True, cwd=ROOT, env={**os.environ, "SERVED_MODEL": args.model})
     return json.loads((out / mode / "speed_greedy.json").read_text())["results"]
 
 
@@ -169,7 +173,7 @@ def tune(args) -> None:
     def objective(trial):
         params = suggest(trial, args.steps)
         cfg = policy_from_params(params, args.steps, trial.number)
-        ack = apply_policy(Path(args.live), cfg, args.base_url)
+        ack = apply_policy(Path(args.live), cfg, args.base_url, args.model)
         start = time.time()
         results = run_bench(f"t{trial.number:03d}", args, Path(args.prompt_file), args.n_requests, out / "trials")
         value = score(results)
@@ -187,12 +191,15 @@ def tune(args) -> None:
     remaining = args.trials - len(done)
     if remaining > 0:
         study.optimize(objective, n_trials=remaining, catch=(RuntimeError, TimeoutError, subprocess.CalledProcessError))
-    best = study.best_trial
-    cfg = policy_from_params(best.params, args.steps, "best")
-    (out / "best.json").write_text(json.dumps(cfg, indent=1))
     defaults = baselines(args.steps)
     (out / "default.json").write_text(json.dumps(policy_from_params(defaults["default"], args.steps, "default"),
                                                  indent=1))
+    try:
+        best = study.best_trial
+    except ValueError:   # every trial failed: nothing to report as best
+        sys.exit("NO_COMPLETE_TRIAL: every trial failed; see the server log and trials.jsonl")
+    cfg = policy_from_params(best.params, args.steps, "best")
+    (out / "best.json").write_text(json.dumps(cfg, indent=1))
     print(f"BEST trial {best.number} score={best.value:.2f} policy={json.dumps(cfg)}", flush=True)
 
 
@@ -203,7 +210,7 @@ def evaluate(args) -> None:
         cfg = json.loads(Path(path).read_text())
         name = Path(path).stem
         cfg["version"] = f"eval-{name}-{time.time():.0f}"
-        apply_policy(Path(args.live), cfg, args.base_url)
+        apply_policy(Path(args.live), cfg, args.base_url, args.model)
         for r in run_bench(f"{args.prefix}{name}", args, None, args.n_requests, out):
             print(f"EVAL {name} {r['prompt_set']} c={r['concurrency']} out={r['output_tok_s']:.1f} "
                   f"accept_len={r.get('spec', {}).get('mean_acceptance_length')}", flush=True)
@@ -225,8 +232,12 @@ def main() -> None:
         p.add_argument("--out", required=True)
         p.add_argument("--max-tokens", type=int, default=256)
         p.add_argument("--concurrency", type=int, nargs="+", default=[1, 4])
+        p.add_argument("--model", default=os.environ.get("SERVED_MODEL", "qwen"),
+                       help="served model name (vLLM's default is the checkpoint path)")
     tune_p = sub.choices["tune"]
-    tune_p.add_argument("--steps", type=int, nargs="+", required=True, help="speculative lengths the boot captured")
+    tune_p.add_argument("--steps", type=int, nargs="+", required=True,
+                        help="speculative lengths the boot captured for every batch size (boot with one "
+                             "candidate list shared by all slots; the server rejects steps a slot lacks)")
     tune_p.add_argument("--prompt-file", required=True)
     tune_p.add_argument("--n-requests", type=int, default=16)
     tune_p.add_argument("--trials", type=int, default=24)
@@ -238,6 +249,11 @@ def main() -> None:
     eval_p.add_argument("--n-requests", type=int, default=48)
     eval_p.add_argument("--prefix", default="")
     args = ap.parse_args()
+    # run_bench works from the repository root, so relative paths are resolved here first.
+    for name in ("out", "live", "prompt_file"):
+        if getattr(args, name, None):
+            setattr(args, name, str(Path(getattr(args, name)).resolve()))
+    args.configs = [str(Path(c).resolve()) for c in getattr(args, "configs", None) or []]
     if args.cmd == "prompts":
         sets = build_prompts(args.n, {"code": args.code_offset, "math": args.math_offset, "chat": args.chat_offset})
         Path(args.out).write_text(json.dumps(sets, indent=1))

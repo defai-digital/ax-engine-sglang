@@ -14,29 +14,26 @@ truncating in place leaves a server that still maps the old file on its own inod
 fault past the end of a shrunk file. AX_PLE_FRESH_FILE=0 leaves SGLang as is.
 
 The file name depends only on shape, dtype and tag, so with more than one rank (torch.distributed
-world size above one) the ranks could share a name; one rank unlinking it while another writes it
-would split them onto separate inodes. The hook therefore acts only in a single-rank server.
+world size or --dp-size above one) the ranks could share a name; one rank unlinking it while another
+writes it would split them onto separate inodes. The hook therefore acts only in a single-rank
+server. Separate servers must not share a PLE directory (SGLang's own rule: the directory is private
+to one checkpoint, by default $SGLANG_CACHE_DIR/ple/<model path>); a second server booting on the
+same directory would unlink the file the first one maps.
 """
 import os
 import sys
 
+from ax_engine_sglang.ax_ranks import server_ranks
 from ax_engine_sglang.compat import patch_attribute
 
 
-def _world_size():
-    try:
-        import torch.distributed as dist
-    except ImportError:
-        return 1
-    return dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
-
-
-def _fresh(allocate, table_module, world_size=_world_size):
+def _fresh(allocate, table_module, world_size=server_ranks):
     def allocate_ple_host_table(shape, dtype, backend="pinned", table_dir=None, tag=None):
         ranks = world_size() if backend == "file" else 1
         if ranks > 1:
             print(f"ax-engine-sglang: PLE table file kept with {ranks} ranks", file=sys.stderr)
         elif backend == "file":
+            # Resolved exactly as allocate_ple_host_table does.
             directory = os.path.expanduser(
                 table_dir or table_module.envs.SGLANG_QWEN4_PLE_FILE_DIR.get())
             path = os.path.join(directory, table_module.ple_table_file_name(shape, dtype, tag))

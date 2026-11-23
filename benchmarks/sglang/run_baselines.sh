@@ -89,7 +89,8 @@ expected_algorithm() {
 # also be ours: still alive after /health succeeds and reporting this mode's algorithm.
 # READY_TIMEOUT (seconds, default 1800) bounds the wait; large checkpoints on slow hosts need more.
 wait_ready() {
-  for _ in $(seq $(( ${READY_TIMEOUT:-1800} / 5 ))); do
+  local deadline=$(( SECONDS + ${READY_TIMEOUT:-1800} ))   # wall clock, probe time included
+  while (( SECONDS < deadline )); do
     kill -0 "$SERVER_PID" 2>/dev/null || return 1
     if [[ "$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$BASE_URL/health")" == "200" ]]; then
       sleep 2

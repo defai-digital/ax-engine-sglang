@@ -8,8 +8,9 @@ memory) · **Stacks:** SGLang 0.5.23 (`lmsysorg/sglang:v0.5.23-cu130`) with ax-e
 
 The fastest configuration on one Thor is **vLLM with ax-engine-vllm's adaptive MTP length**
 (`AX_VLLM_ADAPTIVE_K`, K chosen each step from 3/5/7 by accepted drafts) plus the QSA block fix
-and an NVFP4 copy of the draft lm_head. One server matched or beat the best fixed length of every
-workload, and beat the best SGLang configuration on every workload and concurrency:
+and an NVFP4 copy of the draft lm_head. One server beat the best fixed length on every workload and
+concurrency but one (math C1: 53.3 against MTP7's 53.5 tok/s, within noise), and beat the best
+SGLang configuration on every workload and concurrency:
 
 | 48 prompts, output tok/s (C1 / C4) | Code | Math | Chat | Geomean |
 |---|---:|---:|---:|---:|
@@ -30,7 +31,8 @@ workload, and beat the best SGLang configuration on every workload and concurren
 - Greedy outputs differ between lanes (Flash Next NVFP4 is not batch-invariant on SM110), so small
   differences are within noise; the vLLM lead holds on all six levels.
 - Accuracy held: on full HumanEval and GSM8K, vLLM's adaptive lane scored exactly what its AR server
-  scored (0.963 / 0.961) in half the time, and SGLang's fastest lane was within one to two items.
+  scored (0.963 / 0.961) in half the time; SGLang's fastest lane scored 2 HumanEval items lower
+(not significant, p = 0.63) and the same on GSM8K.
 
 ## Runs
 
@@ -134,11 +136,12 @@ must divide the attention block size 1664`. The QSA indexer keeps the raw keys o
 compress group in a ring of `round_up(4 + N, 4)` slots and asserts that the ring divides the
 scheduler block. vLLM sizes that block from the Mamba page and each attention backend's smallest
 kernel block (QSA: multiple of 16, indexer: any), so the ring never enters the alignment: 1664 =
-16 × 104 works for 8- and 16-slot rings (N ≤ 4, N ≥ 9) but not 12.
+16 × 104 works for 8- and 16-slot rings (N ≤ 4 and N 9–12) but not 12.
 
 ax-engine-vllm `AX_VLLM_QSA_BLOCK_ALIGN=1` makes the indexer backend report a multiple of the ring
-capacity to the calls that choose and validate the block size. The block became 1728 (a multiple of
-lcm(16, 12) = 48) and MTP7 started and served.
+capacity to the calls that choose and validate the block size. The run logged a 1728-token block,
+a multiple of lcm(16, 12) = 48, and MTP7 started and served. Rounding 1664 up to a multiple of 48
+alone would give 1680, so another of vLLM's block alignments also applies on this host.
 
 ## Adaptive length in vLLM and Optuna tuning
 
@@ -231,15 +234,16 @@ GSM8K test (1,319) sets: greedy without thinking, 1,024-token limit, four reques
 | SGLang AR | 158 / 164 (0.963) | 1269 / 1319 (0.962) | 9,359 s | 57.4 |
 | SGLang adaptive + AX + 64k draft map | 156 / 164 (0.951) | 1269 / 1319 (0.962) | 5,297 s | 100.7 |
 
-- Speculative decoding did not change accuracy on either engine. vLLM's adaptive lane scored the
-  same as its AR server on both sets; GSM8K swapped 7 items each way. SGLang's lane lost 3 and
-  gained 1 HumanEval item (exact McNemar p = 0.63) and swapped 9 GSM8K items each way.
+- vLLM's adaptive lane scored the same as its AR server on both sets; GSM8K swapped 7 items each
+  way. SGLang's lane scored 2 HumanEval items lower, losing 3 and gaining 1 (exact McNemar
+  p = 0.63, not significant), and the same on GSM8K with 9 items swapped each way.
 - Over about 533k generated tokens per lane, vLLM's adaptive lane ran 1.90 times faster than its AR
   server and 14% faster than SGLang's fastest lane, consistent with the 48-prompt results. Mean
   acceptance length was 4.91 (vLLM) and 4.21 (SGLang) in the GSM8K phase.
 - Text agreement with the same engine's AR output: vLLM 80% (HumanEval) and 36% (GSM8K), SGLang
-  62% and 10%. The two AR servers agree with each other on only 65% and 11%, so these differences
-  come from each engine's numerics, not from the draft.
+  62% and 10%. The two AR servers agree with each other on only 65% and 11%, so differences of this
+  size arise from numerics alone (verify shapes are not batch-invariant). This comparison does not
+  isolate how much of each engine's own disagreement the draft adds.
 
 ## Output agreement
 

@@ -26,7 +26,9 @@ class Params:
         self._bs_list = [1, 4]
         self._slots = {1: Slot(3, {"candidate_steps": self.candidate_steps}),
                        4: Slot(3, {"candidate_steps": self.candidate_steps})}
+        self._cuda_graph_bs = None   # CUDA graphs off, as SGLang sets it before init_states
         self.calls = []
+        self.slots_seen = []
 
     def _route(self, batch_size):
         return self._slots[max(b for b in self._bs_list if b <= batch_size) if batch_size >= self._bs_list[0]
@@ -34,6 +36,7 @@ class Params:
 
     def on_verify_complete(self, drafts, batch_size):
         self.calls.append((drafts, batch_size))
+        self.slots_seen.append(self._slots)
         return None
 
 
@@ -138,6 +141,58 @@ class TestAdaptiveLive(unittest.TestCase):
         self.verify(params, [1], 1)
         self.assertEqual(params._bs_list, [1, 4])
         self.assertTrue(self.ack()["applied"])
+
+    def test_the_triggering_batch_feeds_the_old_policy(self):
+        params = Params()
+        boot = params._slots
+        self.write({"version": 1, "1": {"candidate_steps": [5, 7]}}, 10**9)
+        new_step = self.verify(params, [4], 1)
+        self.assertIs(params.slots_seen[0], boot)       # delegated before the swap
+        self.assertIsNot(params._slots, boot)
+        self.assertEqual(new_step, 5)                   # the new slot's step runs next (3 not allowed)
+        # the overlap scheduler launched the next batch before the reload: not fed, not counted
+        self.now[0] = 0.1
+        self.assertIsNone(self.verify(params, [0], 1))
+        self.assertEqual(len(params.calls), 1)
+        self.verify(params, [4], 1)
+        self.assertEqual(len(params.calls), 2)
+        self.assertIs(params.slots_seen[1], params._slots)
+
+    def test_out_of_range_numbers_are_rejected(self):
+        bad = [{"update_interval": 0}, {"update_interval": 2.5}, {"warmup_batches": -1},
+               {"ema_alpha": 0}, {"ema_alpha": 1.5}, {"ema_alpha": "0.2"}, {"up_hysteresis": float("nan")},
+               {"down_hysteresis": True}, {"1": {"candidate_steps": [True]}}, {"ema_alpha": None},
+               {"ceiling_coeff": 1e308}, {"up_hysteresis": 10**401}, {"warmup_batches": None}]
+        for mtime, extra in enumerate(bad, start=1):
+            params = Params()
+            boot = params._slots
+            self.write({"version": mtime, "1": {"candidate_steps": [3]}, **extra}, mtime * 10**9)
+            self.now[0] = mtime
+            self.verify(params, [1], 1)
+            self.assertIs(params._slots, boot, extra)
+            self.assertFalse(self.ack()["applied"], extra)
+        params = Params()
+        self.write({"version": 99, "ema_alpha": 1, "update_interval": 1, "warmup_batches": 0,
+                    "1": {"candidate_steps": [3], "up_hysteresis": -0.5}}, 99 * 10**9)
+        self.now[0] = 99
+        self.verify(params, [1], 1)
+        self.assertTrue(self.ack()["applied"])
+
+    def test_an_unreadable_file_keeps_the_policy(self):
+        params = Params()
+        boot = params._slots
+        with mock.patch.object(ax_adaptive_live.os, "stat", side_effect=PermissionError("denied")):
+            self.verify(params, [1], 1)   # must not raise on the verify path
+        self.assertIs(params._slots, boot)
+
+    def test_an_sglang_without_graph_batch_sizes_refuses_reloads(self):
+        params = Params()
+        del params._cuda_graph_bs
+        boot = params._slots
+        self.write({"version": 1, "1": {"candidate_steps": [3]}}, 10**9)
+        self.verify(params, [1], 1)
+        self.assertIs(params._slots, boot)
+        self.assertIn("_cuda_graph_bs", self.ack()["error"])
 
     def test_more_than_one_rank_keeps_the_boot_policy(self):
         verify = ax_adaptive_live._wrap(Params.on_verify_complete, module(), self.state,

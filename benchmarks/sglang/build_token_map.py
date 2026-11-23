@@ -71,7 +71,8 @@ def main():
                 hit, total = by_set.get(r["set"], (0, 0))
                 ids = r["output_ids"]
                 by_set[r["set"]] = (hit + sum(i in keep_set for i in ids), total + len(ids))
-            line += "  coverage " + " ".join(f"{s}={h / t:.4f}" for s, (h, t) in sorted(by_set.items()))
+            line += "  coverage " + " ".join(f"{s}={h / t:.4f}" if t else f"{s}=n/a"
+                                             for s, (h, t) in sorted(by_set.items()))
         print(line, flush=True)
 
 
