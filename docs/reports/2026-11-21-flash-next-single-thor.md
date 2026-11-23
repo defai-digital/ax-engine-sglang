@@ -1,6 +1,6 @@
 # Qwen3.8-Flash-Next NVFP4 on one Jetson Thor
 
-**Date:** 2026-11-21 to 2026-11-22 · **Host:** one Jetson Thor (df-thor-02, SM110, 122 GB unified
+**Date:** 2026-11-21 to 2026-11-23 · **Host:** one Jetson Thor (df-thor-02, SM110, 122 GB unified
 memory) · **Stacks:** SGLang 0.5.23 (`lmsysorg/sglang:v0.5.23-cu130`) with ax-engine-sglang; vLLM
 `0.34.0rc1.dev1105+g2f170a0fe` (aarch64 wheel, torch 2.14.0+cu130) with ax-engine-vllm
 
@@ -29,6 +29,8 @@ workload, and beat the best SGLang configuration on every workload and concurren
   7-token chain needs. ax-engine-sglang fixed the 27 MB/s PLE table rewrite (`AX_PLE_FRESH_FILE`).
 - Greedy outputs differ between lanes (Flash Next NVFP4 is not batch-invariant on SM110), so small
   differences are within noise; the vLLM lead holds on all six levels.
+- Accuracy held: on full HumanEval and GSM8K, vLLM's adaptive lane scored exactly what its AR server
+  scored (0.963 / 0.961) in half the time, and SGLang's fastest lane was within one to two items.
 
 ## Runs
 
@@ -215,6 +217,29 @@ other weights. The PLE table stays off the GPU, so the GPU-side weights are abou
    previous table file on every boot (`AX_PLE_FRESH_FILE`, on by default).
 3. **Startup wait.** `run_baselines.sh` waited at most 30 minutes for `/health`, which a 29-minute
    load exceeded. `READY_TIMEOUT` now sets the limit (default 1800 s); these runs used 3600 s.
+
+## Answer quality
+
+Each engine's fastest lane was scored against its own AR server on the full HumanEval (164) and
+GSM8K test (1,319) sets: greedy without thinking, 1,024-token limit, four requests at a time, the
+`benchmarks/baselines/eval_quality.py` prompts and checks (2026-11-22/23, df-thor-02).
+
+| Lane | HumanEval pass@1 | GSM8K accuracy | Wall time | Output tok/s |
+|---|---:|---:|---:|---:|
+| vLLM AR | 158 / 164 (0.963) | 1268 / 1319 (0.961) | 8,773 s | 60.9 |
+| vLLM adaptive K + NVFP4 draft lm_head + AX QSA block | 158 / 164 (0.963) | 1268 / 1319 (0.961) | **4,625 s** | **115.2** |
+| SGLang AR | 158 / 164 (0.963) | 1269 / 1319 (0.962) | 9,359 s | 57.4 |
+| SGLang adaptive + AX + 64k draft map | 156 / 164 (0.951) | 1269 / 1319 (0.962) | 5,297 s | 100.7 |
+
+- Speculative decoding did not change accuracy on either engine. vLLM's adaptive lane scored the
+  same as its AR server on both sets; GSM8K swapped 7 items each way. SGLang's lane lost 3 and
+  gained 1 HumanEval item (exact McNemar p = 0.63) and swapped 9 GSM8K items each way.
+- Over about 533k generated tokens per lane, vLLM's adaptive lane ran 1.90 times faster than its AR
+  server and 14% faster than SGLang's fastest lane, consistent with the 48-prompt results. Mean
+  acceptance length was 4.91 (vLLM) and 4.21 (SGLang) in the GSM8K phase.
+- Text agreement with the same engine's AR output: vLLM 80% (HumanEval) and 36% (GSM8K), SGLang
+  62% and 10%. The two AR servers agree with each other on only 65% and 11%, so these differences
+  come from each engine's numerics, not from the draft.
 
 ## Output agreement
 

@@ -306,7 +306,9 @@ One Thor served the same checkpoint alone. Rates are output tok/s at concurrency
 
 vLLM needed two ax-engine-vllm changes: a QSA block alignment that lets MTP 5–8 start, and an
 adaptive K that picks 3, 5 or 7 draft tokens each step from accepted drafts. Optuna tuning of either
-engine's adaptive policy did not beat the defaults on held-out prompts.
+engine's adaptive policy did not beat the defaults on held-out prompts. On full HumanEval and GSM8K
+the vLLM adaptive lane scored the same as vLLM AR (0.963 / 0.961) and finished in 4,625 s against
+8,773 s.
 [Single-Thor setup, all lanes, Optuna and the QSA fix](reports/2026-11-21-flash-next-single-thor.md)
 
 ## Reproduce
