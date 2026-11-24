@@ -60,6 +60,33 @@ this standalone chain. The option is experimental and currently covers
 the dense Qwen3.8-27B target with static, width-eight verification.
 [RTX 5090 validation](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_5090_gdn_chain_replay/REPORT.md)
 
+On RTX PRO 6000, replay raised warmed NVFP4 chat throughput by 16–18%
+at C8 and 26–27% at C16 across both launch orders. Timed replay batches
+recorded zero fallbacks. A 96-request stress run confirmed 12 cancellations,
+zero errors, and identical reference outputs before and after. Use
+`AX_QUALITY_PROFILE=verified` with the width-eight chain for the measured
+exact-output configuration. [RTX PRO 6000 hot-path validation](../results/rtx_pro_6000_hotpath_validation/REPORT.md)
+
+Add `AX_DFLASH_KV_GRAPH=1` to this launch to try CUDA graph replay for
+the draft-context KV commit after verify. It captures per live batch size
+through 16 when the draft uses the standard unquantized KV layout. Prefill
+and incompatible rounds use the native eager writer. The CUDA cache check
+matched eager exactly. On an RTX PRO 6000 at eight clients, the graph
+raised streamed chat throughput by 0.8% and lowered frozen-prompt
+throughput by 3.8%.
+[RTX PRO 6000 measurements](../results/rtx_pro_6000_kv_graph/REPORT.md)
+
+Use `AX_DFLASH_KV_DIRECT=1` with the GDN replay launch to test direct
+BF16 draft KV writes. A single kernel handles the accepted rows across
+all draft layers. Prefill and other KV layouts use the native writer.
+The RTX PRO 6000 test measured a 0.25% gain on eight-client streamed chat.
+[Direct writer measurements](../results/rtx_pro_6000_kv_direct/REPORT.md)
+
+`AX_DFLASH_PLAN_REUSE=1` tests fixed-offset reuse and in-place page-ID
+packing on the native FA2 verify CUDA graph. It requires the GDN replay
+launch. Eight-client streamed chat was 1.45% slower on the RTX PRO 6000.
+[Replay planning measurements](../results/rtx_pro_6000_plan_reuse/REPORT.md)
+
 ## B200 benchmark results
 
 Tested on SGLang 0.5.23 (and 0.5.22 for the single-request tree), one B200, greedy unless noted,
@@ -200,8 +227,8 @@ on 28 of 28 distribution tests, and a server with `--max-running-requests 4` pas
 request and stress checks (2,000 requests, 178 cancelled) at the stock DFlash rate for two and
 four requests. Not qualified on Thor: `AX_EAGLE_JOINT_SAMPLING` and `AX_DFLASH_JOINT_SAMPLING`
 on a served model (their kernel-level checks pass on SM110), and `AX_QSA_STABLE_TOPK` on a
-served model. All `tests/gpu_*.py` checks pass on SM110; the NVFP4 parity check is SM120 only and
-skips.
+served model. The CUDA checks used in the Thor report passed on SM110. The NVFP4 parity check
+requires SM120.
 
 ## Launch check, quality profile and adaptive chain width
 
@@ -247,10 +274,13 @@ faster with eight. `AX_CHAIN_WIDTH_BY_BATCH="1:16,5:8"` with
 four (+0.3%) and was the fastest lane with eight (+10.6% over width 16), but
 with four requests it still ran width 16, 2.6% below width 8.
 
-Use `AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` on this GPU and checkpoint. On a
-second RTX PRO 6000 with the same prompts it was within 1% of the better fixed
+`AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` was within 1% of the better fixed
 width with two, three, four and eight requests (+0.7% over width 16 with three,
-−0.2% against width 8 with four). `1:16,3:8` was 1.8% below width 16 with
+−0.2% against width 8 with four) in a second fixed-concurrency comparison.
+On mixed waves of 1, 2, 4, and 8 clients, fixed width 8 led at 445.6 tok/s
+and the table reached 434.0. [Mixed-wave results](../results/rtx_pro_6000_hotpath_validation/REPORT.md#mixed-request-waves)
+
+`1:16,3:8` was 1.8% below width 16 with
 three requests, where width 16 is still slightly faster than width 8. A schedule alternating 31 rounds of width 16
 with one of width 8 (two switches every 32 rounds) stayed within 1% of fixed
 width 16, so switches at that rate cost nothing measurable.

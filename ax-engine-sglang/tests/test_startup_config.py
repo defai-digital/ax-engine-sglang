@@ -2,11 +2,12 @@
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ax_engine_sglang.config import get_config, startup_config
+from ax_engine_sglang.config import get_config, server_args_error, startup_config
 
 # The width-eight multi-user settings from the README, on the minimal launch command.
 CHAIN8 = {"AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8", "AX_CHAIN_DRAFT_WIDTHS": "8",
@@ -69,6 +70,52 @@ class StartupConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be 0 or 1"):
             startup_config({"FC1_FUSED": "yes"}, hooks_available=True)
 
+    def test_tree_node_count_also_limits_the_allocated_chain_width(self):
+        base = {"FC1_TREE64": "1", "FC1_TREE_N": "16", "FC1_DRAFT_BLOCK": "32",
+                "FC1_FUSED": "1", "AX_SSM_POSITIONS": "24"}
+        for policy in (
+            {"AX_CHAIN_WIDTH": "24"},
+            {"AX_CHAIN_WIDTH_BY_BATCH": "1:24,4:8", "AX_CHAIN_GRAPH_WIDTHS": "24 8"},
+            {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "24 8"},
+        ):
+            with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, "chain width 24 exceeds the 16 SSM positions"):
+                startup_config({**base, **policy}, hooks_available=True)
+        config, _ = startup_config({**base, "AX_CHAIN_WIDTH": "16"}, hooks_available=True)
+        self.assertEqual(config.chain_width, 16)
+
+    def test_resolved_dflash_block_limits_all_legacy_chain_graphs(self):
+        base = {"FC1_TREE64": "0", "FC1_DRAFT_BLOCK": "32", "FC1_FUSED": "1", "AX_SSM_POSITIONS": "16"}
+        args = SimpleNamespace(disable_radix_cache=True, speculative_num_draft_tokens=8)
+        for policy in (
+            {"AX_CHAIN_WIDTH": "16"},
+            {"AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8 16"},
+            {"AX_CHAIN_WIDTH_BY_BATCH": "1:8", "AX_CHAIN_GRAPH_WIDTHS": "8 16"},
+            {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "8 16"},
+        ):
+            with self.subTest(policy=policy):
+                config, _ = startup_config({**base, **policy}, hooks_available=True)
+                self.assertEqual(server_args_error(config, args),
+                                 "chain width 16 exceeds the 8 SSM positions allocated per slot by DFlash")
+        config, _ = startup_config({**base, "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8"},
+                                   hooks_available=True)
+        self.assertIsNone(server_args_error(config, args))
+
+    def test_doctor_checks_legacy_capacity_with_checkpoint_or_dflash_block_flag(self):
+        from ax_engine_sglang.doctor import diagnose, parse
+
+        env = {"AX_AUTO_DEFAULTS": "0", "FC1_TREE64": "0", "FC1_DRAFT_BLOCK": "32", "FC1_FUSED": "1",
+               "AX_SSM_POSITIONS": "16", "AX_CHAIN_WIDTH": "8", "AX_CHAIN_GRAPH_WIDTHS": "8 16"}
+        command = ["target", "--speculative-algorithm", "FC1_DFLASH_TREE", "--speculative-draft-model-path", "draft",
+                   "--disable-radix-cache"]
+        for arguments, draft in (([], {"block_size": 8}),
+                                 (["--speculative-dflash-block-size", "8"], {"dflash_config": {"block_size": 16}})):
+            with self.subTest(arguments=arguments):
+                def load(path, filename, _revision):
+                    return draft if path == "draft" and filename == "config.json" else {}
+
+                report = diagnose(parse(command + arguments), env, load=load, capability=(11, 0), sglang="0.5.23")
+                self.assertIn("chain width 16 exceeds the 8 SSM positions allocated per slot by DFlash", report["errors"])
+
 
 class FusedTreeShapeTests(unittest.TestCase):
     def test_fused_tree_rejects_width_without_inverse_kernel(self):
@@ -87,6 +134,26 @@ class FusedTreeShapeTests(unittest.TestCase):
         for option in ("FC1_TREE64", "AX_GDN_RECURRENT_VERIFY", "AX_NVFP4_VERIFY_PARITY", "AX_GDN_UNPACKED_DECODE"):
             with self.subTest(option=option), self.assertRaisesRegex(ValueError, "stock width-eight DFLASH"):
                 PluginConfig.from_env({"AX_GDN_CHAIN_REPLAY": "1", option: "1"})
+
+    def test_dflash_kv_graph_requires_native_gdn_replay(self):
+        from ax_engine_sglang.config import PluginConfig
+
+        self.assertFalse(PluginConfig.from_env({}).dflash_kv_graph)
+        with self.assertRaisesRegex(ValueError, "requires AX_GDN_CHAIN_REPLAY=1"):
+            PluginConfig.from_env({"AX_DFLASH_KV_GRAPH": "1"})
+        self.assertTrue(PluginConfig.from_env(
+            {"AX_DFLASH_KV_GRAPH": "1", "AX_GDN_CHAIN_REPLAY": "1"},
+        ).dflash_kv_graph)
+
+    def test_direct_kv_requires_its_own_gdn_replay_lane(self):
+        from ax_engine_sglang.config import PluginConfig
+
+        with self.assertRaisesRegex(ValueError, "requires AX_GDN_CHAIN_REPLAY=1"):
+            PluginConfig.from_env({"AX_DFLASH_KV_DIRECT": "1"})
+        options = {"AX_DFLASH_KV_DIRECT": "1", "AX_GDN_CHAIN_REPLAY": "1"}
+        self.assertTrue(PluginConfig.from_env(options).dflash_kv_direct)
+        with self.assertRaisesRegex(ValueError, "separate experiments"):
+            PluginConfig.from_env({**options, "AX_DFLASH_KV_GRAPH": "1"})
 
 
 if __name__ == "__main__":

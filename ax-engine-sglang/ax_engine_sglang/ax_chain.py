@@ -193,15 +193,19 @@ def begin_round(w, batch=None):
     state.host_kv_len = None
     state.round_info.update(backend=None, graph=None, width=None)
     sets = getattr(w, "_ax_draft_sets", None)
-    if not sets or batch is None or batch.forward_mode.is_extend() or batch.is_extend_in_batch:
+    if not sets:
         return
-    w._ax_tree_round = (id(batch), tree_round(batch))
-    if w._ax_tree_round[1]:
-        return
-    wid = width(block, len(batch.reqs))
-    w._ax_round_width = wid
-    if wid in sets:
-        _enter_draft_width(w, wid)
+    if batch is not None and not batch.forward_mode.is_extend() and not batch.is_extend_in_batch:
+        w._ax_tree_round = (id(batch), tree_round(batch))
+        if not w._ax_tree_round[1]:
+            wid = width(block, len(batch.reqs))
+            w._ax_round_width = wid
+            if wid in sets:
+                _enter_draft_width(w, wid)
+    # A repeated width need not touch every convolution again. The live model
+    # must match the selected width for any forward that takes the eager path.
+    if w.draft_model.block_size != w.block_size:
+        w.draft_model.set_block_size(w.block_size)
 
 
 def install():
@@ -482,6 +486,7 @@ def _build_draft_runners(w, R):
         hooks, flag = dmr.capture_tail_hooks, dmr.init_new_workspace
         try:
             w.block_size = wid
+            w.draft_model.set_block_size(wid)
             sampler = w._maybe_build_draft_sampler()
             if sampler is None:
                 raise RuntimeError("ax-engine: no in-graph draft sampler for a narrower drafting width")
@@ -497,8 +502,12 @@ def _build_draft_runners(w, R):
             current_runtime().draft_width_override = None
             dmr.capture_tail_hooks, dmr.init_new_workspace = hooks, flag
             w.block_size = block
+            w.draft_model.set_block_size(block)
         spec_info = W.make_draft_block_spec_info(draft_token_num=wid, device=w.device)
-        w._ax_draft_sets[wid] = {"runner": runner, "sampler": sampler, "buffers": None, "spec_info": spec_info}
+        w._ax_draft_sets[wid] = {
+            "runner": runner, "sampler": sampler, "buffers": None, "spec_info": spec_info,
+            "position_offsets": w._block_pos_offsets[..., :wid],
+        }
         used = (free0 - torch.cuda.mem_get_info()[0]) / 2 ** 30
         print(f"[ax_chain] drafter graph runner width {wid}: batch sizes {runner.capture_bs}, {used:.2f} GB", flush=True)
 
@@ -509,10 +518,12 @@ def _enter_draft_width(w, wid):
     d = w._ax_draft_sets[wid]
     dmr = w.draft_model_runner
     w._ax_draft_saved = (dmr.attn_backend, dmr.decode_cuda_graph_runner, w._draft_sampler,
-                         w._draft_block_spec_info, {n: getattr(w, n, None) for n in _DRAFT_BUFFERS})
+                         w._draft_block_spec_info, w._block_pos_offsets,
+                         {n: getattr(w, n, None) for n in _DRAFT_BUFFERS})
     dmr.attn_backend, dmr.decode_cuda_graph_runner = d["runner"].attn_backend, d["runner"]
     w._draft_sampler = d["sampler"]
     w._draft_block_spec_info = d["spec_info"]
+    w._block_pos_offsets = d["position_offsets"]
     bufs = d["buffers"] or {n: None for n in _DRAFT_BUFFERS}   # None: _ensure_draft_block_buffers allocates at W
     for n, v in bufs.items():
         setattr(w, n, v)
@@ -528,7 +539,8 @@ def _leave_draft_width(w):
     d = w._ax_draft_sets[wid]
     d["buffers"] = {n: getattr(w, n, None) for n in _DRAFT_BUFFERS}
     dmr = w.draft_model_runner
-    dmr.attn_backend, dmr.decode_cuda_graph_runner, w._draft_sampler, w._draft_block_spec_info, bufs = w._ax_draft_saved
+    (dmr.attn_backend, dmr.decode_cuda_graph_runner, w._draft_sampler,
+     w._draft_block_spec_info, w._block_pos_offsets, bufs) = w._ax_draft_saved
     for n, v in bufs.items():
         setattr(w, n, v)
     _check_buffer_set(w, f"leaving width {wid}")

@@ -16,6 +16,7 @@
 # axotree<spec> / axtree<spec>: the same tree lanes through the standalone ax-engine-sglang plugin
 # (AXSITE, `uv pip install --no-deps --target $AXSITE ax-engine-sglang/`): axotree on the 0.5.22
 # overlay (parity with the patched DForkTree plugin), axtree on the venv's own SGLang, no overlay.
+# axreplay8: native width-eight DFlash2 with AX accepted-prefix GDN replay, using AXSITE.
 # PROFILE=1 also loads benchmarks/sglang/axprof.py (round-time breakdown, written to <lane>/axprof.json);
 # AXPROF_SYNC=0 preserves overlap. AXPROF_NVTX=1 adds ranges to an Nsight Systems capture.
 # Profiled runs are diagnostic. NSYS_TRACE=1 enables capture in run_baselines.sh.
@@ -126,6 +127,16 @@ for lane in $LANES; do
       mkdir -p "$OUT/$lane"
       install_profiler "$SITE"
       env SGLANG_PLUGINS="none$PROF" AXPROF_OUT="$OUT/$lane/axprof.json" EXTRA_ARGS="${CHAIN_ARGS:-} $ATTN_ARGS" MODES=dflash BLOCK="${lane#chain}" OUT="$OUT/$lane" \
+        bash benchmarks/sglang/run_baselines.sh || failed=1
+      ;;
+    axreplay8)
+      [[ -d "$AXSITE/ax_engine_sglang" ]] || { echo "missing $AXSITE/ax_engine_sglang" >&2; exit 2; }
+      mkdir -p "$OUT/$lane"
+      profiler_dir="$OUT/$lane/profiler"
+      install_profiler "$profiler_dir"
+      env PYTHONPATH="$AXSITE:$profiler_dir" SGLANG_PLUGINS="ax-engine$PROF" \
+        AX_GDN_CHAIN_REPLAY=1 AX_FI_OFFSET_FIX=0 AXPROF_OUT="$OUT/$lane/axprof.json" \
+        EXTRA_ARGS="${CHAIN_ARGS:-} $ATTN_ARGS" MODES=dflash BLOCK=8 OUT="$OUT/$lane" \
         bash benchmarks/sglang/run_baselines.sh || failed=1
       ;;
     tree*|axtree*|axotree*)

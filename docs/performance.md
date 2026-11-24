@@ -162,10 +162,25 @@ frozen prompts repeatedly; every sequence was compared with AR alone.
 | DFlash2 chain, width 8 | 1,000 of 1,000 | 120 of 120 | 109–113 | 489 / 561 |
 | DFlash2 tree, 16 nodes | 1,000 of 1,000 | 116 of 120 | 126–132 | 499 / 592 |
 
-The tree lane's four unequal sequences are two prompts in two passes at
-concurrency one, from output tokens 329 and 492; its chain rounds (two or more
-requests) matched. The profile now refuses the tree route. The sequences are
-ten distinct prompts repeated at concurrency 1, 2 and 8.
+The tree lane's four unequal sequences came from two prompts in two serialized
+passes. The first differences were at output tokens 330 and 493, counted from
+one. Chain rounds with two or more requests matched. The sequences are ten
+distinct prompts repeated at concurrency 1, 2 and 8.
+
+### DFlash2 hot-path follow-up
+
+The verified width-eight chain matched all 40 1,024-token sequences in
+the follow-up and delivered 2.05× AR throughput at C1 and 1.81× at C2 and
+C8. The serialized tree probe reproduced both divergences and measured
+reversed token rankings on the shared decoded prefixes.
+
+Native accepted-prefix replay improved warmed chat throughput by 16–18%
+at C8 and 26–27% at C16 in both launch orders, on 64 held-out prompts and
+512 output tokens per request. P95 latency fell from 9.91–9.98 s to
+7.74–8.43 s at C16. The stress test recorded 12 confirmed cancellations
+and zero errors. The median C16 target-verify GPU span fell from 33.5 ms
+to 23.4 ms, with draft KV append near 0.36 ms in both lanes.
+[Throughput, token scores, and Nsight attribution](../results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
 ### Chain width by batch size
 
@@ -182,14 +197,19 @@ Output tok/s against fixed width 16, RTX PRO 6000:
 | `AX_CHAIN_WIDTH_BY_BATCH="1:16,4:8"` | +0.1% | +0.7% | +3.0% | +9.3% |
 | `AX_CHAIN_WIDTH_BY_BATCH="1:16,3:8"` | +0.1% | −1.8% | +3.9% | +8.9% |
 
-Width 16 reached 347.9, 470.7, 570.9 and 792.6 tok/s. `1:16,4:8` is within 1%
-of the better fixed width at every measured concurrency and is the recommended
-table for this GPU and checkpoint; it stays experimental. Switching widths
-twice every 32 rounds cost nothing measurable. The adaptive policy
+Width 16 reached 347.9, 470.7, 570.9 and 792.6 tok/s. `1:16,4:8` was within 1%
+of the better fixed width at every concurrency in this fixed-concurrency
+sweep. Switching widths twice every 32 rounds cost nothing measurable.
+The adaptive policy
 (`AX_POLICY_MODE=adaptive`) was 2.3% below width 16 at concurrency two and 0.6%
 below width 8 at eight on another pod, so it stays experimental and off by
 default.
 [Gate, width comparisons and limits](reports/2026-11-21-verified-profile-gate.md)
+
+On 200 held-out prompts submitted in waves of 1, 2, 4, and 8 clients,
+fixed width 8 led at 445.6 tok/s, followed by `1:16,4:8` at 434.0 and fixed
+width 16 at 411.9. The table switched widths at four live requests.
+[Mixed-wave throughput and latency](../results/rtx_pro_6000_hotpath_validation/REPORT.md#mixed-request-waves)
 
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 

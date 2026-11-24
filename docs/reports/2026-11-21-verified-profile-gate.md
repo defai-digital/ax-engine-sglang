@@ -38,7 +38,7 @@ concurrency and scheduling combinations, not 1,000 inputs. The rows stay
 ### The tree route
 
 Two of the ten prompts left the AR sequence in the tree lane at concurrency
-one, at output tokens 329 and 492, the same way in both passes. A tree server
+one, at output offsets 329 and 492 (zero-based), the same way in both passes. A tree server
 verifies a single request with tree rounds and two or more with chain rounds,
 which is why its C2 and C8 passes matched. All earlier parity evidence compared
 128 tokens.
@@ -46,7 +46,7 @@ which is why its C2 and C8 passes matched. All earlier parity evidence compared
 A fresh AR server given the prompt and the AR output up to each point reported
 these top candidates:
 
-| Prompt | Token | AR chose | Tree chose | AR log-probabilities of the two |
+| Prompt index | Token index | AR chose | Tree chose | AR log-probabilities of the two |
 |---|---:|---:|---:|---|
 | 1 | 329 | 5816 | 258 | 258: −0.753, 5816: −1.003 |
 | 3 | 492 | 4338 | 2579 | 4338: −0.681, 2579: −0.806 |
@@ -55,6 +55,9 @@ The two candidates are 0.25 and 0.125 apart, and at token 329 the probe (which
 prefilled the prefix) ranked them the other way round than the AR run (which
 decoded it). The tree's verification pass therefore differs numerically from
 AR's by enough to reorder close candidates. The cause was not investigated.
+
+The follow-up captured both routes' scores along the same decoded prefixes
+and reproduced the reversed rankings. [Tree score probe](../../results/rtx_pro_6000_hotpath_validation/REPORT.md#serialized-tree-divergence)
 
 ### Throughput of the verified lanes (output tok/s)
 
@@ -214,11 +217,12 @@ The comparison of the design with vLLM's dynamic speculative decoding (which
 picks the token count per batch size in the scheduler, before the step) found no
 reason to move the decision: the cost it would avoid was not measured.
 
-Two gaps found in the review of these changes are older than them and remain
-open: with `AX_SSM_POSITIONS` and `FC1_TREE64=1`, a chain width above the tree
-width passes the launch check although the state pool is sized for the tree
-width; and with `AX_CHAIN_DRAFT_WIDTHS`, a narrow draft round keeps full-width
-position offsets if SGLang falls back from its Triton block preparation.
+The review found two issues in width handling. The follow-up switches the
+narrow drafter's position offsets and grouped convolution width for both
+capture and eager execution. With `AX_SSM_POSITIONS` and `FC1_TREE64=1`,
+launch validation now rejects chain widths larger than the allocated
+positions per slot, which are capped by the tree node count.
+[DFlash2 hot-path plan](../decisions/2026-11-21-dflash-hotpath.md)
 
 ### Fewer running requests than asked
 

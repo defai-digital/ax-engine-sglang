@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+from math import ceil
 import os
 from pathlib import Path
 import signal
@@ -17,7 +18,17 @@ import urllib.request
 DEFAULT_LANES = ("ar", "stock8", "tree32")
 PARITY_LANES = ("ar", "tree16", "chain8")
 VERIFIED_LANES = ("ar", "chain8")      # the routes AX_QUALITY_PROFILE=verified admits
-LANES = (*DEFAULT_LANES, "replay8", "tree16", "chain8")
+KV_GRAPH_LANE = "replay8-kv-graph"
+KV_DIRECT_LANE = "replay8-kv-direct"
+PLAN_REUSE_LANE = "replay8-plan-reuse"
+HOTPATHS = {
+    "replay8": ("gdn_replay", None),
+    KV_GRAPH_LANE: ("kv_graph", "AX_DFLASH_KV_GRAPH"),
+    KV_DIRECT_LANE: ("kv_direct", "AX_DFLASH_KV_DIRECT"),
+    PLAN_REUSE_LANE: ("plan_reuse", "AX_DFLASH_PLAN_REUSE"),
+}
+REPLAY_LANES = tuple(HOTPATHS)
+LANES = (*DEFAULT_LANES, *REPLAY_LANES, "tree16", "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 
 
@@ -74,8 +85,12 @@ def launch_config(args, lane):
                 str(args.draft.resolve()), "--speculative-num-draft-tokens", draft_block]
     if not custom_dflash:
         command += ["--mamba-ssm-dtype", "float32", "--linear-attn-verify-backend", "triton"]
-    if lane == "replay8":
-        flags.update(SGLANG_PLUGINS="ax-engine", AX_GDN_CHAIN_REPLAY="1", AX_FI_OFFSET_FIX="0")
+    if lane in REPLAY_LANES:
+        flags.update(SGLANG_PLUGINS="ax-engine", AX_GDN_CHAIN_REPLAY="1", AX_FI_OFFSET_FIX="0",
+                     AX_DFLASH_BENCH_ACTIVITY="1")
+        _, flag = HOTPATHS[lane]
+        if flag:
+            flags[flag] = "1"
     if custom_dflash:
         flags.update(
             SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1" if args.verify_parity else "0",
@@ -134,8 +149,17 @@ def run_pass(base_url, prompts, concurrency, length, speculative):
         # map preserves the frozen prompt order even when requests finish out of order.
         rows = list(pool.map(lambda ids: generate(base_url, ids, length, speculative), prompts))
         wall_s = time.perf_counter() - start
-    return {"concurrency": concurrency, "wall_s": wall_s, "output_tokens": length * len(rows),
-            "median_request_s": statistics.median(row["wall_s"] for row in rows), "rows": rows}
+    return summarize_pass(rows, wall_s, concurrency, length, speculative)
+
+
+def summarize_pass(rows, wall_s, concurrency, length, speculative):
+    request_times = sorted(row["wall_s"] for row in rows)
+    output_tokens = length * len(rows)
+    return {"concurrency": concurrency, "wall_s": wall_s, "output_tokens": output_tokens,
+            "median_request_s": statistics.median(request_times),
+            "p95_request_s": request_times[ceil(0.95 * len(rows)) - 1],
+            "tokens_per_verify": output_tokens / sum(row["spec_verify_ct"] for row in rows)
+            if speculative else None, "rows": rows}
 
 
 def stop_server(process):
@@ -150,6 +174,63 @@ def stop_server(process):
         process.wait()
 
 
+def hotpath_snapshot(base_url):
+    with urllib.request.urlopen(f"{base_url}/server_info", timeout=10) as response:
+        states = json.load(response)["internal_states"]
+    if len(states) != 1 or "ax_dflash_activity" not in states[0]:
+        raise RuntimeError("DFlash hot-path accounting requires one instrumented scheduler")
+    return states[0]["ax_dflash_activity"]
+
+
+def hotpath_pass(base_url, path, concurrency, measure):
+    while True:
+        before = hotpath_snapshot(base_url)
+        result = measure()
+        after = hotpath_snapshot(base_url)
+        if after["capture_attempts"] == before["capture_attempts"]:
+            break  # discard passes affected by a first-time graph capture
+
+    optimized_before = before["optimized"].get(path, {})
+    optimized_after = after["optimized"].get(path, {})
+    counts = {}
+    for size, total in sorted(after["rounds"].items(), key=lambda item: int(item[0])):
+        rounds = total - before["rounds"].get(size, 0)
+        if rounds:
+            optimized = optimized_after.get(size, 0) - optimized_before.get(size, 0)
+            counts[size] = {"optimized": optimized, "fallback": rounds - optimized}
+    requested = counts.get(str(concurrency), {})
+    if not requested.get("optimized"):
+        raise RuntimeError(f"DFlash {path} ran no optimized rounds at live batch size {concurrency} "
+                           f"during the timed pass. Measured rounds: {counts}")
+    if requested["fallback"]:
+        raise RuntimeError(f"DFlash {path} fell back at live batch size {concurrency} during the timed pass. "
+                           f"Measured rounds: {counts}")
+    result["hotpath"] = {"path": path, "rounds_by_live_batch": counts}
+    return result
+
+
+def report_matches(label, reference_ids, rows):
+    matches = 0
+    earliest = None
+    for request, (reference, row) in enumerate(zip(reference_ids, rows, strict=True), start=1):
+        candidate = row["output_ids"]
+        if reference == candidate:
+            matches += 1
+            continue
+        difference = next((position, expected, actual) for position, (expected, actual) in enumerate(
+            zip(reference, candidate, strict=True), start=1,
+        ) if expected != actual)
+        if earliest is None or difference[0] < earliest[0]:
+            earliest = (*difference, request)
+
+    detail = ""
+    if earliest is not None:
+        position, expected, actual, request = earliest
+        detail = f", earliest difference at output token {position} of request {request} ({expected} vs {actual})"
+    print(f"{label}: {matches}/{len(rows)} exact{detail}")
+    return matches
+
+
 def run_lane(args, lane, prompts):
     out = args.out / lane
     out.mkdir(parents=True, exist_ok=True)
@@ -160,17 +241,23 @@ def run_lane(args, lane, prompts):
     env.update(flags, HF_HUB_OFFLINE="1")
     base_url = f"http://127.0.0.1:{args.port}"
     speculative = algorithm is not None
-    with (out / "server.log").open("w") as log:
+    log_path = out / "server.log"
+    with log_path.open("w") as log:
         process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             info = wait_for_server(process, base_url, args.target, algorithm)
-            if bool(info.get("enable_linear_replayssm_spec")) != (lane == "replay8"):
+            if bool(info.get("enable_linear_replayssm_spec")) != (lane in REPLAY_LANES):
                 raise RuntimeError(f"Unexpected ReplaySSM setting for {lane}")
             run_pass(base_url, [max(prompts, key=len)], 1, 32, speculative)
             run_pass(base_url, prompts[:args.slots], args.slots, 32, speculative)
             passes = []
             for concurrency, repeat in ((1, 1), *args.concurrent_passes, (1, 1)):
-                result = run_pass(base_url, prompts * repeat, concurrency, args.output_tokens, speculative)
+                if lane in HOTPATHS:
+                    result = hotpath_pass(base_url, HOTPATHS[lane][0], concurrency, lambda: run_pass(
+                        base_url, prompts * repeat, concurrency, args.output_tokens, speculative,
+                    ))
+                else:
+                    result = run_pass(base_url, prompts * repeat, concurrency, args.output_tokens, speculative)
                 passes.append(result)
                 print(f"{lane} C{concurrency}: {result['output_tokens'] / result['wall_s']:.2f} output tok/s",
                       flush=True)
@@ -213,6 +300,8 @@ def main():
                       else DEFAULT_LANES)
     if args.verified_profile and any(lane not in VERIFIED_LANES for lane in args.lanes):
         parser.error("--verified-profile supports the ar and chain8 lanes: the profile refuses the tree route")
+    if args.verified_profile and "ar" not in args.lanes:
+        parser.error("--verified-profile requires the ar lane as the serialized reference")
     if args.verify_parity and any(lane not in PARITY_LANES for lane in args.lanes):
         parser.error("--verify-parity supports the ar, tree16, and chain8 lanes")
     if not args.verify_parity and "chain8" in args.lanes:
@@ -232,6 +321,13 @@ def main():
         parser.error(f"--kv-tokens must be at least {needed} for {widest} concurrent requests "
                      f"of {args.output_tokens} output tokens")
     runs = {lane: run_lane(args, lane, prompts) for lane in args.lanes}
+    comparisons = (("stock8", "replay8"), *(("replay8", lane) for lane in REPLAY_LANES[1:]))
+    for control, candidate in comparisons:
+        if control not in runs or candidate not in runs:
+            continue
+        for reference, result in zip(runs[control], runs[candidate], strict=True):
+            report_matches(f"{candidate} C{result['concurrency']} against {control}",
+                           (row["output_ids"] for row in reference["rows"]), result["rows"])
     if args.verify_parity:
         reference_lane = "ar" if "ar" in runs else args.lanes[0]
         reference = [row["output_ids"] for row in runs[reference_lane][0]["rows"]]
@@ -239,8 +335,8 @@ def main():
         for lane, passes in runs.items():
             for result in passes:
                 rows = result["rows"]
-                matches = sum(row["output_ids"] == reference[i % len(reference)] for i, row in enumerate(rows))
-                print(f"{lane} C{result['concurrency']} against {reference_lane} C1: {matches}/{len(rows)} exact")
+                matches = report_matches(f"{lane} C{result['concurrency']} against {reference_lane} C1",
+                                         (reference[i % len(reference)] for i in range(len(rows))), rows)
                 failed |= matches != len(rows)
         if failed:
             raise SystemExit("Greedy token sequences differ; see the saved passes for each lane")

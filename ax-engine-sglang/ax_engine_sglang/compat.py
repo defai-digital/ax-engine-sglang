@@ -1,4 +1,5 @@
 """Compatibility checks and reversible startup patches to upstream Python objects."""
+import __future__
 from contextlib import contextmanager
 from contextvars import ContextVar
 import importlib
@@ -95,7 +96,9 @@ def rebuild_function(cls, name, edits, *, feature):
         src = src.replace(old, new)
     mod = sys.modules[fn.__module__]
     ns = {}
-    exec(compile(src, f"<ax-engine {feature} {fn.__module__}.{cls.__name__}.{name}>", "exec"), mod.__dict__, ns)
+    filename = f"<ax-engine {feature} {fn.__module__}.{cls.__name__}.{name}>"
+    flags = fn.__code__.co_flags & __future__.annotations.compiler_flag
+    exec(compile(src, filename, "exec", flags=flags, dont_inherit=True), mod.__dict__, ns)
     new_fn = ns[name]
     new_fn.__qualname__ = fn.__qualname__
     return new_fn

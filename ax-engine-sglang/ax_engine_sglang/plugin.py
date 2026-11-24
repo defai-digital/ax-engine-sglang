@@ -12,13 +12,15 @@ _tree_installed = False
 class TreeSpec(CustomSpecAlgo):
 
     def handle_server_args(self, server_args):
+        from sglang.srt.arg_groups.overrides import declare_resolution, resolving_view
+
         config = get_config()
-        error = server_args_error(config, server_args)
+        # The native handler can resolve the block size from the drafter checkpoint.
+        SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
+        error = server_args_error(config, resolving_view(server_args))
         if error:
             raise ValueError(error)
         _install_tree()
-        SpeculativeAlgorithm.DFLASH.handle_server_args(server_args)
-        from sglang.srt.arg_groups.overrides import declare_resolution
         # A chain-only server captures its main graph with the same backend mode it uses at replay.
         declare_resolution(server_args, 'fc1_chain_tree', speculative_eagle_topk=2 if config.tree else 1)
         if config.tree64:
@@ -63,6 +65,18 @@ def _install_fixes(config):
     if config.gdn_chain_replay:
         from . import ax_gdn_chain_replay
         ax_gdn_chain_replay.install()
+    if config.dflash_kv_graph:
+        from . import ax_dflash_kv_graph
+        ax_dflash_kv_graph.install()
+    if config.dflash_kv_direct:
+        from . import ax_dflash_kv_direct
+        ax_dflash_kv_direct.install()
+    if config.dflash_plan_reuse:
+        from . import ax_dflash_plan
+        ax_dflash_plan.install()
+    if config.gdn_chain_replay:
+        from . import ax_dflash_activity
+        ax_dflash_activity.install()
     if config.nvfp4_verify_parity:
         from . import ax_nvfp4_verify, ax_verify_attention
         ax_nvfp4_verify.install(config.nvfp4_parity_rows)

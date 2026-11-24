@@ -38,6 +38,9 @@ class PluginConfig:
     gdn_unpacked_decode: bool = False
     gdn_recurrent_verify: bool = False
     gdn_chain_replay: bool = False
+    dflash_kv_graph: bool = False
+    dflash_kv_direct: bool = False
+    dflash_plan_reuse: bool = False
     nvfp4_verify_parity: bool = False
     nvfp4_parity_rows: int = 0
     quality_profile: str | None = None
@@ -53,6 +56,14 @@ class PluginConfig:
                     or self.chain_width is not None or self.chain_schedule or self.chain_width_table
                     or self.graph_widths
                     or self.draft_widths or self.chain_attention or self.ssm_positions)
+
+    @property
+    def configured_chain_widths(self) -> tuple[int, ...]:
+        if self.chain_width_table:
+            return tuple(width for _, width in self.chain_width_table)
+        if self.policy_mode == "adaptive" and self.chain_width is None:
+            return self.graph_widths
+        return self.chain_schedule or (self.chain_width if self.chain_width is not None else self.draft_block,)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, *, validate: bool = True) -> PluginConfig:
@@ -130,6 +141,9 @@ class PluginConfig:
             gdn_unpacked_decode=flag("AX_GDN_UNPACKED_DECODE"),
             gdn_recurrent_verify=flag("AX_GDN_RECURRENT_VERIFY"),
             gdn_chain_replay=flag("AX_GDN_CHAIN_REPLAY"),
+            dflash_kv_graph=flag("AX_DFLASH_KV_GRAPH"),
+            dflash_kv_direct=flag("AX_DFLASH_KV_DIRECT"),
+            dflash_plan_reuse=flag("AX_DFLASH_PLAN_REUSE"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
             nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
             quality_profile=env.get("AX_QUALITY_PROFILE") or None,
@@ -182,6 +196,14 @@ class PluginConfig:
             if not self.graph_widths:
                 # Measured with one captured graph per width; the tree's own graph serves one width.
                 raise ValueError("AX_CHAIN_WIDTH_BY_BATCH needs its widths in AX_CHAIN_GRAPH_WIDTHS")
+        if self.dflash_kv_graph and not self.gdn_chain_replay:
+            raise ValueError("AX_DFLASH_KV_GRAPH requires AX_GDN_CHAIN_REPLAY=1")
+        if self.dflash_kv_direct and not self.gdn_chain_replay:
+            raise ValueError("AX_DFLASH_KV_DIRECT requires AX_GDN_CHAIN_REPLAY=1")
+        if self.dflash_kv_direct and self.dflash_kv_graph:
+            raise ValueError("AX_DFLASH_KV_DIRECT and AX_DFLASH_KV_GRAPH are separate experiments")
+        if self.dflash_plan_reuse and not self.gdn_chain_replay:
+            raise ValueError("AX_DFLASH_PLAN_REUSE requires AX_GDN_CHAIN_REPLAY=1")
         if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
                                       or self.nvfp4_verify_parity or self.gdn_unpacked_decode):
             raise ValueError("AX_GDN_CHAIN_REPLAY uses the stock width-eight DFLASH worker without AX tree or parity options")
@@ -213,12 +235,7 @@ class PluginConfig:
             raise ValueError("AX_SSM_CONV_SHARE must be finite and between 0 and 1")
         if self.chain_attention and not self.graph_widths:
             raise ValueError("AX_CHAIN_ATTN needs AX_CHAIN_GRAPH_WIDTHS")
-        chain = self.chain_schedule or ((self.chain_width,) if self.chain_width is not None
-                                        else (self.draft_block,))
-        if self.policy_mode == "adaptive" and self.chain_width is None:
-            chain = self.graph_widths   # the policy chooses among the graph widths, widest first
-        if self.chain_width_table:
-            chain = tuple(width for _, width in self.chain_width_table)
+        chain = self.configured_chain_widths
         for width in (*chain, *self.graph_widths, *self.draft_widths):
             if not 2 <= width <= self.draft_block:
                 raise ValueError(f"chain width {width} outside 2..{self.draft_block}")
@@ -232,8 +249,12 @@ class PluginConfig:
                         and not self.chain_width_table)):
                 raise ValueError("AX_SSM_POSITIONS needs FC1_FUSED=1 or AX_GDN_RECURRENT_VERIFY=1, "
                                  "AX_TREE=1 and AX_CHAIN_WIDTH or AX_CHAIN_WIDTH_BY_BATCH")
-            if max((*chain, *self.graph_widths)) > self.ssm_positions:
+            widest = max((*chain, *self.graph_widths))
+            if widest > self.ssm_positions:
                 raise ValueError("chain graph widths exceed AX_SSM_POSITIONS")
+            if self.tree64 and widest > self.tree_nodes:
+                raise ValueError(f"chain width {widest} exceeds the {self.tree_nodes} SSM positions "
+                                 f"allocated per slot by FC1_TREE_N={self.tree_nodes}")
 
 
 def server_args_error(config: PluginConfig, server_args) -> str | None:
@@ -242,6 +263,11 @@ def server_args_error(config: PluginConfig, server_args) -> str | None:
         return "AX_SSM_POSITIONS requires --disable-radix-cache"
     # The worker drafts FC1_DRAFT_BLOCK tokens with FC1_TREE64=1, else --speculative-num-draft-tokens.
     block = config.draft_block if config.tree64 else getattr(server_args, "speculative_num_draft_tokens", None)
+    if config.ssm_positions and not config.tree64 and block is not None:
+        # With FC1_TREE64=0 the allocator starts from SGLang's resolved block, even if the cap is larger.
+        widest = max((*config.configured_chain_widths, *config.graph_widths))
+        if widest > int(block):
+            return f"chain width {widest} exceeds the {block} SSM positions allocated per slot by DFlash"
     if config.chain_width_table:
         widest = max(width for _, width in config.chain_width_table)
         if block is not None and widest > int(block):

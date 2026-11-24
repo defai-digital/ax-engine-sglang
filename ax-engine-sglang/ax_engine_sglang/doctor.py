@@ -30,6 +30,7 @@ SERVER_FLAGS = (
     ("--speculative-draft-model-path", "speculative_draft_model_path", str, None),
     ("--speculative-draft-model-revision", "speculative_draft_model_revision", str, None),
     ("--speculative-num-draft-tokens", "speculative_num_draft_tokens", int, None),
+    ("--speculative-dflash-block-size", "speculative_dflash_block_size", int, None),
     ("--speculative-eagle-topk", "speculative_eagle_topk", int, None),
     ("--speculative-adaptive", "speculative_adaptive", None, False),
     ("--max-running-requests", "max_running_requests", int, None),
@@ -142,6 +143,12 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
             errors.append(str(error))
     if config and algorithm == "FC1_DFLASH_TREE" and not errors:   # TreeSpec.handle_server_args
         resolved_args = SimpleNamespace(**{**vars(args), **{name: value for name, (value, _) in settings.args.items()}})
+        if resolved_args.speculative_num_draft_tokens is None:
+            draft_config = drafter or {}
+            checkpoint_block = (draft_config.get("dflash_config") or {}).get("block_size", draft_config.get("block_size"))
+            resolved_args.speculative_num_draft_tokens = resolved_args.speculative_dflash_block_size
+            if resolved_args.speculative_num_draft_tokens is None and type(checkpoint_block) is int and checkpoint_block > 0:
+                resolved_args.speculative_num_draft_tokens = checkpoint_block
         error = server_args_error(config, resolved_args)
         if error:
             errors.append(error)
@@ -156,6 +163,9 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
     experimental = [name for name, on in (
         ("AX_CHAIN_WIDTH_BY_BATCH", bool(config and config.chain_width_table)),
         ("AX_GDN_CHAIN_REPLAY=1", replay["requested"]),
+        ("AX_DFLASH_KV_GRAPH=1", bool(config and config.dflash_kv_graph)),
+        ("AX_DFLASH_KV_DIRECT=1", bool(config and config.dflash_kv_direct)),
+        ("AX_DFLASH_PLAN_REUSE=1", bool(config and config.dflash_plan_reuse)),
         ("AX_POLICY_MODE=adaptive", bool(config and config.policy_mode == "adaptive")),
     ) if on]
     if errors:

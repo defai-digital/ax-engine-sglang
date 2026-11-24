@@ -7,6 +7,9 @@ benchmarks/sglang/run_tree_plugin.sh (PROFILE=1). It wraps the phases of one spe
   interval         wall time between the starts of consecutive rounds (round + scheduler, sampling
                    bookkeeping, detokeniser hand-off); only gaps under 50 ms are counted
   fwd.<who>.<mode> every ModelRunner.forward, by worker (draft / target) and forward mode
+  verify_prepare   DFlash input binding and attention metadata preparation
+  verify_accept    DFlash token acceptance after the target forward
+  target_commit    DFlash recurrent state and convolution rollback
   tree_build       DForkTree Builder call (n-gram re-scoring + beam tree, CUDA graph replay)
   verify_branch    DForkTree tree verification including the target pass and the state commit
   eagle_verify     run_eagle_verify inside it
@@ -103,9 +106,30 @@ def wrap_round(cls):
     cls.forward_batch_generation = wrapper
 
 
+def wrap_dflash_worker(cls):
+    wrap_round(cls)
+    for method, phase in (
+        ("_accept_block", "verify_accept"),
+        ("_update_target_mamba_state_after_verify", "target_commit"),
+        ("_append_target_hidden_to_draft_kv_by_loc", "draft_kv_append"),
+    ):
+        impl = getattr(cls, method, None)
+        if impl is not None:
+            setattr(cls, method, timed(phase)(impl))
+
+
 def register():
     import sys
     from pathlib import Path
+
+    plugins = {name.strip() for name in os.environ.get("SGLANG_PLUGINS", "").split(",")}
+    if "ax-engine" in plugins:
+        # SGLang executes entry points in discovery order. Install the AX
+        # replay commit before timing it, even when axprof is discovered first.
+        from ax_engine_sglang.plugin import register as register_ax_engine
+
+        register_ax_engine()
+
     from sglang.srt.model_executor.model_runner import ModelRunner
 
     def fwd_label(self, forward_batch, *a, **kw):
@@ -126,17 +150,14 @@ def register():
         return ok
     DecodeCudaGraphRunner.can_run_graph = can_run_graph
 
+    from sglang.srt.speculative.dflash_info import DFlashVerifyInput
     from sglang.srt.speculative.dflash_worker_v2 import DFlashWorkerV2
-    wrap_round(DFlashWorkerV2)
-    append = getattr(DFlashWorkerV2, "_append_target_hidden_to_draft_kv_by_loc", None)
-    if append is not None:
-        DFlashWorkerV2._append_target_hidden_to_draft_kv_by_loc = timed("draft_kv_append")(append)
-    plugins = os.environ.get("SGLANG_PLUGINS", "")
+    DFlashVerifyInput.prepare_for_verify = timed("verify_prepare")(DFlashVerifyInput.prepare_for_verify)
+    wrap_dflash_worker(DFlashWorkerV2)
     if "ax-engine" in plugins:
-        # ax-engine-sglang registers first (SGLANG_PLUGINS=ax-engine,axprof): its generated worker
-        # module and the tree modules are importable from its package directory
+        # The resolved scheduler config installs the generated tree worker.
         if "fc1_dflash_worker" not in sys.modules:
-            print("[axprof] ax-engine worker not loaded yet; only ModelRunner phases are timed", flush=True)
+            print("[axprof] AX tree worker not loaded; profiling the native worker", flush=True)
             return
     elif "dforktree" in plugins:
         here = [p for p in sys.path if (Path(p) / "dforktree" / "fc1_plugin.py").exists()]
@@ -148,9 +169,7 @@ def register():
     import fc1_branch64
     import fc1_builder
     import fc1_dflash_worker
-    wrap_round(fc1_dflash_worker.DFlashTreeWorkerV2)
-    cls = fc1_dflash_worker.DFlashTreeWorkerV2
-    cls._append_target_hidden_to_draft_kv_by_loc = timed("draft_kv_append")(cls._append_target_hidden_to_draft_kv_by_loc)
+    wrap_dflash_worker(fc1_dflash_worker.DFlashTreeWorkerV2)
     fc1_builder.Builder.__call__ = timed("tree_build")(fc1_builder.Builder.__call__)
     fc1_branch64.run_eagle_verify = timed("eagle_verify")(fc1_branch64.run_eagle_verify)
     fc1_branch64.verify_branch = timed("verify_branch")(fc1_branch64.verify_branch)

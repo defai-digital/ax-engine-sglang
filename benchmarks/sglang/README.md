@@ -38,10 +38,10 @@ baseline that enters a comparison on one version.
 
 | Entry point | Purpose |
 |---|---|
-| `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark. Use `--verify-parity` to compare AX AR, tree 16 and chain 8 bit for bit, or `--verified-profile` to launch AR and chain 8 with `AX_QUALITY_PROFILE=verified` alone and compare them the same way; `--slots`, `--concurrency`, `--repeat` and `--output-tokens` size the passes. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. |
-| `ab_adaptive_width.py` | Throughput of chain-width policies on the same captured graphs, one server per lane: `w<W>` (fixed width), `table` (`AX_CHAIN_WIDTH_BY_BATCH`, `--table`, default `1:16,4:8`), `schedule` (`AX_CHAIN_SCHEDULE`, `--schedule`, default `16x31,8x1`) and `adaptive` (`--adaptive-env` for its settings). `--env NAME=VALUE` applies to every lane. Without the verified profile the generated text differs between lanes, so use many distinct prompts (`--input-ids`, about 200) and `--repeat 1`; ten prompts moved lanes by several percent. It compares the request limit the server reports with the sweep's concurrency; also check the server log for `max_running_requests is capped`, which SGLang prints when the GDN state cache lowers the limit |
+| `bench_27b_nvfp4.py` | Fixed-output Qwen3.8-27B NVFP4 benchmark. Use `--verify-parity` to compare AX AR, tree 16 and chain 8 bit for bit, or `--verified-profile` to launch AR and chain 8 with `AX_QUALITY_PROFILE=verified` alone. Use `--lanes stock8 replay8 tree16 tree32` for the GDN replay and tree-width comparison. Compare `replay8` with `replay8-kv-graph`, `replay8-kv-direct`, or `replay8-plan-reuse` to measure the experimental KV append and planning paths. Each timed replay pass saves optimized and fallback counts by live batch size in `passes.json`. |
+| `ab_adaptive_width.py` | Throughput of chain-width policies on the same captured graphs, one server per lane: `w<W>` (fixed width), `table` (`AX_CHAIN_WIDTH_BY_BATCH`, `--table`, default `1:16,4:8`), `schedule` (`AX_CHAIN_SCHEDULE`, `--schedule`, default `16x31,8x1`) and `adaptive` (`--adaptive-env` for its settings). `--mixed-concurrency 1 2 4 8` repeats those request waves in one pass. `--env NAME=VALUE` applies to every lane. Without the verified profile the generated text differs between lanes, so use many distinct prompts (`--input-ids`, about 200) and `--repeat 1`. Check the server log for `max_running_requests is capped` when the GDN state cache lowers the limit. |
 | `run_stage1a.sh` | Qwen3.8-27B comparison with greedy, sampling and multi-user checks |
-| `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes |
+| `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes. Use `LANES="chain8n axreplay8"` for stock width-eight DFlash2 and AX accepted-prefix GDN replay. See the [profiling procedure](../../docs/decisions/2026-11-21-dflash-hotpath.md#stability-and-profiling-follow-up). |
 | `run_paired.sh` | Repeat matched benchmark lanes for paired statistics |
 | `run_trtllm_dflash2.sh` | TensorRT-LLM DFlash2 comparison |
 | `token_identity.py`, `sampling_dist_check.py` | Collect and compare greedy IDs and sampled distributions |
@@ -50,3 +50,8 @@ baseline that enters a comparison on one version.
 The regression runner can compare a current checkout with an older checkout
 that still stores its validation scripts under `track_l/`.
 [Regression runner](../../scripts/check_model_regression.py)
+
+`--verified-profile` requires `ar` when selecting lanes explicitly. A
+timed replay pass requires at least one optimized round and zero fallbacks
+at the requested live batch size. The results also record smaller batches.
+[RTX PRO 6000 validation and workload settings](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)

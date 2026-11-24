@@ -88,10 +88,10 @@ checkpoint. Flash Next uses its own NVFP4 MoE and PLE settings.
 The target verifies each speculative proposal on the configured numerical
 path. The RTX speed profile uses batched verification. The opt-in parity
 profile uses matched AR and verification settings, so its speculative
-lanes reproduce its own AR reference over 128 tokens. Over 1,024 tokens the
-chain route still did and the tree route did not, on an RTX PRO 6000.
-`AX_QUALITY_PROFILE=verified` starts the measured chain or AR settings and
-refuses anything without exact-output evidence. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles) · [Verified profile](../ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
+lanes reproduced its AR reference over 128 tokens. The RTX PRO 6000
+follow-up matched all 40 1,024-token outputs with the width-eight chain
+and reproduced two divergences with the 16-node tree. The verified profile
+admits the measured AR and chain settings. [Speed and parity results](performance.md#rtx-speed-and-parity-profiles) · [Verified profile](../ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width) · [Hot-path validation](../results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
 ## Validate a deployment
 

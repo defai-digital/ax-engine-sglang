@@ -157,6 +157,19 @@ outputs. The reverse-order run measured an 11.2% gain and matched 38 of 48
 stock outputs.
 [RTX PRO 6000 retest and latency results](results/rtx_pro_6000_retest/REPORT.md)
 
+The RTX PRO 6000 hot-path follow-up matched serialized AR on all 40
+1,024-token outputs with the verified width-eight chain, at **2.05×** AR
+throughput at C1 and **1.81×** at C2 and C8. In a separate warmed chat
+benchmark, accepted-prefix GDN replay improved native DFlash2 throughput
+by **16–18% at C8** and **26–27% at C16** across both launch orders.
+Replay's greedy outputs varied with batching. [Parity, cancellation, and profiling results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
+
+With GDN replay already enabled, a separate draft KV graph added 0.8%
+to eight-client streamed chat throughput and reduced throughput on the
+frozen prompt set by 3.8%. [Draft KV graph measurements](results/rtx_pro_6000_kv_graph/REPORT.md)
+
+[Streamed chat comparison for stock SGLang, ax-engine-sglang, and vLLM](results/rtx_pro_6000_plan_reuse/REPORT.md#sglang-ax-engine-sglang-and-vllm-on-rtx-pro-6000)
+
 ##### RTX PRO 6000 · Qwen3.8-27B NVFP4
 
 The original speed sweep used SGLang 0.5.23, the same target checkpoint,

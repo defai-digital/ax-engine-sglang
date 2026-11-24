@@ -25,6 +25,9 @@ results/track_l_l0/REPORT.md for the measurements):
   rounds; 64-bit slot offsets in fc1_conv.py and tree_kernels.py.
 - The release's copy of SGLang 0.5.22's dflash_worker_v2.py is not included: worker_gen.py builds
   the tree worker from the installed SGLang at start-up.
+- ax_dflash_kv_direct.py adapts the RMSNorm and RoPE arithmetic from
+  SGLang 0.5.23's fused_kv_materialize.py, Copyright 2023-2024 SGLang Team,
+  licensed under Apache-2.0.
 
 DForkTree's own notice:
   The SGLang worker integration is adapted from SGLang 0.5.22

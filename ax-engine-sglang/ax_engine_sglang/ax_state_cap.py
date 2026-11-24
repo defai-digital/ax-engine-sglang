@@ -72,7 +72,7 @@ def install():
         patch_attribute(MambaPool, "__init__", init)
         patch_attribute(KVCacheConfigurator, "_handle_max_mamba_cache", budget)
         patch_attribute(sys.modules[__name__], "_installed", True)
-    print(f"[ax_state_cap] intermediate SSM cache sized for {POS} draft positions per slot", flush=True)
+    print(f"[ax_state_cap] intermediate SSM cache capped at {POS} draft positions per slot", flush=True)
 
 
 def check_widths(widths, nn):

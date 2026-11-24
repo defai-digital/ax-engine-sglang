@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE))
@@ -151,6 +151,46 @@ class AdaptiveChainTests(unittest.TestCase):
         with patch.object(self.chain, "_ADAPTIVE", False), patch.object(self.chain, "_CONFIG", table):
             self.assertEqual([self.chain.width(16, n) for n in (1, 2, 4, 5, 8, 64)], [16, 16, 16, 8, 8, 8])
             self.assertEqual(self.chain._configured_widths(16), [8, 16])
+
+    def test_draft_width_switch_restores_position_offsets(self):
+        chain = self.chain
+        wide_offsets = tuple(range(16))
+        narrow_offsets = wide_offsets[:8]
+        wide_runner = SimpleNamespace(attn_backend=object())
+        narrow_runner = SimpleNamespace(attn_backend=object())
+        dmr = SimpleNamespace(attn_backend=wide_runner.attn_backend, decode_cuda_graph_runner=wide_runner)
+        worker = self.worker
+        worker.draft_model_runner = dmr
+        worker._draft_sampler = object()
+        worker._draft_block_spec_info = object()
+        worker._block_pos_offsets = wide_offsets
+        worker.draft_model = SimpleNamespace(block_size=16)
+        worker.draft_model.set_block_size = Mock(
+            side_effect=lambda width: setattr(worker.draft_model, "block_size", width)
+        )
+        worker._ax_draft_sets[8] = {
+            "runner": narrow_runner, "sampler": object(), "spec_info": object(),
+            "buffers": None, "position_offsets": narrow_offsets,
+        }
+
+        decode = SimpleNamespace(
+            reqs=[object(), object()], forward_mode=SimpleNamespace(is_extend=lambda: False),
+            is_extend_in_batch=False,
+        )
+        with patch.object(chain, "width", return_value=8):
+            chain.begin_round(worker, decode)
+            chain.begin_round(worker, decode)
+        self.assertEqual(worker.block_size, 8)
+        self.assertEqual(worker.draft_model.block_size, 8)
+        self.assertIs(worker._block_pos_offsets, narrow_offsets)
+        self.assertIs(dmr.decode_cuda_graph_runner, narrow_runner)
+
+        chain.begin_round(worker)
+        self.assertEqual(worker.block_size, 16)
+        self.assertEqual(worker.draft_model.block_size, 16)
+        self.assertIs(worker._block_pos_offsets, wide_offsets)
+        self.assertIs(dmr.decode_cuda_graph_runner, wide_runner)
+        self.assertEqual(worker.draft_model.set_block_size.call_args_list, [call(8), call(16)])
         self.assertIsNone(self.chain.current_runtime().controller)
 
     def test_accept_lengths_of_any_shape_are_counted(self):
