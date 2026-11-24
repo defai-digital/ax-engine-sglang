@@ -26,12 +26,12 @@ adds in drafting and verification.
 ## Quick start
 
 Use Python 3.12 on Linux with an NVIDIA GPU and a CUDA 13-compatible driver.
-Install the v0.4.0 GitHub release wheel in a fresh virtual environment.
+Install the v0.5.0 GitHub release wheel in a fresh virtual environment.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl
+python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.0/ax_engine_sglang-0.5.0-py3-none-any.whl
 ```
 
 Use `python -m pip install ./ax-engine-sglang` from the repository root for a
@@ -53,15 +53,16 @@ The 0.2.1 wheel served this target and drafter on Jetson Thor. A single greedy
 request returned 32 tokens and the trace contained six DFlash2 tree rounds.
 [Thor smoke test and flags](docs/README.md#021-installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
 
-## Changes in v0.4.0
+## Changes in v0.5.0
 
-- Add opt-in accepted-prefix GDN replay for stock width-eight DFlash2
-  chains to reduce speculative state memory on a single GPU.
-- Use one recurrent GDN verification launch per layer in the NVFP4 parity
-  profile and support 64-candidate trees with eight request slots on RTX PRO 6000.
-- Add Qwen3.8-27B NVFP4 speed and replay charts for GeForce RTX 5090.
+- Add `ax-engine-sglang doctor` and a verified launch profile for AR and
+  width-eight DFlash2 chain decoding.
+- Add experimental chain width selection by live batch size and validate
+  recurrent state capacity before loading weights.
+- Measure accepted-prefix GDN replay on RTX PRO 6000, with live batch
+  counters, cancellation checks, and Nsight phase timings.
 
-[Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.4.0) · [RTX 5090 benchmarks](#geforce-rtx-5090--qwen38-27b-nvfp4)
+[Release notes](https://github.com/defai-digital/ax-engine-sglang/releases/tag/v0.5.0) · [RTX PRO 6000 hot-path validation](results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
 ## Supported platforms
 

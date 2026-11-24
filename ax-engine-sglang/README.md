@@ -15,11 +15,11 @@ SGLang code and validates the expected upstream integration points.
 ## Install and run
 
 Use Python 3.11 or 3.12 and a CUDA 13-compatible NVIDIA driver on Linux. In a
-fresh virtual environment, install the [v0.4.0 release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl)
+fresh virtual environment, install the [v0.5.0 release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.0/ax_engine_sglang-0.5.0-py3-none-any.whl)
 to install the add-on and SGLang 0.5.23.
 
 ```bash
-python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.4.0/ax_engine_sglang-0.4.0-py3-none-any.whl
+python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.0/ax_engine_sglang-0.5.0-py3-none-any.whl
 ```
 
 Use `python -m pip install ./ax-engine-sglang` from a source checkout. Add
