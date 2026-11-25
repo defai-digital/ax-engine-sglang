@@ -386,6 +386,24 @@ AR, tree 16 and chain 8 each matched all 100 sequences from the serialized
 AR reference across concurrency one and two.
 [RTX 5090 parity results](results/rtx_5090_27b_nvfp4/REPORT.md#fp8-parity-retest)
 
+##### Batched lattice trees at low concurrency
+
+The batched-tree work of the RTX PRO 6000 section, on 32 GB: 200 prompts, 256 greedy tokens, two
+slots, `AX_SSM_POSITIONS=8` and `AX_TREE_TEMP=1.55` on the tree lanes. Output tok/s:
+
+![RTX 5090 trees at one and two requests. The 32-node tree leads at one request; batched trees lead at two, 9.5% above GDN replay and 20.4% above chain rounds.](docs/figures/rtx-5090-27b-batched-trees.svg)
+
+| Route | C1 | C2 |
+|---|---:|---:|
+| Stock DFlash2 width 16 + AX GDN replay | 187.6 | 338.5 |
+| AX tree 16, chain 8 above one request | 220.4 | 307.7 |
+| AX tree 32 | **237.8** | 310.6 |
+| AX batched trees (`AX_BTREE=2`) | 220.2 | **370.6** |
+
+AX_BTREE keeps 16-node trees, so one server picks tree 32 for single requests or batched trees
+for two. Experimental and off by default.
+[Benchmark report](results/rtx_pro_6000_tree_width/REPORT.md#5-rtx-5090-low-concurrency)
+
 ##### Experimental recurrent GDN replay
 
 The width-eight DFlash2 follow-up used the same checkpoint, inputs, and

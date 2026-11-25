@@ -131,7 +131,47 @@ RTX 5090 (section 5). The GPU kernel check covers the in-place mode.
 
 ## 5. RTX 5090 (low concurrency)
 
-M5_PLACEHOLDER
+One GeForce RTX 5090 (32 GB), the same checkpoints, prompts (200: 60 code, 60 math, 80 chat), 256
+greedy tokens and SGLang 0.5.23. The weights leave about 7 GB, so every tree lane ran with two slots,
+4,096 KV tokens, `--mem-fraction-static 0.94`, `--chunked-prefill-size 512`, a 64 MiB FlashInfer
+workspace, FlashInfer autotune off, a width-8 chain for chain rounds and `AX_SSM_POSITIONS=8` (the
+in-place commit of section 4). Without the position cap the server could not size a KV cache.
+Output tok/s (tokens per verify), median / p95 request seconds:
+
+| lane | C1 | C2 |
+|---|---|---|
+| tree16 | 213.9 (5.66) 1.03 / 1.99 | 307.8 (4.38) 1.45 / 2.58 |
+| tree16s | 220.4 (5.86) 1.03 / 1.93 | 307.7 (4.37) 1.44 / 2.67 |
+| btree2 | 213.6 (5.66) 1.03 / 1.99 | 362.5 (5.65) 1.27 / 2.30 |
+| **btree2s** | 220.2 (5.86) 1.03 / 1.93 | **370.6 (5.80) 1.23 / 2.23** |
+| tree32 | 231.6 (6.18) 0.91 / 1.96 | 307.8 (4.38) 1.44 / 2.62 |
+| **tree32s** | **237.8 (6.38) 0.93 / 1.80** | 310.6 (4.45) 1.44 / 2.64 |
+| AR | | 116.7, 4.39 / 4.40 |
+
+`s` is `AX_TREE_TEMP=1.55` (tree32s too). Stock DFlash2 width 16 with accepted-prefix GDN replay
+(`tree_width_study.py replay`, per family, "all" pools the families' tokens):
+
+| C | replay16 code / math / chat | replay16 all | replay8 all |
+|---|---|---|---|
+| 1 | 290.8 / 263.2 / 126.7 | 187.6 (4.90) | 181.8 (4.33) |
+| 2 | 496.5 / 449.7 / 237.7 | 338.5 (4.88) | 309.9 (4.29) |
+
+- **Two requests:** batched trees are +17.8% over tree16's width-8 chain rounds (btree2s +20.4%)
+  and +7.1% over replay16 (btree2s +9.5%), at a lower p95 (2.23 s against 2.58 s). The server
+  stats of the btree2 lane count btree rounds once two requests are live; one-request rounds stay
+  on the single tree.
+- **One request:** tree32s is the fastest lane, +11.2% over tree16 and +26.8% over replay16. The
+  32-node tree fits on the 5090 because `AX_SSM_POSITIONS` caps the per-node state.
+- **Tree temperature:** +3.0% at C1 (220.4 against 213.9), as on the RTX PRO 6000 (+3.9%).
+- **Outputs:** btree2 and btree2s at C1 equal tree16 and tree16s on 200/200 requests. Against AR at
+  C2 every lane matches 18-20 of 200 exactly, mean common prefix 81-86 tokens, the same NVFP4 batch
+  drift as section 4.
+
+For a low-concurrency RTX 5090 deployment the two best lanes cannot share one server: AX_BTREE
+requires `FC1_TREE_N` at most the drafter block (16). Traffic that is mostly one request at a time
+is served best by `FC1_TREE_N=32 AX_TREE_TEMP=1.55` (tree32s); traffic with two live requests by
+`AX_BTREE=2 AX_TREE_TEMP=1.55` (btree2s), which gives up 7.4% at C1 for +19.3% at C2 against
+tree32s. Both need `AX_SSM_POSITIONS=8` on 32 GB.
 
 ## Reproduce
 

@@ -235,6 +235,19 @@ def main():
     )
 
     bar_chart(
+        OUT / "rtx-5090-27b-batched-trees.svg",
+        title="GeForce RTX 5090 · Qwen3.8-27B NVFP4 · trees at low concurrency",
+        subtitle="200 prompts · 256 greedy output tokens · 2 slots · AX_SSM_POSITIONS=8 · AX_TREE_TEMP=1.55",
+        series=[("Stock DFlash2 width 16 + AX GDN replay", STOCK), ("AX tree 16, chain 8 above one request", AX_LIGHT),
+                ("AX tree 32", AX), ("AX batched trees (AX_BTREE=2)", AX_DEEP)],
+        panels=[{"categories": ["C1", "C2"],
+                 "values": [[187.6, 338.5], [220.4, 307.7], [237.8, 310.6], [220.2, 370.6]]}],
+        xlabel="Output tokens per second", legend_columns=2,
+        description="At one request the 32-node tree leads; at two requests batched trees lead by 9.5% over GDN "
+                    "replay and 20.4% over chain rounds.",
+    )
+
+    bar_chart(
         OUT / "rtx-5090-27b-gdn-replay-throughput.svg",
         title="GeForce RTX 5090 · DFlash2 GDN replay",
         subtitle="Qwen3.8-27B NVFP4 · width-8 chain · 128 output tokens per request",
