@@ -1,6 +1,6 @@
-<p align="center">
-  <img src="docs/images/ax-engine-icon.png" width="128" alt="">
-</p>
+<div align="center">
+
+<img src="docs/images/ax-engine-banner.svg" alt="AX Engine for SGLang" width="100%">
 
 # AX Engine for SGLang
 
@@ -9,6 +9,8 @@
 [![Linux](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-FCC624?logo=linux&logoColor=black)](#supported-platforms)
 [![CUDA](https://img.shields.io/badge/CUDA-13-76B900?logo=nvidia&logoColor=white)](#quick-start)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+</div>
 
 **AX Engine's Linux CUDA edition for NVIDIA Hopper, NVIDIA Blackwell, and the NVIDIA Jetson series.**
 
