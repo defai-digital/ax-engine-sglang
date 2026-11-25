@@ -16,9 +16,10 @@ For B200 and RTX PRO 6000, the matched serving retests are the current
 cross-route comparison: 128 greedy tokens, eight slots, and the same prompt
 corpus for code, math, and chat. The 1,024-token studies and the pooled
 ten-prompt sweeps use different budgets, so their tok/s do not substitute
-for the retest tables. The verified profile is the current exact-output
-gate. The parity tables under it are the measurements that produced that
-gate.
+for the retest tables. Batched lattice trees (`AX_BTREE`) are a separate
+256-token study and are off by default. The verified profile is the
+current exact-output gate. The parity tables under it are the measurements
+that produced that gate.
 
 ## B200 · Qwen3.8-27B
 
@@ -296,6 +297,25 @@ fixed width 8 led at 445.6 tok/s, followed by `1:16,4:8` at 434.0 and fixed
 width 16 at 411.9. The table switched widths at four live requests.
 [Mixed-wave throughput and latency](../results/rtx_pro_6000_hotpath_validation/REPORT.md#mixed-request-waves)
 
+### Batched lattice trees
+
+Experimental and off by default. `AX_BTREE=4` with the fused GDN kernels
+gives each of two to four greedy requests its own 16-node DFlash2 lattice
+tree in one target pass. The run used 200 prompts and 256 output tokens.
+`AX_TREE_TEMP=1.55` is the tree shape found by offline Optuna tuning.
+Output tok/s:
+
+![RTX PRO 6000 batched lattice trees at one, two and four requests. Batched trees gain 17% at C2 and 26% at C4 over chain rounds, and the tree temperature adds about 3%.](figures/rtx-pro-6000-27b-batched-trees.svg)
+
+| Route | C1 | C2 | C4 |
+|---|---:|---:|---:|
+| Tree 16, chain rounds above one request | 235.1 | 336.6 | 536.8 |
+| Batched trees (`AX_BTREE=4`) | 235.3 | 395.1 | 678.8 |
+| Batched trees + `AX_TREE_TEMP=1.55` | **244.1** | **407.7** | **689.0** |
+
+With SGLang's native GDN kernels the batched trees gained 0–2%.
+[Benchmark report](../results/rtx_pro_6000_tree_width/REPORT.md)
+
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with
@@ -316,6 +336,25 @@ two and finished within **0.6%** of stock DFlash2. Verification parity
 was disabled for the timed comparison. Both speculative routes matched
 packed AR on 0 of 10 complete outputs per pass at concurrency one.
 [Per-pass timings, token matches and reproduction](../results/rtx_5090_27b_nvfp4/REPORT.md)
+
+### Batched lattice trees
+
+The batched-tree workload above, on 32 GB: 200 prompts, 256 greedy tokens,
+two slots, `AX_SSM_POSITIONS=8`, and `AX_TREE_TEMP=1.55` on the tree lanes.
+Output tok/s. Experimental and off by default.
+
+![RTX 5090 trees at one and two requests. The 32-node tree leads at one request; batched trees lead at two, 9.5% above GDN replay and 20.4% above chain rounds.](figures/rtx-5090-27b-batched-trees.svg)
+
+| Route | C1 | C2 |
+|---|---:|---:|
+| AX GDN replay, DFlash2 chain 16 | 187.6 | 338.5 |
+| AX tree 16, chain 8 above one request | 220.4 | 307.7 |
+| AX tree 32 | **237.8** | 310.6 |
+| AX batched trees (`AX_BTREE=2`) | 220.2 | **370.6** |
+
+`AX_BTREE` keeps 16-node trees, so one server uses tree 32 for single
+requests or batched trees for two.
+[RTX 5090 results](../results/rtx_pro_6000_tree_width/REPORT.md#5-rtx-5090-low-concurrency)
 
 ### Experimental recurrent GDN replay
 

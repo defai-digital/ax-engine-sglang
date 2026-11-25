@@ -164,8 +164,9 @@ and can run without an n-gram table.
 
 Grouped by GPU: B200, RTX PRO 6000, RTX 5090, then Jetson Thor. Within a GPU,
 Qwen3.8-Flash-Next comes before Qwen3.8-27B, and BF16 comes before NVFP4.
-The same grouping is in the
-[top-level README](../README.md#measured-throughput).
+The [top-level README](../README.md#measured-throughput) summarizes the
+current serving retest. The full tables are in
+[Serving performance](../docs/performance.md).
 
 ### B200
 
