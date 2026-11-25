@@ -1,6 +1,6 @@
 # AX Engine for SGLang
 
-[![CPU tests](https://img.shields.io/github/actions/workflow/status/defai-digital/ax-engine-sglang/plugin-cpu.yml?branch=main&label=CPU%20tests)](https://github.com/defai-digital/ax-engine-sglang/actions/workflows/plugin-cpu.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/defai-digital/ax-engine-sglang/ci.yml?branch=main&label=CI)](https://github.com/defai-digital/ax-engine-sglang/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/ax-engine-sglang?label=PyPI)](https://pypi.org/project/ax-engine-sglang/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
