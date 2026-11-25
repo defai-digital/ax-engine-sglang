@@ -313,18 +313,31 @@ by about 0.1% in paired timings. During serving, the candidate generated
 
 ## Jetson Thor · Qwen3.8-27B
 
-All rows use the single-request FlashInfer lanes on a Linux arm64 Jetson
-Thor with SGLang 0.5.23. The 27B NVFP4 run used 12 prompts per family with
-a 512-token output limit. The BF16 run used eight prompts per family with
-a 384-token limit. Each cell gives code / math / chat output tok/s for
-that checkpoint's workload.
+All rows are single-request runs on a Linux arm64 Jetson Thor. SGLang
+0.5.23 used FlashInfer. TensorRT Edge-LLM 0.12.0 served the same
+checkpoints, DFlash2 drafter and prompts through `trtedge serve`. The 27B
+NVFP4 run used 12 prompts per family with a 512-token output limit. The
+BF16 run used eight prompts per family with a 384-token limit. Each cell
+gives code / math / chat output tok/s for that checkpoint's workload.
 
-![On Jetson Thor, the AX Engine tree has the highest measured throughput for code, math and chat in each BF16 and NVFP4 panel.](figures/jetson-thor-27b-throughput.svg)
+![On Jetson Thor, the AX Engine tree has the highest measured code and math throughput in each BF16 and NVFP4 panel and ties Edge-LLM DDTree 32 on chat.](figures/jetson-thor-27b-throughput.svg)
 
-| Target precision | Stock SGLang AR | Stock SGLang + DFlash2 chain 16 | SGLang + ax-engine-sglang tree 32 |
-|---|---:|---:|---:|
-| NVFP4 | 13.4 / 13.5 / 13.5 | 93.0 / 73.5 / 30.6 | 106.1 / 92.1 / 43.1 |
-| BF16 | 4.6 / 4.6 / 4.6 | 43.1 / 29.6 / 12.5 | 47.5 / 37.6 / 18.3 |
+| Route | NVFP4 | BF16 |
+|---|---:|---:|
+| Stock SGLang AR | 13.4 / 13.5 / 13.5 | 4.6 / 4.6 / 4.6 |
+| Edge-LLM AR | 13.3 / 13.3 / 13.3 | 4.7 / 4.7 / 4.7 |
+| Stock SGLang MTP3 | 36.2 / 35.2 / 27.0 | 13.5 / 12.9 / 9.9 |
+| Edge-LLM MTP3 | 39.1 / 37.3 / 28.4 | 13.8 / 12.9 / 10.2 |
+| Edge-LLM DFlash2 chain 8 | 73.0 / 65.7 / 34.5 | 30.1 / 25.1 / 14.0 |
+| Edge-LLM DDTree 32 (`draft_top_k` 4) | 71.4 / 68.8 / **44.2** | 30.1 / 28.8 / 18.2 |
+| Stock SGLang + DFlash2 chain 16 | 93.0 / 73.5 / 30.6 | 43.1 / 29.6 / 12.5 |
+| SGLang + ax-engine-sglang tree 32 | **106.1 / 92.1** / 43.1 | **47.5 / 37.6 / 18.3** |
+
+Edge-LLM's AR matched stock SGLang AR and its MTP3 ran 0–8% faster. Its
+DFlash2 chain verifies the drafter's `block_size` of 8 tokens per round,
+against SGLang's 16. The add-on's tree 32 ran 1.49 / 1.34 / 0.98 times as
+fast as Edge-LLM's DDTree 32 on NVFP4 and 1.58 / 1.31 / 1.01 times on BF16.
+[Edge-LLM setup and failed lanes](../results/edgellm_thor/REPORT.md)
 
 The Thor report also records Qwen3.5-9B BF16 with the original DFlash
 drafter. Its FlashInfer follow-up changed host load, and the chain lane
@@ -502,10 +515,12 @@ Each cell gives output tok/s at one and four concurrent requests.
 All configurations used the same 48 greedy prompts per workload and a
 256-token output limit.
 
-![Single-Thor Flash Next NVFP4 throughput for stock and adaptive MTP on SGLang and vLLM.](figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
+![Single-Thor Flash Next NVFP4 throughput for stock MTP on SGLang, vLLM and TensorRT Edge-LLM, and adaptive MTP with the add-ons.](figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
 
 | Configuration | Code | Math | Chat |
 |---|---:|---:|---:|
+| TensorRT Edge-LLM 0.12.0 AR | 17.3 / 49.1 | 17.2 / 51.5 | 17.5 / 50.1 |
+| TensorRT Edge-LLM 0.12.0 MTP3 | 37.2 / 89.8 | 34.7 / 90.3 | 26.4 / 67.0 |
 | Stock SGLang MTP3 | 42.3 / 96.2 | 38.8 / 92.2 | 28.9 / 65.4 |
 | Stock vLLM MTP3 | 42.4 / 101.0 | 41.2 / 101.5 | 31.3 / 75.8 |
 | SGLang adaptive MTP + ax-engine-sglang + 64k draft vocabulary map | 59.8 / 123.3 | 49.1 / 103.1 | 33.6 / 70.5 |
@@ -517,6 +532,14 @@ policies scored slightly higher than the Optuna-selected policies on
 the held-out workloads. On full HumanEval and GSM8K, the AX vLLM lane
 matched vLLM AR's accuracy (0.963 / 0.961) and finished in 4,625 seconds
 versus 8,773 seconds for AR.
+
+Edge-LLM served `nvidia/Qwen3.8-Flash-Next-NVFP4` with in-flight batching
+(batch 4) and the cached PLE table. The RadixArk checkpoint used by the
+SGLang and vLLM rows failed to load in Edge-LLM with a CUDA
+`misaligned address` error. Edge-LLM MTP3's geomean was 51.4 tok/s, 6%
+below stock SGLang MTP3's 54.9. Flash Next BF16 (about 360 GB) does not
+fit one Thor and was not run.
+[Edge-LLM lanes](../results/edgellm_thor/REPORT.md#qwen38-flash-next-nvfp4-concurrency-1-and-4)
 [Single-Thor setup, all lanes, Optuna and the QSA fix](reports/2026-11-21-flash-next-single-thor.md)
 
 ## Reproduce

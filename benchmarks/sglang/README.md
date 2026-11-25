@@ -47,6 +47,7 @@ baseline that enters a comparison on one version.
 | `run_tree_plugin.sh` | Select and run SGLang stock and plugin lanes. Use `LANES="chain8n axreplay8"` for stock width-eight DFlash2 and AX accepted-prefix GDN replay. See the [profiling procedure](../../docs/decisions/2026-11-21-dflash-hotpath.md#stability-and-profiling-follow-up). |
 | `run_paired.sh` | Repeat matched benchmark lanes for paired statistics |
 | `run_trtllm_dflash2.sh` | TensorRT-LLM DFlash2 comparison |
+| `run_edgellm_thor.sh` | TensorRT Edge-LLM 0.12.0 lanes on one Jetson Thor (`trtedge serve`): 27B NVFP4 and BF16 AR, MTP3, DFlash2 chain and DDTree 32, and Flash Next NVFP4 AR and MTP3 at C1 and C4. Each lane drops the page cache, builds or reuses engines, and runs the shared speed harness from a separate client environment. [Results](../../results/edgellm_thor/REPORT.md) |
 | `token_identity.py`, `sampling_dist_check.py` | Collect and compare greedy IDs and sampled distributions |
 | `mixed_requests_check.py`, `stress_multiuser.py` | Check mixed serving, cancellation and slot reuse |
 

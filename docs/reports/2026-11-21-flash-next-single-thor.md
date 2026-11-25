@@ -23,7 +23,11 @@ SGLang configuration on every workload and concurrency:
 | vLLM MTP7 + NVFP4 draft lm_head + AX QSA block | 61.6 / 130.9 | 53.5 / 115.0 | 31.5 / 64.4 | 68.2 |
 | **vLLM adaptive K + NVFP4 draft lm_head + AX QSA block** | **62.4 / 131.4** | 53.3 / **117.2** | **36.9 / 82.7** | **73.4** |
 
-![Single-Thor Flash Next NVFP4 throughput for the stock and adaptive SGLang and vLLM configurations.](../figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
+![Single-Thor Flash Next NVFP4 throughput for the stock and adaptive SGLang and vLLM configurations, with TensorRT Edge-LLM MTP3 added on November 25.](../figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
+
+The figure also shows TensorRT Edge-LLM 0.12.0 MTP3, measured on November 25
+with the same 48 prompts on NVIDIA's NVFP4 checkpoint (geomean 51.4).
+[Edge-LLM lanes](../../results/edgellm_thor/REPORT.md)
 
 - Against stock SGLang MTP3 the result is 26–48% faster; against the best SGLang configuration
   4–17% faster (geomean +10%). Against AR (20.6 tok/s on code at C1) code runs 3.0 times faster.
