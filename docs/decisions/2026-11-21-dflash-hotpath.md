@@ -403,3 +403,39 @@ throughput, p95 request latency, and generated IDs on held-out chat prompts.
 Before promoting a candidate to a verified serving profile, run the
 serialized 1,024-token AR comparison.
 [Benchmark commands](../../benchmarks/sglang/README.md#dflash2-fp8-verification-tactics) · [Measurement record](../../results/fp8_verify_tactics/REPORT.md)
+
+### Splash DFlash2 follow-up
+
+1. **Measure how much time the draft vocabulary head takes.** Splash
+   projects onto 59.8% of Qwen's vocabulary when the recent 64 tokens of
+   every lane fit that subset. It falls back to the full draft head when
+   a lane leaves it. SGLang's native draft graph already includes greedy
+   selection over the target's shared head. Profile that operation at C1
+   and C8 first. A useful CUDA prototype would pack the selected weight
+   rows once, map draft IDs back before verification, and keep the full
+   target head. Start with greedy TP1 and check prompts in and out of the
+   subset, acceptance, and complete outputs.
+   [Splash vocabulary policy](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/docs/models.md#drafts)
+2. **Score verified rows by expected committed tokens per millisecond.**
+   Splash calibrates the cost of row counts and adds a term for context
+   history. It estimates conditional acceptance by draft confidence and
+   depth, then pools candidate rows across requests. AX already adapts
+   chain width using round times and observed acceptance. Score the
+   existing captured widths offline by live batch, padded rows, and
+   context length. Compare against the fixed width-eight lane before
+   adding graph shapes or changing recurrent state capacity.
+   [Splash cost selection](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/runtime/model/StepCosts.cpp#L274-L301) · [AX width policy](../../ax-engine-sglang/ax_engine_sglang/policy.py)
+3. **Use prompt lookup to fill a fixed tree budget.** Splash deduplicates
+   a request's own repeated suffix with the learned draft tree. Test a
+   bounded lookup on C1 code and tool-call prompts, replacing low-ranked
+   proposals at the same total row count. Record lookup hits, accepted
+   lookup rows, and regressions on chat. Keep sampled decoding on the
+   existing path until lookup proposals have a validated rejection rule.
+   [Splash lookup proposal code](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/runtime/model/Runtime.cpp#L2654-L2685)
+
+Splash's Metal results combine several changes. The RTX PRO 6000 replay
+trace puts 20.98 ms in target verify and 4.07 ms in draft forward at C8.
+Draft KV append takes 0.35 ms at the median. Use the CUDA trace to choose
+the first experiment and check its gain in both launch orders. Require
+the serialized AR parity gate before changing the verified profile.
+[RTX replay trace](../../results/rtx_pro_6000_hotpath_validation/REPORT.md#nsight-attribution) · [Splash release measurements](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/docs/release-notes/1.7.0.md)

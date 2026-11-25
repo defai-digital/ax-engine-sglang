@@ -136,6 +136,11 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
+In a separate 128-token B200 retest at eight concurrent clients, AX GDN
+replay reached **1,599.5 / 1,428.3 / 949.6** output tok/s for code / math /
+chat. This was **11.2% / 21.8% / 5.1%** above stock DFlash2.
+[B200 retest table and chart](docs/performance.md#b200-dflash2-serving-retest)
+
 #### RTX PRO 6000 · Qwen3.8-27B BF16 and NVFP4
 
 Two passes per route used 128-token greedy outputs. Cells give end-to-end
@@ -171,9 +176,20 @@ benchmark, accepted-prefix GDN replay improved native DFlash2 throughput
 by **16–18% at C8** and **26–27% at C16** across both launch orders.
 Replay's greedy outputs varied with batching. [Parity, cancellation, and profiling results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
-The RTX PRO 6000 serving comparison for FP8 verification tactics is
-pending.
-[RTX 5090 serving results](#rtx-5090--fp8-verification-tactics) · [Thor-01 projection results](#thor-01--fp8-verification-projections)
+##### RTX PRO 6000 · FP8 verification tactics
+
+At eight concurrent clients, the candidate cuBLAS tactics improved
+throughput by **1.95–2.61%**. They matched **57 of 64** complete greedy
+outputs in each launch order. The tactics remain experimental.
+
+![RTX PRO 6000 throughput at eight clients with default and candidate FP8 tactics in both launch orders.](docs/figures/rtx-pro-6000-27b-fp8-verify-throughput.svg)
+
+| First lane | Default (output tok/s) | Candidate (output tok/s) | Change | Exact outputs |
+|---|---:|---:|---:|---:|
+| Default | 699.74 | 718.01 | +2.61% | 57/64 |
+| Candidate | 710.20 | 724.04 | +1.95% | 57/64 |
+
+[RTX PRO 6000 operands and serving results](results/fp8_verify_tactics/REPORT.md#rtx-pro-6000-live-qwen38-27b-nvfp4) · [RTX 5090 serving results](#rtx-5090--fp8-verification-tactics) · [Thor-01 projection results](#thor-01--fp8-verification-projections)
 
 With GDN replay already enabled, a separate draft KV graph added 0.8%
 to eight-client streamed chat throughput and reduced throughput on the
@@ -327,20 +343,23 @@ test timed individual projections on synthetic CUDA inputs.
 
 #### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
 
-One GPU served Flash Next with pinned-host FP8 PLE. Cells give end-to-end
-output tok/s in code / math / chat order on the same prompt sets.
+One GPU served Flash Next with pinned-host FP8 PLE. Rates pool two
+passes in code / math / chat order and use output tok/s.
 
-![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3 and AX MTP3 and MTP7 at concurrency eight by workload.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
+![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3, AX MTP3, and AX MTP7 at one and eight clients.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
 
 | Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
 |---:|---:|---:|---:|---:|
-| 1 | 82.2 / 82.9 / 79.2 | 179.1 / 163.8 / **137.0** | 181.5 / 163.3 / 132.7 | **209.1** / **170.7** / 116.9 |
-| 8 | 412.5 / 415.9 / 376.5 | 621.7 / 572.4 / 423.0 | 650.4 / **576.5** / **452.0** | **679.7** / 555.3 / 356.9 |
+| 1 | 83.1 / 83.8 / 83.7 | 183.5 / 164.1 / 134.0 | 182.1 / 164.8 / **135.0** | **218.9** / **174.0** / 114.7 |
+| 8 | 414.1 / 421.5 / 399.3 | 679.0 / **582.6** / **455.4** | 594.2 / 572.4 / 405.5 | **728.0** / 542.7 / 356.5 |
 
-At eight clients, AX MTP3 led chat at **452.0 tok/s** (+6.8% over stock
-MTP3). AX MTP7 led code at **679.7 tok/s**. Greedy chat outputs varied
-between repeats on these serving routes.
-[RTX PRO 6000 Flash Next retest](results/rtx_pro_6000_retest/REPORT.md#qwen38-flash-next-nvfp4)
+At eight clients, AX MTP7 led code at **728.0 tok/s**, and stock MTP3
+led chat at **455.4 tok/s**. The first AX MTP3 chat pass was slower than
+its repeat (363.7 vs. 458.2 tok/s).
+[RTX PRO 6000 Flash Next retest](results/blackwell_nvfp4_serving_retest/REPORT.md#rtx-pro-6000-qwen38-flash-next-nvfp4)
+
+On one B200 at C8, AX MTP7 led code at **1,126.9 tok/s** and AX MTP3
+led chat at **715.4 tok/s**. [B200 table and chart](docs/performance.md#b200-flash-next-serving-retest)
 
 #### Two B300 GPUs · Qwen3.8-Flash-Next BF16
 

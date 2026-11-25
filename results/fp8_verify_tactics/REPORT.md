@@ -1,18 +1,52 @@
 # DFlash2 FP8 verification tactics
 
-## RTX PRO 6000 serving
+## RTX PRO 6000 live Qwen3.8-27B NVFP4
 
-The original Runpod host had no free GPU. FP8 tactic serving measurements
-on RTX PRO 6000 remain pending. The reference below is the earlier
-Qwen3.8-27B NVFP4 width-eight DFlash2 run with accepted-prefix GDN replay
-on 64 held-out UltraChat prompts and 512 output tokens per request.
-The ranges cover both launch orders in that run.
+The new Runpod host had an RTX PRO 6000 Blackwell Server Edition
+(97,887 MiB, SM120) with driver 595.112.07. It used SGLang 0.5.23,
+FlashInfer 0.7.2, PyTorch 2.14.1+cu130, and cuDNN 9.24.
+Both lanes used width-eight DFlash2, GDN replay, eight request slots,
+a context limit of 2,048, and an 8,192-token KV pool.
+
+### 64-row projection audit on RTX PRO 6000
+
+The same tuning prompts as the RTX 5090 run supplied four distinct live
+layer samples per projection. Thirteen of 42 candidate and projection
+combinations matched native cuBLAS in eager and graph execution. The other
+29 changed BF16 bits in eager execution. The fastest exact candidate was
+cuBLAS tactic 7 for GDN QKVZ and tactic 0 for attention QKV.
+
+| Projection | Candidate tactic | Native (µs) | Candidate (µs) | Median paired time reduction |
+|---|---:|---:|---:|---:|
+| GDN QKVZ | cuBLAS 7 | 66.08 | 63.06 | 4.55% |
+| Attention QKV | cuBLAS 0 | 63.47 | 63.41 | 0.08% |
+
+### RTX PRO 6000 paired serving comparison
+
+Both launch orders used the same 64 held-out UltraChat prompts as the
+RTX 5090 run, eight concurrent clients, and exactly 512 greedy output
+tokens per request. The first capture exceeded the scheduler watchdog
+during CUDA compilation. The completed capture ran with the warmed
+kernel cache and a longer watchdog timeout.
+
+![RTX PRO 6000 end-to-end throughput for default and candidate FP8 tactics across both launch orders.](../../docs/figures/rtx-pro-6000-27b-fp8-verify-throughput.svg)
+
+| First lane | Default (output tok/s) | Candidate (output tok/s) | Change | Default p95 (s) | Candidate p95 (s) | Exact outputs |
+|---|---:|---:|---:|---:|---:|---:|
+| Default | 699.74 | 718.01 | +2.61% | 7.16 | 7.13 | 57/64 |
+| Candidate | 710.20 | 724.04 | +1.95% | 6.96 | 7.09 | 57/64 |
+
+Each timed candidate pass replayed 87 full eight-request tactic graphs
+with zero fallbacks at that size. The default lane recorded 139 full
+eight-request GDN replay rounds per pass. The candidate averaged 3.123
+tokens per verification and the default averaged 3.100. Each mode repeated
+all 64 of its own outputs across launch orders. The earliest difference
+between the modes was at output token seven. The profile remains experimental.
+
+The earlier accepted-prefix GDN replay run used a 32,768-token KV pool
+and reached 771.72–782.87 output tok/s at C8 and 1,200.63–1,202.68 at C16.
+The new tactic audit covers C8.
 [Prior RTX measurements](../rtx_pro_6000_hotpath_validation/REPORT.md#warmed-chat-throughput)
-
-| Live clients | Replay output tok/s | p95 request latency |
-|---|---:|---:|
-| 8 | 771.72–782.87 | 6.32–6.46 s |
-| 16 | 1,200.63–1,202.68 | 7.74–8.43 s |
 
 ## RTX 5090 live Qwen3.8-27B NVFP4
 

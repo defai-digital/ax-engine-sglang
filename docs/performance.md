@@ -49,6 +49,25 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
+### B200 DFlash2 serving retest
+
+The 128-token retest pooled two streamed passes per route and used the
+same greedy prompts for all lanes. Values are code / math / chat output
+tok/s.
+
+![B200 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](figures/b200-27b-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 136.0 / 136.0 / 136.4 | 448.5 / 408.1 / 281.3 | **632.5** / **516.5** / **333.8** | 456.6 / 415.3 / 286.6 |
+| 8 | 870.4 / 851.6 / 833.6 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5** / **1,428.3** / **949.6** |
+
+AX tree/chain led all three single-client workloads. Width-eight GDN
+replay led all three at C8 and lowered chat p95 request latency from 1.41
+to 1.34 s compared with stock DFlash2. An AR confirmation after checkpoint
+staging reached 953.0 tok/s on C8 chat, close to the replay result.
+[Per-pass throughput and output agreement](../results/blackwell_nvfp4_serving_retest/REPORT.md#b200-qwen38-27b-nvfp4)
+
 ## RTX PRO 6000 · Qwen3.8-27B NVFP4
 
 All lanes used SGLang 0.5.23, a fixed 128-token greedy output, FlashInfer
@@ -184,17 +203,22 @@ to 23.4 ms, with draft KV append near 0.36 ms in both lanes.
 
 ### FP8 tactic serving comparison
 
-The assigned Runpod host had no free GPU. RTX PRO 6000 serving throughput
-with the candidate tactics remains pending. The reference is the earlier
-accepted-prefix replay run on 64 held-out UltraChat prompts, with 512 output
-tokens per request. The reference ranges cover both launch orders.
+The RTX PRO 6000 ran both launch orders at concurrency eight. Each timed
+pass used 64 held-out UltraChat prompts and 512 greedy output tokens per
+request. Both lanes used width-eight DFlash2 and GDN replay.
 
-| Live clients | Replay reference (output tok/s) | Candidate (output tok/s) |
-|---:|---:|---:|
-| 8 | 771.72–782.87 | Pending |
-| 16 | 1,200.63–1,202.68 | Pending |
+![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput with both FP8 tactic policies at concurrency eight.](figures/rtx-pro-6000-27b-fp8-verify-throughput.svg)
 
-[Prior RTX warm chat measurements](../results/rtx_pro_6000_hotpath_validation/REPORT.md#warmed-chat-throughput) · [RTX 5090 serving measurements](#fp8-verification-tactics-at-c8) · [Thor-01 projection measurements](#fp8-verification-projections)
+| First lane | Default (output tok/s) | Candidate (output tok/s) | Change | Default → candidate p95 (s) | Exact outputs |
+|---|---:|---:|---:|---:|---:|
+| Default | 699.74 | 718.01 | +2.61% | 7.16 → 7.13 | 57/64 |
+| Candidate | 710.20 | 724.04 | +1.95% | 6.96 → 7.09 | 57/64 |
+
+The 64-row GDN QKVZ tactic reduced its projection time by 4.55% on
+captured operands. The attention QKV tactic was within 0.1% of the native
+tactic. In serving, both modes repeated their own 64 outputs across
+launch orders. Seven outputs differed between modes in each order.
+[RTX PRO 6000 projection audit and graph coverage](../results/fp8_verify_tactics/REPORT.md#rtx-pro-6000-live-qwen38-27b-nvfp4) · [RTX 5090 serving measurements](#fp8-verification-tactics-at-c8)
 
 ### Chain width by batch size
 
@@ -331,6 +355,39 @@ projections on Thor-01.
 
 Flash Next uses SGLang MTP with the add-on's QSA fix. Its comparison uses
 stock MTP3 as the speculative baseline.
+
+### RTX PRO 6000 Flash Next serving retest
+
+Both passes used the same 128-token greedy workloads and pinned-host FP8
+PLE. Values are code / math / chat output tok/s.
+
+![RTX PRO 6000 Flash Next NVFP4 throughput by serving route and workload at one and eight clients.](figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 83.1 / 83.8 / 83.7 | 183.5 / 164.1 / 134.0 | 182.1 / 164.8 / **135.0** | **218.9** / **174.0** / 114.7 |
+| 8 | 414.1 / 421.5 / 399.3 | 679.0 / **582.6** / **455.4** | 594.2 / 572.4 / 405.5 | **728.0** / 542.7 / 356.5 |
+
+At C8, AX MTP7 was 7.2% faster than stock MTP3 on code. Stock MTP3 led
+math and chat. Both MTP3 routes reached 458.22 tok/s in their second
+chat pass.
+[RTX PRO 6000 setup and complete pass results](../results/blackwell_nvfp4_serving_retest/REPORT.md#rtx-pro-6000-qwen38-flash-next-nvfp4)
+
+### B200 Flash Next serving retest
+
+The 128-token retest used two streamed passes per lane. Values are
+code / math / chat output tok/s.
+
+![B200 Flash Next NVFP4 throughput for AR, MTP3, AX MTP3, and AX MTP7 at one and eight clients.](figures/b200-flash-next-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 136.9 / 136.4 / 130.6 | 304.9 / 273.3 / **223.4** | 302.8 / 270.9 / 213.3 | **389.7** / **297.1** / 208.9 |
+| 8 | 614.7 / 717.4 / 594.2 | 720.7 / 947.0 / 684.5 | 745.1 / 976.8 / **715.4** | **1,126.9** / **978.8** / 607.5 |
+
+AX MTP7 led code at both concurrencies. AX MTP3 led C8 chat with
+715.4 tok/s and 1.94 s p95 request latency.
+[B200 setup, pass rates, and exact-output counts](../results/blackwell_nvfp4_serving_retest/REPORT.md#b200-qwen38-flash-next-nvfp4)
 
 ### One B200
 
