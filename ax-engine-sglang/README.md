@@ -162,7 +162,7 @@ and can run without an n-gram table.
 
 ## Benchmark results
 
-Grouped by GPU: B200, RTX PRO 6000, then Jetson Thor (B300 and RTX 5090 results are in the
+Grouped by GPU: B200, RTX PRO 6000, RTX 5090, then Jetson Thor (B300 results are in the
 [top-level README](../README.md#measured-throughput)). Within a GPU, Qwen3.8-27B comes before
 Qwen3.8-Flash-Next.
 
@@ -236,6 +236,32 @@ complete outputs per pass.
 For a recorded token-for-token match, use `AX_QUALITY_PROFILE=verified`
 with `AX_TREE=0` and a draft block of 8. That route matched serialized AR
 on RTX PRO 6000 at 128 and 1,024 tokens. The tree route is refused.
+
+**Batched lattice trees (experimental).** `AX_BTREE=4` with the fused GDN kernels gives each of two
+to four greedy requests its own 16-node tree in one target pass. On 200 prompts with 256 tokens it
+reached 395.1 / 678.8 tok/s at C2 / C4 against 336.6 / 536.8 for tree 16 with chain rounds (+17% /
++26%), and 407.7 / 689.0 with `AX_TREE_TEMP=1.55`. SGLang's native GDN tree kernels
+(`AX_BTREE_NATIVE=1`) gained 0-2%. [Batched trees](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_pro_6000_tree_width/REPORT.md)
+
+![RTX PRO 6000 batched lattice trees at one, two and four requests.](https://raw.githubusercontent.com/defai-digital/ax-engine-sglang/main/docs/figures/rtx-pro-6000-27b-batched-trees.svg)
+
+### RTX 5090
+
+One 32 GB RTX 5090 fits the 27B NVFP4 tree lanes with two slots, 4,096 KV tokens and
+`AX_SSM_POSITIONS=8` (`--mem-fraction-static 0.94 --chunked-prefill-size 512`). With
+`AX_TREE_TEMP=1.55`, 200 prompts and 256 tokens, output tok/s:
+
+| Route | C1 | C2 |
+|---|---:|---:|
+| AX GDN replay, DFlash2 chain 16 | 187.6 | 338.5 |
+| AX tree 16, chain 8 above one request | 220.4 | 307.7 |
+| AX tree 32 (`FC1_TREE_N=32`) | **237.8** | 310.6 |
+| AX batched trees (`AX_BTREE=2`) | 220.2 | **370.6** |
+
+`AX_BTREE` requires `FC1_TREE_N` at most 16, so pick tree 32 for mostly single requests and
+`AX_BTREE=2` when two requests are usually live. [RTX 5090 results](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_pro_6000_tree_width/REPORT.md#5-rtx-5090-low-concurrency)
+
+![RTX 5090 trees at one and two requests.](https://raw.githubusercontent.com/defai-digital/ax-engine-sglang/main/docs/figures/rtx-5090-27b-batched-trees.svg)
 
 ### Jetson Thor
 

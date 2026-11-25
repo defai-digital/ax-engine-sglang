@@ -16,6 +16,7 @@ STOCK = "#6b7a8d"       # stock speculative route
 STOCK2 = "#3f4d60"      # second stock speculative route
 VLLM = "#8f86b5"        # stock vLLM
 EDGE = ["#e0c4a2", "#c99a64", "#a9703a", "#7a4c22"]   # TensorRT Edge-LLM AR, MTP3, chain 8, DDTree 32
+AX_PALE = "#c4e6cf"
 AX_LIGHT = "#8fd0a6"
 AX = "#2e9e5f"          # green
 AX_DEEP = "#0b5d36"     # deep green
@@ -238,7 +239,7 @@ def main():
         OUT / "rtx-5090-27b-batched-trees.svg",
         title="GeForce RTX 5090 · Qwen3.8-27B NVFP4 · trees at low concurrency",
         subtitle="200 prompts · 256 greedy output tokens · 2 slots · AX_SSM_POSITIONS=8 · AX_TREE_TEMP=1.55",
-        series=[("Stock DFlash2 width 16 + AX GDN replay", STOCK), ("AX tree 16, chain 8 above one request", AX_LIGHT),
+        series=[("AX GDN replay, DFlash2 chain 16", AX_PALE), ("AX tree 16, chain 8 above one request", AX_LIGHT),
                 ("AX tree 32", AX), ("AX batched trees (AX_BTREE=2)", AX_DEEP)],
         panels=[{"categories": ["C1", "C2"],
                  "values": [[187.6, 338.5], [220.4, 307.7], [237.8, 310.6], [220.2, 370.6]]}],

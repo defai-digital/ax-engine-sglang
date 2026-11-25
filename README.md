@@ -17,7 +17,8 @@ checkpoint formats specific to each runtime.
 AX aims to emit more tokens per target-model pass while keeping the target in
 charge of what gets emitted. On dense Qwen models, it can verify multiple
 candidate continuations as a tree for one active request and use linear
-chains when requests are batched. On Flash Next, it fixes the sparse
+chains when requests are batched. An experimental mode (`AX_BTREE`) gives each
+request of a small batch its own tree in one target pass. On Flash Next, it fixes the sparse
 attention state so SGLang's multi-token prediction (MTP) can verify longer
 drafts. Each route pays off when it saves more time in target passes than it
 adds in drafting and verification.
@@ -92,7 +93,7 @@ SGLang. The table lists the routes accelerated by this add-on.
 | Model family | Measured target precision | What the add-on accelerates |
 |---|---|---|
 | Qwen3.5-9B | BF16 | DFlash v1 tree verification on eligible requests |
-| Qwen3.8-27B dense | BF16 and NVFP4 | DFlash2 tree verification for eligible single requests and chain verification for grouped requests |
+| Qwen3.8-27B dense | BF16 and NVFP4 | DFlash2 tree verification for eligible single requests and chain verification for grouped requests; experimental per-request trees for two to eight grouped requests (`AX_BTREE`) |
 | Qwen3.8-Flash-Next (Qwen4-Exp) | BF16 and NVFP4 | SGLang MTP with the QSA pending-ring fix. DFlash2 tree serving remains unavailable |
 
 For NVFP4, load an existing SGLang-compatible NVFP4 checkpoint with the
@@ -395,7 +396,7 @@ slots, `AX_SSM_POSITIONS=8` and `AX_TREE_TEMP=1.55` on the tree lanes. Output to
 
 | Route | C1 | C2 |
 |---|---:|---:|
-| Stock DFlash2 width 16 + AX GDN replay | 187.6 | 338.5 |
+| AX GDN replay, DFlash2 chain 16 | 187.6 | 338.5 |
 | AX tree 16, chain 8 above one request | 220.4 | 307.7 |
 | AX tree 32 | **237.8** | 310.6 |
 | AX batched trees (`AX_BTREE=2`) | 220.2 | **370.6** |

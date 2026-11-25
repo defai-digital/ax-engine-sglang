@@ -155,7 +155,7 @@ L 366.690184 139.1976
 L 366.690184 150.9624 
 L 79.2 150.9624 
 z
-" clip-path="url(#pcc8b5c1e37)" style="fill: #6b7a8d"/>
+" clip-path="url(#pcc8b5c1e37)" style="fill: #c4e6cf"/>
    </g>
    <g id="patch_4">
     <path d="M 79.2 152.8776 
@@ -187,7 +187,7 @@ L 597.938951 208.3176
 L 597.938951 220.0824 
 L 79.2 220.0824 
 z
-" clip-path="url(#pcc8b5c1e37)" style="fill: #6b7a8d"/>
+" clip-path="url(#pcc8b5c1e37)" style="fill: #c4e6cf"/>
    </g>
    <g id="patch_8">
     <path d="M 79.2 221.9976 
@@ -249,7 +249,7 @@ L 41.04 74.88
 L 41.04 66.24 
 L 25.2 66.24 
 z
-" style="fill: #6b7a8d; stroke: #6b7a8d; stroke-linejoin: miter"/>
+" style="fill: #c4e6cf; stroke: #c4e6cf; stroke-linejoin: miter"/>
   </g>
   <g id="patch_13">
    <path d="M 378 74.88 
@@ -282,7 +282,7 @@ z
    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-anchor: start; fill: #485971" x="25.2" y="46.8" transform="rotate(-0 25.2 46.8)">200 prompts · 256 greedy output tokens · 2 slots · AX_SSM_POSITIONS=8 · AX_TREE_TEMP=1.55</text>
   </g>
   <g id="text_22">
-   <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-anchor: start; fill: #14243b" x="46.8" y="73.618242" transform="rotate(-0 46.8 73.618242)">Stock DFlash2 width 16 + AX GDN replay</text>
+   <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-anchor: start; fill: #14243b" x="46.8" y="73.618242" transform="rotate(-0 46.8 73.618242)">AX GDN replay, DFlash2 chain 16</text>
   </g>
   <g id="text_23">
    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; text-anchor: start; fill: #14243b" x="399.6" y="73.618242" transform="rotate(-0 399.6 73.618242)">AX tree 16, chain 8 above one request</text>
