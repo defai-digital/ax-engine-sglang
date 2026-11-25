@@ -101,7 +101,9 @@ verified on separate serving routes. [Model routes and precision support](docs/R
 
 ## Measured throughput
 
-[Qwen3.8-27B](#qwen38-27b) · [Qwen3.8-Flash-Next](#qwen38-flash-next)
+[B300](#b300) · [B200](#b200) · [RTX PRO 6000](#rtx-pro-6000) · [GeForce RTX 5090](#geforce-rtx-5090) · [Jetson Thor](#jetson-thor)
+
+Results are grouped by GPU, then by model (Qwen3.8-27B, then Qwen3.8-Flash-Next).
 
 Rates are output tokens per second. A cell written as three numbers is
 code / math / chat. The B200, RTX PRO 6000, and Flash Next serving retests
@@ -111,9 +113,36 @@ RTX 5090, B300, and 1,024-token studies use the budgets named in their
 headings. Compare rates inside one table. Launch commands and per-pass
 results are in [Serving performance](docs/performance.md).
 
-### Qwen3.8-27B
+### B300
 
-#### B200 · NVFP4 serving retest
+#### Two B300 GPUs · Qwen3.8-Flash-Next BF16
+
+SGLang 0.5.23 ran the BF16 checkpoint with TP2 and an on-GPU BF16 KV cache.
+The table and chart show end-to-end output tok/s from the second pass, with
+24 greedy prompts per family and a 256-token output limit.
+
+![Qwen3.8-Flash-Next BF16 on two B300 GPUs. Stock AR, stock MTP3, and AX Engine MTP7 throughput at concurrency 1, 4, and 16.](docs/figures/b300-flash-next-bf16-throughput.svg)
+
+| Workload | Concurrency | Stock SGLang AR | Stock SGLang MTP3 | AX Engine MTP7 |
+|---|---:|---:|---:|---:|
+| Code | 1 | 184.9 | 306.6 | **390.0** |
+| Code | 4 | 389.6 | 520.7 | **615.4** |
+| Code | 16 | 794.5 | 1,199.7 | **1,649.8** |
+| Math | 1 | 206.8 | 353.9 | **409.9** |
+| Math | 4 | 550.4 | 649.4 | **735.2** |
+| Math | 16 | 1,258.0 | 1,606.1 | **1,708.0** |
+| Chat | 1 | 207.2 | **294.4** | 268.0 |
+| Chat | 4 | 534.1 | **584.5** | 521.1 |
+| Chat | 16 | 1,069.6 | **1,272.6** | 1,169.6 |
+
+MTP7 beat stock MTP3 by **18–38% on code** and **6–16% on math**.
+Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
+references. AR and MTP7 passed all 28 sampled distribution checks.
+[Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
+
+### B200
+
+#### B200 · Qwen3.8-27B NVFP4 serving retest
 
 The add-on used a 32-node tree for one eligible request and a width-eight
 chain when requests were grouped. GDN replay is the experimental
@@ -162,6 +191,40 @@ concurrency 16, replaced GDN snapshots with accepted-prefix replay.
 Replay raised chat throughput by **10.1%**. A 256-token check matched all
 **64 of 64** stock greedy sequences.
 [Reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
+
+#### B200 · Qwen3.8-Flash-Next NVFP4
+
+The B200 served the same prompts with the same 128-token output budget.
+Values are code / math / chat output tok/s pooled over two passes.
+
+![B200 Qwen3.8-Flash-Next NVFP4 serving retest at one and eight clients, with stock AR, stock MTP3, AX MTP3, and AX MTP7.](docs/figures/b200-flash-next-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 136.9 / 136.4 / 130.6 | 304.9 / 273.3 / **223.4** | 302.8 / 270.9 / 213.3 | **389.7** / **297.1** / 208.9 |
+| 8 | 614.7 / 717.4 / 594.2 | 720.7 / 947.0 / 684.5 | 745.1 / 976.8 / **715.4** | **1,126.9** / **978.8** / 607.5 |
+
+At eight clients, AX MTP7 led code and AX MTP3 led chat.
+[B200 setup and per-pass results](docs/performance.md#b200-flash-next-serving-retest)
+
+##### Earlier single-request MTP study
+
+This study predates the 128-token serving retest above. It uses SGLang
+0.5.23 and is the second pass with a 256-token output limit. Each cell
+gives code / math / chat output tok/s.
+
+![Flash Next on B200. MTP7 with the QSA fix leads on code and math. Stock MTP3 leads on chat.](docs/figures/b200-flash-next-mtp-throughput.svg)
+
+| Platform | Stock SGLang AR | Stock SGLang MTP3 | MTP7 + ax-engine-sglang QSA fix |
+|---|---:|---:|---:|
+| One B200 | 204.9 / 212.5 / 211.7 | 435.2 / 432.3 / 334.4 | **547.9 / 487.7** / 296.8 |
+
+MTP7 with the QSA fix led on code and math. Stock MTP3 was faster than
+MTP7 on chat.
+
+[Flash Next benchmark conditions and all routes](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
+
+### RTX PRO 6000
 
 #### RTX PRO 6000 · Qwen3.8-27B BF16 and NVFP4
 
@@ -255,6 +318,26 @@ match. The parity iterations that produced the profile, including the
 faster value-tile timings, are in the performance notes.
 [Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Parity history](docs/performance.md#rtx-speed-and-parity-profiles) · [Launch settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
 
+#### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
+
+One GPU served Flash Next with pinned-host FP8 PLE and 128 greedy output
+tokens per request. Values pool two passes and show code / math / chat
+output tok/s.
+
+![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3, AX MTP3, and AX MTP7 at one and eight clients.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 83.1 / 83.8 / 83.7 | 183.5 / 164.1 / 134.0 | 182.1 / 164.8 / **135.0** | **218.9** / **174.0** / 114.7 |
+| 8 | 414.1 / 421.5 / 399.3 | 679.0 / **582.6** / **455.4** | 594.2 / 572.4 / 405.5 | **728.0** / 542.7 / 356.5 |
+
+At eight clients, AX MTP7 led code at **728.0 tok/s**, and stock MTP3
+led chat at **455.4 tok/s**. The first AX MTP3 chat pass was slower than
+its repeat (363.7 vs. 458.2 tok/s).
+[RTX PRO 6000 Flash Next retest](results/blackwell_nvfp4_serving_retest/REPORT.md#rtx-pro-6000-qwen38-flash-next-nvfp4)
+
+### GeForce RTX 5090
+
 #### GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 One 32 GB RTX 5090 ran SGLang 0.5.23 with two GPU request slots. Each
@@ -315,6 +398,8 @@ cuBLAS lane on **10 of 64** complete greedy outputs in each launch order.
 | Candidate | 807.25 | 824.02 | +2.08% | 10/64 |
 
 [Latency, graph coverage, and output checks](results/fp8_verify_tactics/REPORT.md#paired-serving-comparison)
+
+### Jetson Thor
 
 #### Jetson Thor · Qwen3.8-27B
 
@@ -388,88 +473,6 @@ test timed individual projections on synthetic CUDA inputs.
 
 [Before and after timings](docs/performance.md#fp8-verification-projections) · [Benchmark report](results/fp8_verify_tactics/REPORT.md)
 
-### Qwen3.8-Flash-Next
-
-#### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
-
-One GPU served Flash Next with pinned-host FP8 PLE and 128 greedy output
-tokens per request. Values pool two passes and show code / math / chat
-output tok/s.
-
-![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3, AX MTP3, and AX MTP7 at one and eight clients.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
-
-| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
-|---:|---:|---:|---:|---:|
-| 1 | 83.1 / 83.8 / 83.7 | 183.5 / 164.1 / 134.0 | 182.1 / 164.8 / **135.0** | **218.9** / **174.0** / 114.7 |
-| 8 | 414.1 / 421.5 / 399.3 | 679.0 / **582.6** / **455.4** | 594.2 / 572.4 / 405.5 | **728.0** / 542.7 / 356.5 |
-
-At eight clients, AX MTP7 led code at **728.0 tok/s**, and stock MTP3
-led chat at **455.4 tok/s**. The first AX MTP3 chat pass was slower than
-its repeat (363.7 vs. 458.2 tok/s).
-[RTX PRO 6000 Flash Next retest](results/blackwell_nvfp4_serving_retest/REPORT.md#rtx-pro-6000-qwen38-flash-next-nvfp4)
-
-#### B200 · Qwen3.8-Flash-Next NVFP4
-
-The B200 served the same prompts with the same 128-token output budget.
-Values are code / math / chat output tok/s pooled over two passes.
-
-![B200 Qwen3.8-Flash-Next NVFP4 serving retest at one and eight clients, with stock AR, stock MTP3, AX MTP3, and AX MTP7.](docs/figures/b200-flash-next-nvfp4-serving-retest.svg)
-
-| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
-|---:|---:|---:|---:|---:|
-| 1 | 136.9 / 136.4 / 130.6 | 304.9 / 273.3 / **223.4** | 302.8 / 270.9 / 213.3 | **389.7** / **297.1** / 208.9 |
-| 8 | 614.7 / 717.4 / 594.2 | 720.7 / 947.0 / 684.5 | 745.1 / 976.8 / **715.4** | **1,126.9** / **978.8** / 607.5 |
-
-At eight clients, AX MTP7 led code and AX MTP3 led chat.
-[B200 setup and per-pass results](docs/performance.md#b200-flash-next-serving-retest)
-
-#### Two B300 GPUs · Qwen3.8-Flash-Next BF16
-
-SGLang 0.5.23 ran the BF16 checkpoint with TP2 and an on-GPU BF16 KV cache.
-The table and chart show end-to-end output tok/s from the second pass, with
-24 greedy prompts per family and a 256-token output limit.
-
-![Qwen3.8-Flash-Next BF16 on two B300 GPUs. Stock AR, stock MTP3, and AX Engine MTP7 throughput at concurrency 1, 4, and 16.](docs/figures/b300-flash-next-bf16-throughput.svg)
-
-| Workload | Concurrency | Stock SGLang AR | Stock SGLang MTP3 | AX Engine MTP7 |
-|---|---:|---:|---:|---:|
-| Code | 1 | 184.9 | 306.6 | **390.0** |
-| Code | 4 | 389.6 | 520.7 | **615.4** |
-| Code | 16 | 794.5 | 1,199.7 | **1,649.8** |
-| Math | 1 | 206.8 | 353.9 | **409.9** |
-| Math | 4 | 550.4 | 649.4 | **735.2** |
-| Math | 16 | 1,258.0 | 1,606.1 | **1,708.0** |
-| Chat | 1 | 207.2 | **294.4** | 268.0 |
-| Chat | 4 | 534.1 | **584.5** | 521.1 |
-| Chat | 16 | 1,069.6 | **1,272.6** | 1,169.6 |
-
-MTP7 beat stock MTP3 by **18–38% on code** and **6–16% on math**.
-Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
-references. AR and MTP7 passed all 28 sampled distribution checks.
-[Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
-
-#### Earlier single-request MTP study
-
-This study predates the 128-token serving retest above. It uses SGLang
-0.5.23. The B200 figures are the second pass with a 256-token output limit.
-The Thor figures use two arm64 hosts and pipeline parallelism over 2.5 GbE.
-Each cell gives code / math / chat output tok/s.
-
-![Flash Next on B200. MTP7 with the QSA fix leads on code and math. Stock MTP3 leads on chat.](docs/figures/b200-flash-next-mtp-throughput.svg)
-
-![Flash Next across two Jetson Thor hosts. MTP7 with the QSA fix leads on code and math. MTP3 with the fix leads on chat.](docs/figures/jetson-thor-flash-next-mtp-throughput.svg)
-
-| Platform | Stock SGLang AR | Stock SGLang MTP3 | MTP7 + ax-engine-sglang QSA fix |
-|---|---:|---:|---:|
-| One B200 | 204.9 / 212.5 / 211.7 | 435.2 / 432.3 / 334.4 | **547.9 / 487.7** / 296.8 |
-| Two Jetson Thor hosts | 18.3 / 19.0 / 19.2 | 32.0 / 32.4 / 24.8 | **43.1 / 37.5** / 22.8 |
-
-On both platforms, MTP7 with the QSA fix led on code and math. Stock MTP3
-was faster than MTP7 on chat. The Thor study also measured MTP3 with the QSA
-fix at **25.7 tok/s** on chat.
-
-[Flash Next benchmark conditions and all routes](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
-
 #### One Jetson Thor · Qwen3.8-Flash-Next NVFP4
 
 One Thor served Flash Next with the PLE table on local NVMe. Each row
@@ -493,6 +496,23 @@ checkpoint used by the other rows failed to load. Its MTP3 geomean was 6%
 below stock SGLang MTP3.
 [Edge-LLM lanes](results/edgellm_thor/REPORT.md#qwen38-flash-next-nvfp4-concurrency-1-and-4)
 [Single-Thor setup, tuning, and answer quality](docs/reports/2026-11-21-flash-next-single-thor.md)
+
+##### Earlier two-host MTP study
+
+This study predates the single-Thor runs above. It uses SGLang 0.5.23, two
+arm64 hosts and pipeline parallelism over 2.5 GbE. Each cell gives code /
+math / chat output tok/s.
+
+![Flash Next across two Jetson Thor hosts. MTP7 with the QSA fix leads on code and math. MTP3 with the fix leads on chat.](docs/figures/jetson-thor-flash-next-mtp-throughput.svg)
+
+| Platform | Stock SGLang AR | Stock SGLang MTP3 | MTP7 + ax-engine-sglang QSA fix |
+|---|---:|---:|---:|
+| Two Jetson Thor hosts | 18.3 / 19.0 / 19.2 | 32.0 / 32.4 / 24.8 | **43.1 / 37.5** / 22.8 |
+
+MTP7 with the QSA fix led on code and math. Stock MTP3 was faster than
+MTP7 on chat; MTP3 with the QSA fix reached **25.7 tok/s** on chat.
+
+[Flash Next benchmark conditions and all routes](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
 
 ## Documentation and repository layout
 

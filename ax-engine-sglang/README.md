@@ -101,50 +101,6 @@ full draft head. The packed head is for a static checkpoint. Keep the option
 off for hot weight replacement.
 [Thor validation and benchmark commands](../results/dflash_draft_vocab/REPORT.md)
 
-## B200 benchmark results
-
-Two studies, both greedy, SGLang 0.5.23, one B200. Read the serving retest
-when comparing routes on the shared 128-token corpus. Read the earlier study
-for concurrency up to 64 and for TensorRT-LLM 1.4. Jetson Thor is measured
-separately. [Jetson Thor](#jetson-thor)
-
-**Serving retest, 128 tokens, eight slots, package 0.5.1.** Code / math /
-chat output tok/s. The add-on used a 32-node tree at one request and a
-width-eight chain when requests were grouped.
-
-| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
-|---:|---:|---:|---:|
-| 1 | 448.5 / 408.1 / 281.3 | 632.5 / 516.5 / 333.8 | 456.6 / 415.3 / 286.6 |
-| 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | 1,599.5 / 1,428.3 / 949.6 |
-
-GDN replay led at eight clients by 11.2% / 21.8% / 5.1%.
-[Retest](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/blackwell_nvfp4_serving_retest/REPORT.md)
-
-**Earlier 1,024-token study.** 64 prompts per family. Full records:
-[dual attention backend](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-16-dual-attention-backend.md),
-[Flash-Next](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md).
-
-| Model | Mode | Result vs. stock SGLang |
-|---|---|---|
-| Qwen3.8-27B NVFP4 | tree at 1 request, chain width 8 / 16 above (32-64 slots) | c = 1: code 1.42x, math 1.33x, chat 1.14x; c = 2-64: 1.01x-1.21x |
-| Qwen3.8-27B bf16 | same (16 slots) | c = 1: 1.09x-1.15x vs. the faster stock block; c = 2-16: 0.93x-1.09x |
-| Qwen3.8-27B, both | vs. TensorRT-LLM 1.4 DFlash2 | c = 1: 1.07x-1.72x; c = 16 chat 0.81x-0.90x (engine round cost) |
-| Qwen3.8-27B, both | tree 32 vs. TensorRT Edge-LLM 0.12.0 DDTree 32 on Jetson Thor | c = 1: code 1.49x-1.58x, math 1.31x-1.34x, chat 0.98x-1.01x |
-| Qwen3.8-Flash-Next NVFP4 | stock MTP 7 + `AX_QSA_RING=16` vs. stock MTP 3 | code 1.22x-1.30x, math 1.05x-1.15x, chat 0.80x-0.86x |
-
-Correctness checks: greedy token identity against the plugin's earlier builds (192 / 192), fp32
-teacher audit at the stock mismatch rate, stress runs with aborts, sampled tree verify matching plain
-decoding on 28 / 28 distribution tests (bf16), QSA ring consistency check (Flash-Next).
-
-Limits:
-- Tree rounds serve one greedy request without grammar or logprobs. Every other batch, and one
-  sampled request unless `AX_TREE_SAMPLING=1`, runs a stock DFlash2 chain round.
-- Tested targets: Qwen3.5-9B and Qwen3.8-27B (Gated-DeltaNet hybrids). On Qwen3.8-Flash-Next
-  (Qwen4-Exp) only the QSA ring fix applies; SGLang does not expose its aux hidden states (needed by
-  DFlash2) and the tree needs the PLE n-gram context.
-- MTP 12 on Flash-Next needs `--max-running-requests 32` (the GDN state pool grows with the draft
-  length). Wider MTP is slower on chat; choose the step count per workload.
-
 ## Launch defaults
 
 On SGLang 0.5.23 the plugin fills in the settings below while SGLang resolves the server arguments,
@@ -201,7 +157,57 @@ The measurement lanes `axtree<spec>` (venv SGLang) and `axotree<spec>` (0.5.22 o
 The `axtree` lanes use `AXSITE` and the venv. Lattice lanes use DFlash2 scores
 and can run without an n-gram table.
 
-## RTX PRO 6000
+## Benchmark results
+
+Grouped by GPU: B200, RTX PRO 6000, then Jetson Thor (B300 and RTX 5090 results are in the
+[top-level README](../README.md#measured-throughput)). Within a GPU, Qwen3.8-27B comes before
+Qwen3.8-Flash-Next.
+
+### B200
+
+Two studies, both greedy, SGLang 0.5.23, one B200. Read the serving retest
+when comparing routes on the shared 128-token corpus. Read the earlier study
+for concurrency up to 64 and for TensorRT-LLM 1.4. Jetson Thor is measured
+separately. [Jetson Thor](#jetson-thor)
+
+**Serving retest, 128 tokens, eight slots, package 0.5.1.** Code / math /
+chat output tok/s. The add-on used a 32-node tree at one request and a
+width-eight chain when requests were grouped.
+
+| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | 448.5 / 408.1 / 281.3 | 632.5 / 516.5 / 333.8 | 456.6 / 415.3 / 286.6 |
+| 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | 1,599.5 / 1,428.3 / 949.6 |
+
+GDN replay led at eight clients by 11.2% / 21.8% / 5.1%.
+[Retest](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/blackwell_nvfp4_serving_retest/REPORT.md)
+
+**Earlier 1,024-token study.** 64 prompts per family. Full records:
+[dual attention backend](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-16-dual-attention-backend.md),
+[Flash-Next](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md).
+
+| Model | Mode | Result vs. stock SGLang |
+|---|---|---|
+| Qwen3.8-27B NVFP4 | tree at 1 request, chain width 8 / 16 above (32-64 slots) | c = 1: code 1.42x, math 1.33x, chat 1.14x; c = 2-64: 1.01x-1.21x |
+| Qwen3.8-27B bf16 | same (16 slots) | c = 1: 1.09x-1.15x vs. the faster stock block; c = 2-16: 0.93x-1.09x |
+| Qwen3.8-27B, both | vs. TensorRT-LLM 1.4 DFlash2 | c = 1: 1.07x-1.72x; c = 16 chat 0.81x-0.90x (engine round cost) |
+| Qwen3.8-27B, both | tree 32 vs. TensorRT Edge-LLM 0.12.0 DDTree 32 on Jetson Thor | c = 1: code 1.49x-1.58x, math 1.31x-1.34x, chat 0.98x-1.01x |
+| Qwen3.8-Flash-Next NVFP4 | stock MTP 7 + `AX_QSA_RING=16` vs. stock MTP 3 | code 1.22x-1.30x, math 1.05x-1.15x, chat 0.80x-0.86x |
+
+Correctness checks: greedy token identity against the plugin's earlier builds (192 / 192), fp32
+teacher audit at the stock mismatch rate, stress runs with aborts, sampled tree verify matching plain
+decoding on 28 / 28 distribution tests (bf16), QSA ring consistency check (Flash-Next).
+
+Limits:
+- Tree rounds serve one greedy request without grammar or logprobs. Every other batch, and one
+  sampled request unless `AX_TREE_SAMPLING=1`, runs a stock DFlash2 chain round.
+- Tested targets: Qwen3.5-9B and Qwen3.8-27B (Gated-DeltaNet hybrids). On Qwen3.8-Flash-Next
+  (Qwen4-Exp) only the QSA ring fix applies; SGLang does not expose its aux hidden states (needed by
+  DFlash2) and the tree needs the PLE n-gram context.
+- MTP 12 on Flash-Next needs `--max-running-requests 32` (the GDN state pool grows with the draft
+  length). Wider MTP is slower on chat; choose the step count per workload.
+
+### RTX PRO 6000
 
 The current single-request default is a 32-node tree (`FC1_TREE_N=32`).
 On the per-workload NVFP4 retest that tree led stock DFlash2 at one client
@@ -224,7 +230,7 @@ For a recorded token-for-token match, use `AX_QUALITY_PROFILE=verified`
 with `AX_TREE=0` and a draft block of 8. That route matched serialized AR
 on RTX PRO 6000 at 128 and 1,024 tokens. The tree route is refused.
 
-## Jetson Thor
+### Jetson Thor
 
 Jetson Thor (SM 11.0, aarch64, 122 GB unified memory) runs the same commands as above on
 `lmsysorg/sglang:v0.5.23-cu130`; the launch defaults detect SM110. Measured single-request output
