@@ -1,0 +1,67 @@
+name: Bug report
+description: A bug, regression, install problem, or compatibility gap
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See [CONTRIBUTING.md](../../CONTRIBUTING.md) for what makes a bug
+        report actionable. Security vulnerabilities should go to
+        [SECURITY.md](../../SECURITY.md) instead of a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Package version or commit, and SGLang version
+      placeholder: e.g. ax-engine-sglang 0.5.1, SGLang 0.5.23
+    validations:
+      required: true
+
+  - type: textarea
+    id: host
+    attributes:
+      label: Host details
+      description: Linux distribution, CPU architecture, GPU model, driver, and CUDA version.
+      placeholder: e.g. Ubuntu 24.04, x86_64, B200 180 GB, driver 580, CUDA 13
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Exact command / request payload
+      description: The exact command, request payload, target checkpoint, drafter checkpoint, and launch flags.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: route
+    attributes:
+      label: Route
+      description: Whether the issue reproduces on stock SGLang, and which add-on route you used.
+      multiple: true
+      options:
+        - Stock SGLang, add-on not loaded
+        - DFlash tree
+        - DFlash chain
+        - MTP
+        - Autoregressive
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Logs or terminal output are welcome here.
+    validations:
+      required: true

@@ -22,6 +22,7 @@ specific to each runtime.
 - [Supported platforms](#supported-platforms)
 - [Measured throughput](#measured-throughput): [Qwen3.8-27B NVFP4](#qwen38-27b-nvfp4) · [Flash Next NVFP4](#qwen38-flash-next-nvfp4) · [Flash Next BF16](#qwen38-flash-next-bf16) · [Exact outputs](#exact-outputs)
 - [Repository](#repository)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Components and workflow
@@ -204,6 +205,20 @@ The speed tables above do not carry that match.
 The project started as Next-Concept Model experiments and moved to
 target-verified speculative decoding.
 [Research history](docs/results-history.md)
+
+## Contributing
+
+Issues, wishlist items, reproducible benchmarks, and docs feedback are welcome.
+Unsolicited code PRs for verification, kernel, or performance paths are
+generally not accepted — open an issue first. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security issues privately. See [SECURITY.md](SECURITY.md).
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Community
+
+- Website: [automatosx.com](https://automatosx.com)
+- Discord: [Join us](https://discord.gg/MECsKdA6zF)
+- Email: [enquiry@defai.digital](mailto:enquiry@defai.digital)
 
 ## License
 

@@ -1,0 +1,39 @@
+name: Wishlist request
+description: A request for a model, route, serving behavior, or documentation
+labels: ["wishlist"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the project's
+        evidence-first contribution policy. We generally do not accept
+        unsolicited code PRs — file the request here first.
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: User workflow you want to support
+    validations:
+      required: true
+
+  - type: textarea
+    id: target
+    attributes:
+      label: Model family, precision, context length, and serving route
+      placeholder: e.g. Qwen3.8-27B NVFP4, 128k context, DFlash tree
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters compared with the currently documented routes
+      description: See the README and docs/performance.md for what is already measured.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference behavior
+      description: Any reference behavior from stock SGLang, another runtime, or a paper.
