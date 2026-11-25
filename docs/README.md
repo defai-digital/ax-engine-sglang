@@ -57,11 +57,11 @@ Historical SGLang 0.5.22 tree runs used explicitly supplied launch settings.
 | Linux amd64 | NVIDIA B200 (SM100) | [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) · [Flash Next release checks](reports/2026-11-18-b200-v0.1.1.md) |
 | Linux amd64 | NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
 | Linux amd64 | NVIDIA GeForce RTX 5090 (SM120) | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |
-| Linux arm64 | NVIDIA Jetson Thor (SM110) | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) |
+| Linux arm64 | NVIDIA Jetson Thor (SM110) | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) · [Single-host Flash Next](reports/2026-11-21-flash-next-single-thor.md) |
 
 Each report records its exact model, precision, CUDA stack and workload.
-Use the Thor report for the measured container and memory settings. The
-Flash Next measurements on arm64 used two Thor hosts.
+The Flash Next arm64 reports cover one Thor with the PLE table on NVMe
+and two Thors with pipeline parallelism.
 
 ## Model routes
 
@@ -99,6 +99,7 @@ admits the measured AR and chain settings. [Speed and parity results](performanc
   rules to a planned launch without loading weights and reports whether it is
   supported, the settings it would derive and its exact-output qualification.
 - [Serving performance](performance.md) compares stock AR, stock speculation and the add-on under the recorded conditions.
+- [DFlash2 draft vocabulary comparison](../results/dflash_draft_vocab/REPORT.md) records throughput, output agreement, and fallback checks on Thor-01, RTX PRO 6000, and B200.
 - [SGLang benchmark guide](../benchmarks/sglang/) covers baseline launches,
   mixed requests, cancellation, greedy token identity and sampled distributions.
 - [Regression runner](../scripts/check_model_regression.py) compares

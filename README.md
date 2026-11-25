@@ -447,7 +447,28 @@ code / math / chat output tok/s.
 On both platforms, MTP7 with the QSA fix led on code and math. Stock MTP3
 was faster than MTP7 on chat. The Thor study also measured MTP3 with the QSA
 fix at **25.7 tok/s** on chat.
+
 [Flash Next benchmark conditions and all routes](docs/performance.md#qwen38-flash-next-nvfp4--mtp)
+
+#### One Jetson Thor · Qwen3.8-Flash-Next NVFP4
+
+One Thor served Flash Next with the PLE table on local NVMe. Each row
+gives output tok/s at one and four concurrent requests from the same 48
+greedy prompts per workload, with a 256-token limit.
+
+![Single-Thor Flash Next NVFP4 throughput for stock and adaptive MTP on SGLang and vLLM.](docs/figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
+
+| Configuration | Code C1 / C4 | Math C1 / C4 | Chat C1 / C4 |
+|---|---:|---:|---:|
+| Stock SGLang MTP3 | 42.3 / 96.2 | 38.8 / 92.2 | 28.9 / 65.4 |
+| Stock vLLM MTP3 | 42.4 / 101.0 | 41.2 / 101.5 | 31.3 / 75.8 |
+| AX SGLang adaptive MTP + 64K draft vocabulary | 59.8 / 123.3 | 49.1 / 103.1 | 33.6 / 70.5 |
+| AX vLLM adaptive MTP + NVFP4 draft head | **62.4 / 131.4** | **53.3 / 117.2** | **36.9 / 82.7** |
+
+AX SGLang's adaptive configuration improved throughput across all six
+levels over stock SGLang MTP3. The AX vLLM configuration led the measured
+comparison.
+[Single-Thor setup, tuning, and answer quality](docs/reports/2026-11-21-flash-next-single-thor.md)
 
 ## Documentation and repository layout
 

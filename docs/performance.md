@@ -442,6 +442,30 @@ The two add-on routes used a 16-slot QSA pending ring. MTP7 gave the highest
 code and math throughput. The MTP3 add-on route led the four measured chat
 lanes. [Thor Flash Next configuration and accepted tokens](reports/2026-11-19-jetson-thor.md#5-qwen38-flash-next-nvfp4-over-two-thors)
 
+### One Jetson Thor with adaptive MTP
+
+One Thor served the NVFP4 checkpoint with its FP8 PLE table on local NVMe.
+Each cell gives output tok/s at one and four concurrent requests.
+All configurations used the same 48 greedy prompts per workload and a
+256-token output limit.
+
+![Single-Thor Flash Next NVFP4 throughput for stock and adaptive MTP on SGLang and vLLM.](figures/jetson-thor-single-flash-next-adaptive-mtp.svg)
+
+| Configuration | Code | Math | Chat |
+|---|---:|---:|---:|
+| Stock SGLang MTP3 | 42.3 / 96.2 | 38.8 / 92.2 | 28.9 / 65.4 |
+| Stock vLLM MTP3 | 42.4 / 101.0 | 41.2 / 101.5 | 31.3 / 75.8 |
+| SGLang adaptive MTP + ax-engine-sglang + 64k draft vocabulary map | 59.8 / 123.3 | 49.1 / 103.1 | 33.6 / 70.5 |
+| vLLM adaptive K + ax-engine-vllm + NVFP4 draft lm_head | **62.4 / 131.4** | **53.3 / 117.2** | **36.9 / 82.7** |
+
+The AX vLLM lane used QSA block alignment and selected three, five,
+or seven draft tokens from observed acceptance. The default adaptive
+policies scored slightly higher than the Optuna-selected policies on
+the held-out workloads. On full HumanEval and GSM8K, the AX vLLM lane
+matched vLLM AR's accuracy (0.963 / 0.961) and finished in 4,625 seconds
+versus 8,773 seconds for AR.
+[Single-Thor setup, all lanes, Optuna and the QSA fix](reports/2026-11-21-flash-next-single-thor.md)
+
 ## Reproduce
 
 - [Run the GeForce RTX 5090 comparison](../results/rtx_5090_27b_nvfp4/REPORT.md#reproduce-the-comparison).

@@ -222,8 +222,12 @@ Settings that differ from a discrete GPU:
   9B and the 27B NVFP4 tree (about 87k KV tokens on the 27B NVFP4).
 - Stock MTP on the 27B bf16 also needs `--max-running-requests 4`: the Gated-DeltaNet state pool
   for the default request count leaves no KV cache.
-- Qwen3.8-Flash-Next NVFP4 (about 148 GB) does not fit one Thor. Two hosts serve it with SGLang
-  pipeline parallelism (`--pp-size 2 --nnodes 2 --dist-init-addr <rank-0 host>:29500
+- One Thor served Qwen3.8-Flash-Next NVFP4 with the FP8 PLE table on NVMe
+  using `--ple-offload-embedding --ple-offload-backend file`. The study
+  used an 8,192-token KV pool and up to four simultaneous client requests.
+  [Single-Thor memory settings and adaptive MTP results](../docs/reports/2026-11-21-flash-next-single-thor.md)
+- The two-host Flash Next NVFP4 run used SGLang pipeline parallelism
+  (`--pp-size 2 --nnodes 2 --dist-init-addr <rank-0 host>:29500
   --node-rank {0,1}`, `SGLANG_PP_LAYER_PARTITION=4,44`, `--mem-fraction-static 0.90`,
   `--max-running-requests 4`, and `SGLANG_ENABLE_PP_SPEC=1` for MTP), each host loading a stage
   directory that lists only its own shards. Without InfiniBand, set `NCCL_IB_DISABLE=1` and
