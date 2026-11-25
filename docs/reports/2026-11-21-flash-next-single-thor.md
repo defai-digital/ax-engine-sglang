@@ -3,8 +3,9 @@
 The study ran from November 21 to 23, 2026 on Thor-02 (SM110, 122 GB
 unified memory). It used SGLang 0.5.23 (`lmsysorg/sglang:v0.5.23-cu130`)
 with ax-engine-sglang and vLLM `0.34.0rc1.dev1105+g2f170a0fe` (aarch64,
-PyTorch 2.14.0+cu130) with ax-engine-vllm. The adaptive tuning and PLE
-startup experiments used development builds.
+PyTorch 2.14.0+cu130) with ax-engine-vllm. The adaptive tuning used
+`AX_ADAPTIVE_LIVE` and the PLE startup fix used `AX_PLE_FRESH_FILE`, both
+now in ax-engine-sglang.
 
 ## Summary
 
@@ -32,7 +33,7 @@ SGLang configuration on every workload and concurrency:
   after 20 Optuna trials per engine. The selected policies' geometric means
   changed by −0.9% for SGLang and −0.6% for vLLM. Trial-to-trial noise was about ±2%.
 - ax-engine-vllm fixed vLLM's MTP 5–8 startup failure (`AX_VLLM_QSA_BLOCK_ALIGN`), which the
-  7-token chain needs. The SGLang development build addressed the 27 MB/s PLE
+  7-token chain needs. ax-engine-sglang addresses the 27 MB/s PLE
   table rewrite with `AX_PLE_FRESH_FILE`.
 - Greedy outputs differ between lanes (Flash Next NVFP4 is not batch-invariant on SM110), so small
   differences are within noise; the vLLM lead holds on all six levels.
@@ -170,7 +171,7 @@ verify batches at K = 3, 820 at K = 5 and 960 at K = 7.
 ### Optuna
 
 The experiment reloaded both policies from a file at runtime using
-`AX_ADAPTIVE_LIVE` in the SGLang development build and
+`AX_ADAPTIVE_LIVE` in ax-engine-sglang and
 `AX_VLLM_ADAPTIVE_K` in ax-engine-vllm. This let each trial reuse the
 running server and its graphs. The Optuna TPE sweep covered EMA alpha, update interval, warmup,
 both hysteresis values and the candidate steps for one request and for two or more. Each trial ran
@@ -223,8 +224,9 @@ other weights. The PLE table stays off the GPU, so the GPU-side weights are abou
 
    In the slowest load the 14 PLE shards took 24 of 29 minutes. Deleting the table file before each
    boot cut the target load from 1480–1755 s to 1050 s, and a 2-second
-   `SGLANG_QWEN4_PLE_FILE_RSS_INTERVAL_S` (default 30) to 746 s. The single-rank
-   development build used `AX_PLE_FRESH_FILE` to replace the previous table file.
+   `SGLANG_QWEN4_PLE_FILE_RSS_INTERVAL_S` (default 30) to 746 s. In single-rank
+   servers, ax-engine-sglang's `AX_PLE_FRESH_FILE` (on by default) replaces the previous
+   table file on every boot.
 3. **Startup wait.** `run_baselines.sh` waited at most 30 minutes for `/health`, which a 29-minute
    load exceeded. The study runner used a 3,600-second readiness timeout.
 

@@ -160,6 +160,8 @@ The tree is refused on Qwen4-Exp targets. If the target's or drafter's `config.j
 | `AX_CHECK=1` | validation only: checks the mask and length bound every round (synchronous, slow) |
 | `AX_QSA_RING=16` | Qwen4-Exp (Qwen3.8-Flash-Next) QSA sparse attention: widen the per-request pending index-key ring from 4 to 16 slots. Fixes compressed index keys built from overwritten ring members whenever a verify window crosses a 4-token group (stock SGLang 0.5.23, MTP 1-3 included) and allows verify windows up to 13 tokens (stock refuses more than 4). Works with stock MTP (`--speculative-algorithm EAGLE`); the tree is not supported on Qwen4-Exp |
 | `AX_QSA_CHECK=1` | validation only: counts QSA groups compressed from ring members that do not hold their group's positions (eager, `--disable-cuda-graph`) |
+| `AX_PLE_FRESH_FILE` | on by default. With `--ple-offload-backend file`, unlink the previous boot's PLE table file so the full rewrite goes to a new sparse file (a filled file under SGLang's `MADV_RANDOM` wrote at 27 MB/s on a Jetson Thor). `0` keeps SGLang's reuse |
+| `AX_ADAPTIVE_LIVE=<file>` | tuning only: with `--speculative-adaptive`, re-read the adaptive policy (the `--speculative-adaptive-config` format plus `"version"`) from this file when it changes, polled at most every `AX_ADAPTIVE_LIVE_POLL_S` seconds (0.5). Only steps captured at boot are accepted; `<file>.ack` reports each reload and the verify batches per step under the previous policy. `benchmarks/sglang/optuna_spec.py` drives it |
 
 B200 multi-user server for the 27B (tree at one request, chain rounds of width 16 / 8 with their own
 CUDA graphs on `trtllm_mha`): see `benchmarks/sglang/run_stage1a.sh` for the full flag set
