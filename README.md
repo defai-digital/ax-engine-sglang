@@ -26,12 +26,12 @@ adds in drafting and verification.
 ## Quick start
 
 Use Python 3.12 on Linux with an NVIDIA GPU and a CUDA 13-compatible driver.
-Install the v0.5.0 GitHub release wheel in a fresh virtual environment.
+Install the v0.5.1 GitHub release wheel in a fresh virtual environment.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.0/ax_engine_sglang-0.5.0-py3-none-any.whl
+python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.1/ax_engine_sglang-0.5.1-py3-none-any.whl
 ```
 
 Use `python -m pip install ./ax-engine-sglang` from the repository root for a
@@ -52,6 +52,12 @@ ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
 The 0.2.1 wheel served this target and drafter on Jetson Thor. A single greedy
 request returned 32 tokens and the trace contained six DFlash2 tree rounds.
 [Thor smoke test and flags](docs/README.md#021-installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
+
+## Changes in v0.5.1
+
+Document the RTX PRO 6000 verification priorities for Qwen3.8-27B NVFP4,
+including live FP8 tactic validation and verify-row sweeps informed by the
+sibling AX engines. [Performance review](docs/decisions/2026-11-21-dflash-hotpath.md#rtx-pro-6000-target-verification-priorities)
 
 ## Changes in v0.5.0
 

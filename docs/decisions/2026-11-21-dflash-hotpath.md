@@ -335,18 +335,18 @@ The newer AX run reached 772–783 tok/s on a 512-token chat workload. Use
 that workload for a fresh matched engine comparison.
 [Engine comparison](../../results/rtx_pro_6000_plan_reuse/REPORT.md#sglang-ax-engine-sglang-and-vllm-on-rtx-pro-6000)
 
-1. Compare CUTLASS with `--fp4-gemm-backend flashinfer_cudnn` on the same
-   checkpoint. Test FlashInfer `b12x` through an explicit opt-in dispatch.
-   SGLang 0.5.23 resolves FP4 `auto` to CUTLASS on SM120. FlashInfer 0.7.2
-   supports `b12x` for eligible SM120 layouts. Test autotuning independently
-   and confirm the selected kernels in Nsight.
-   [SGLang dispatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/layers/quantization/fp4_utils.py#L88-L151) · [FlashInfer implementation](https://github.com/flashinfer-ai/flashinfer/blob/v0.7.2/flashinfer/gemm/gemm_base.py#L7180-L7218)
-2. Profile the remaining FP8 projections at actual graph-padded verify
+1. Profile the remaining FP8 projections at actual graph-padded verify
    shapes. NVFP4 and FP8 GEMMs made up 65% of summed C16 replay verify
    kernel time. Width-eight verification can have 64 rows at C8 and 128
    at C16. The pinned FP8 specialization covers selected shapes with up
    to nine rows. Use width eight and BF16 draft KV for these controls.
    [SM120 FP8 dispatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/kernels/kda_kernels/sm120_fp8.py)
+2. Use CUTLASS as the FP4 control and test FlashInfer autotuning as its own
+   variable. Compare `flashinfer_cudnn` and opt-in `b12x` by shape and batch
+   size. SGLang 0.5.23 resolves FP4 `auto` to CUTLASS on SM120. FlashInfer
+   0.7.2 supports `b12x` for eligible SM120 layouts. Confirm the selected
+   kernels in Nsight.
+   [SGLang dispatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/layers/quantization/fp4_utils.py#L88-L151) · [FlashInfer implementation](https://github.com/flashinfer-ai/flashinfer/blob/v0.7.2/flashinfer/gemm/gemm_base.py#L7180-L7218)
 3. Compare both engines under sustained load with identical prompts,
    output budgets, and streaming conditions. Only 84–93 of roughly 830
    replay rounds per C16 pass had 16 live requests. Report the live-batch
@@ -354,3 +354,36 @@ that workload for a fresh matched engine comparison.
    and tokens per verification. Require the serialized 1,024-token AR
    comparison before qualifying a backend for the verified profile.
    [RTX validation](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)
+
+### Lessons from AX Engine and AX Engine vLLM
+
+- **Audit live FP8 operands.** AX Engine vLLM improved C8 throughput by
+  3.43% with 64-row GDN QKVZ and attention QKV tactics and by 1.46% with
+  a separate 48-row profile. The 64-row profile matched all 2,112
+  same-input projection outputs. Capture SGLang's own activations,
+  scales, and native kernels. Rotate layer weights during timing, match
+  BF16 outputs in both eager and CUDA graph runs, then check live graph
+  coverage. Key any accepted tactic to the GPU, checkpoint, shape,
+  native tactic, and library versions.
+  [vLLM 64-row audit](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#sm120-fp8-tactics-on-real-c8-operands) · [48-row audit](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#sm120-48-row-dflash2-fp8-tactics)
+- **Keep a live numerical gate for FP4 experiments.** In vLLM's C8
+  backend sweep, CUTLASS reached 700.91 tok/s, FlashInfer B12x 688.67,
+  and cuDNN 687.07. All three matched the small projection fixture, while
+  the serving outputs differed. A faster down-projection tactic passed
+  a synthetic test and changed BF16 bits on 27 of 2,112 live projections.
+  [vLLM backend sweep and live tactic checks](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#nvfp4-gemm-backends)
+- **Measure verify cost against rows.** AX Engine found that a 16-row
+  packed verify on M5 Max cost 1.6× an 8-row verify on MLX 0.32.4 and
+  about the same on MLX 0.32.5. Use the same row sweep method on SM120
+  to locate its own cost transitions. A vLLM policy with five proposals
+  at four to eight live requests gained 1.77% at C8. The equivalent
+  SGLang verify width is six including the anchor. Test it after adding
+  capacity and graph validation for replay widths beyond the current
+  width-eight configuration.
+  [AX Engine row sweep](https://github.com/defai-digital/ax-engine/blob/426ab2bd0872d77eb8fe885c183a90ccef874ace/docs/DFLASH2-TREE-VERIFY.md#verify-cost-by-row-count) · [vLLM width comparison](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#five-dflash2-proposals-at-high-concurrency)
+- **Measure commit overlap after projection work.** AX Engine vLLM
+  overlapped GDN commit with drafting on a second stream for a 1.29%
+  C8 gain. A SGLang prototype would need a separate graph pool, an event
+  wait before the next target verify, and a drain path for skipped
+  drafts and teardown.
+  [vLLM overlap implementation and trace](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#follow-up-experiment-on-gdn-and-draft-overlap)

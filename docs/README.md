@@ -7,16 +7,16 @@ hosts with NVIDIA GPUs. Install the `ax-engine-sglang` Python package and run
 
 ## Installation and release status
 
-AX Engine for SGLang 0.5.0 supports Python 3.11 and 3.12 and pins SGLang
+AX Engine for SGLang 0.5.1 supports Python 3.11 and 3.12 and pins SGLang
 0.5.23. For a fresh install from wheels, use glibc 2.34 or later and a CUDA
 13-compatible NVIDIA driver. [SGLang 0.5.23 wheel files](https://pypi.org/project/sglang/0.5.23/#files)
 
 | Environment | Install command |
 |---|---|
-| Fresh virtual environment | `python -m pip install ./ax_engine_sglang-0.5.0-py3-none-any.whl` after downloading the [release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.0/ax_engine_sglang-0.5.0-py3-none-any.whl) |
+| Fresh virtual environment | `python -m pip install ./ax_engine_sglang-0.5.1-py3-none-any.whl` after downloading the [release wheel](https://github.com/defai-digital/ax-engine-sglang/releases/download/v0.5.1/ax_engine_sglang-0.5.1-py3-none-any.whl) |
 | Fresh virtual environment, from the repository root | `python -m pip install ./ax-engine-sglang` |
 | Existing SGLang 0.5.23 stack, including the pinned container | `python -m pip install --no-deps ./ax-engine-sglang` |
-| Existing SGLang 0.5.23 stack with the 0.5.0 wheel | `python -m pip install --no-deps ./ax_engine_sglang-0.5.0-py3-none-any.whl` |
+| Existing SGLang 0.5.23 stack with the 0.5.1 wheel | `python -m pip install --no-deps ./ax_engine_sglang-0.5.1-py3-none-any.whl` |
 
 Run `ax-engine-sglang --version` to verify the install. `serve` forwards
 SGLang server flags, enables AX and reports a startup error if AX fails to load.
