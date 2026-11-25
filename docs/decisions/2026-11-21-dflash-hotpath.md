@@ -325,3 +325,32 @@ mixed-width waves, and serialized tree score probe. Target verification
 had the largest GPU span in replay. At C16 the block-scaled and FP8 GEMMs
 accounted for 65% of the summed replay verify kernel time. Fixed width 8
 led the mixed-wave workload. [RTX PRO 6000 follow-up results](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)
+
+## RTX PRO 6000 target-verification priorities
+
+On the 128-token streamed chat workload, AX replay reached 584.3 output
+tok/s at C8 and vLLM reached 700.3. Their p95 request latencies were 2.14 s
+and 1.63 s, with about three output tokens per verification in each engine.
+The newer AX run reached 772–783 tok/s on a 512-token chat workload. Use
+that workload for a fresh matched engine comparison.
+[Engine comparison](../../results/rtx_pro_6000_plan_reuse/REPORT.md#sglang-ax-engine-sglang-and-vllm-on-rtx-pro-6000)
+
+1. Compare CUTLASS with `--fp4-gemm-backend flashinfer_cudnn` on the same
+   checkpoint. Test FlashInfer `b12x` through an explicit opt-in dispatch.
+   SGLang 0.5.23 resolves FP4 `auto` to CUTLASS on SM120. FlashInfer 0.7.2
+   supports `b12x` for eligible SM120 layouts. Test autotuning independently
+   and confirm the selected kernels in Nsight.
+   [SGLang dispatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/layers/quantization/fp4_utils.py#L88-L151) · [FlashInfer implementation](https://github.com/flashinfer-ai/flashinfer/blob/v0.7.2/flashinfer/gemm/gemm_base.py#L7180-L7218)
+2. Profile the remaining FP8 projections at actual graph-padded verify
+   shapes. NVFP4 and FP8 GEMMs made up 65% of summed C16 replay verify
+   kernel time. Width-eight verification can have 64 rows at C8 and 128
+   at C16. The pinned FP8 specialization covers selected shapes with up
+   to nine rows. Use width eight and BF16 draft KV for these controls.
+   [SM120 FP8 dispatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/kernels/kda_kernels/sm120_fp8.py)
+3. Compare both engines under sustained load with identical prompts,
+   output budgets, and streaming conditions. Only 84–93 of roughly 830
+   replay rounds per C16 pass had 16 live requests. Report the live-batch
+   histogram, throughput, time to first token, p95 inter-token latency,
+   and tokens per verification. Require the serialized 1,024-token AR
+   comparison before qualifying a backend for the verified profile.
+   [RTX validation](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)
