@@ -83,6 +83,14 @@ backends.
 | DFlash2 chain 16 | SGLang | Triton | 98.4 | 70.0 | 31.3 |
 | **ax-engine-sglang tree `axtree32cfl_b16`** | SGLang | FlashInfer | 106.1 | **92.1** | 43.1 |
 | **ax-engine-sglang tree `axtree32cfl_b16`** | SGLang | Triton | **112.0** | 90.0 | **45.2** |
+| AR | TensorRT Edge-LLM | — | 13.3 | 13.3 | 13.3 |
+| MTP3 | TensorRT Edge-LLM | — | 39.1 | 37.3 | 28.4 |
+| DFlash2 chain 8 | TensorRT Edge-LLM | — | 73.0 | 65.7 | 34.5 |
+| DDTree 32 | TensorRT Edge-LLM | — | 71.4 | 68.8 | 44.2 |
+
+The TensorRT Edge-LLM 0.12.0 rows were measured on November 25 on Thor-02 with
+the same checkpoint, a byte-identical drafter and the same prompts.
+[Edge-LLM setup](../../results/edgellm_thor/REPORT.md)
 
 On FlashInfer the ax-engine-sglang tree is 1.14× / 1.25× / 1.41× the stock chain and
 7.9× / 6.8× / 3.2× AR; against vLLM's best route (DFlash) it is
@@ -122,6 +130,14 @@ correctness verdict, and AR when exact AR output is required.
 | DFlash2 chain 16 | SGLang | Triton | 44.5 | 30.0 | 12.9 |
 | **ax-engine-sglang tree `axtree32cfl_b16`** | SGLang | FlashInfer | 47.5 | 37.6 | **18.3** |
 | **ax-engine-sglang tree `axtree32cfl_b16`** | SGLang | Triton | **48.0** | **38.5** | 18.2 |
+| AR | TensorRT Edge-LLM | — | 4.7 | 4.7 | 4.7 |
+| MTP3 | TensorRT Edge-LLM | — | 13.8 | 12.9 | 10.2 |
+| DFlash2 chain 8 | TensorRT Edge-LLM | — | 30.1 | 25.1 | 14.0 |
+| DDTree 32 | TensorRT Edge-LLM | — | 30.1 | 28.8 | 18.2 |
+
+The Edge-LLM rows come from the November 25 run
+([Edge-LLM setup](../../results/edgellm_thor/REPORT.md)). The ax-engine-sglang tree on
+FlashInfer ran 1.58× / 1.31× / 1.01× Edge-LLM's DDTree 32.
 
 ax-engine-sglang tree / stock chain on FlashInfer: 1.10× / 1.27× / 1.46×;
 ax-engine-sglang tree / AR:
