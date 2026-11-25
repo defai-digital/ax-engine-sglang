@@ -49,9 +49,10 @@ ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
   --speculative-num-draft-tokens 16
 ```
 
-The 0.2.1 wheel served this target and drafter on Jetson Thor. A single greedy
-request returned 32 tokens and the trace contained six DFlash2 tree rounds.
-[Thor smoke test and flags](docs/README.md#021-installed-wheel-smoke-on-jetson-thor) · [Launch defaults and multi-user settings](ax-engine-sglang/README.md#launch-defaults)
+Eligible single requests use the DFlash2 tree. Grouped requests use chain
+verification. The same target and drafter are the measured dense NVFP4 route
+on B200, RTX PRO 6000, RTX 5090, and Jetson Thor.
+[Launch defaults](ax-engine-sglang/README.md#launch-defaults) · [Measured throughput](#measured-throughput)
 
 ## Changes in v0.5.1
 
@@ -102,44 +103,21 @@ verified on separate serving routes. [Model routes and precision support](docs/R
 
 [Qwen3.8-27B](#qwen38-27b) · [Qwen3.8-Flash-Next](#qwen38-flash-next)
 
+Rates are output tokens per second. A cell written as three numbers is
+code / math / chat. The B200, RTX PRO 6000, and Flash Next serving retests
+share one protocol: SGLang 0.5.23, eight request slots, 128 greedy output
+tokens, and two streamed passes on the same prompt corpus. The Jetson,
+RTX 5090, B300, and 1,024-token studies use the budgets named in their
+headings. Compare rates inside one table. Launch commands and per-pass
+results are in [Serving performance](docs/performance.md).
+
 ### Qwen3.8-27B
 
-#### B200 · Qwen3.8-27B NVFP4
+#### B200 · NVFP4 serving retest
 
-Greedy runs used 64 prompts per family, a 1,024-token output limit and 64
-server slots. Each rate averages two passes. Values are output tok/s in
-code / math / chat order.
-
-![B200 NVFP4 throughput for stock DFlash2 and the add-on at concurrency 1 and 16.](docs/figures/b200-27b-nvfp4-throughput.svg)
-
-| Concurrency | Stock SGLang + DFlash2 block 8 | SGLang + ax-engine-sglang |
-|---|---:|---:|
-| 1 | 816 / 733 / 401 | **1,160 / 971 / 458** (tree 16) |
-| 16 | 3,628 / 4,670 / 2,980 | **4,379.5 / 4,989 / 3,110** (chain 8) |
-
-[Full B200 27B benchmark and launch settings](docs/performance.md#b200--qwen38-27b)
-
-##### Experimental recurrent GDN replay
-
-The benchmark overlay used width-8 stock DFlash2 on one B200 with SGLang
-0.5.23 and 32 request slots. Both timed runs used the same 64 greedy NVFP4
-chat prompts at concurrency 16 and a 1,024-token output limit.
-
-![B200 NVFP4 chat at concurrency 16. Stock DFlash2 reached 2,685.6 output tok/s and the recurrent GDN replay overlay reached 2,957.3 output tok/s.](docs/figures/b200-dflash2-recurrent-replay-throughput.svg)
-
-| DFlash2 configuration | Output tok/s | Median decode tok/s per request | Median time to first token |
-|---|---:|---:|---:|
-| Stock GDN snapshots | 2,685.6 | 190.2 | 130 ms |
-| Recurrent GDN replay overlay | **2,957.3** | **210.5** | 129 ms |
-
-Replay raised aggregate throughput by **10.1%**. A separate 256-token
-check matched all **64 of 64** stock greedy sequences.
-[Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
-
-##### B200 DFlash2 serving retest
-
-Each route ran two streamed passes with exactly 128 greedy output tokens
-per request. Values are code / math / chat output tok/s.
+The add-on used a 32-node tree for one eligible request and a width-eight
+chain when requests were grouped. GDN replay is the experimental
+accepted-prefix path on width-eight DFlash2.
 
 ![B200 Qwen3.8-27B NVFP4 serving retest at one and eight clients, with stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](docs/figures/b200-27b-nvfp4-serving-retest.svg)
 
@@ -148,9 +126,42 @@ per request. Values are code / math / chat output tok/s.
 | 1 | 136.0 / 136.0 / 136.4 | 448.5 / 408.1 / 281.3 | **632.5** / **516.5** / **333.8** | 456.6 / 415.3 / 286.6 |
 | 8 | 870.4 / 851.6 / 833.6 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5** / **1,428.3** / **949.6** |
 
-At eight clients, AX GDN replay improved on stock DFlash2 by
-**11.2% / 21.8% / 5.1%**. A separate warmed AR check reached 953.0 tok/s
-on chat. [B200 setup and per-pass results](docs/performance.md#b200-dflash2-serving-retest)
+At one client the tree led all three workloads. At eight clients, GDN
+replay led stock DFlash2 by **11.2% / 21.8% / 5.1%**. A warmed AR check
+after checkpoint staging reached 953.0 tok/s on chat, close to replay on
+this short workload. These are speed-profile runs.
+[Per-pass results](results/blackwell_nvfp4_serving_retest/REPORT.md#b200-qwen38-27b-nvfp4)
+
+##### Earlier 1,024-token study
+
+Sixty-four prompts per family, a 1,024-token limit, and 64 server slots.
+Each rate is the mean of two passes. This study also records the
+TensorRT-LLM 1.4 comparison.
+
+![B200 NVFP4 throughput for stock DFlash2 and the add-on at concurrency 1 and 16.](docs/figures/b200-27b-nvfp4-throughput.svg)
+
+| Concurrency | Stock SGLang + DFlash2 block 8 | SGLang + ax-engine-sglang |
+|---|---:|---:|
+| 1 | 816 / 733 / 401 | **1,160 / 971 / 458** (tree 16) |
+| 16 | 3,628 / 4,670 / 2,980 | **4,379.5 / 4,989 / 3,110** (chain 8) |
+
+The add-on was **1.14×–1.42×** stock DFlash2 at one request and
+**1.04×–1.21×** at concurrency 16.
+[Full study](docs/performance.md#earlier-1024-token-study)
+
+A separate overlay, with 32 slots and the same 64 chat prompts at
+concurrency 16, replaced GDN snapshots with accepted-prefix replay.
+
+![B200 NVFP4 chat at concurrency 16. Stock DFlash2 reached 2,685.6 output tok/s and the recurrent GDN replay overlay reached 2,957.3 output tok/s.](docs/figures/b200-dflash2-recurrent-replay-throughput.svg)
+
+| DFlash2 configuration | Output tok/s | Median decode tok/s per request | Median time to first token |
+|---|---:|---:|---:|
+| Stock GDN snapshots | 2,685.6 | 190.2 | 130 ms |
+| Recurrent GDN replay overlay | **2,957.3** | **210.5** | 129 ms |
+
+Replay raised chat throughput by **10.1%**. A 256-token check matched all
+**64 of 64** stock greedy sequences.
+[Reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
 #### RTX PRO 6000 · Qwen3.8-27B BF16 and NVFP4
 
@@ -173,19 +184,19 @@ output tok/s in code / math / chat order.
 | 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | **324.7** / **270.9** / **152.2** | 235.8 / 195.2 / 128.9 |
 | 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8** / **898.1** / **580.8** |
 
-At eight clients, BF16 chat reached 335.1 tok/s on AX tree/chain and
-333.7 on stock DFlash2. NVFP4 GDN replay raised chat throughput from
-505.3 to **580.8 tok/s (+14.9%)** and matched stock on all 48 greedy chat
-outputs. The reverse-order run measured an 11.2% gain and matched 38 of 48
-stock outputs.
-[RTX PRO 6000 retest and latency results](results/rtx_pro_6000_retest/REPORT.md)
+At eight clients, BF16 tree/chain chat reached 335.1 tok/s and stock
+DFlash2 reached 333.7. On NVFP4, GDN replay raised chat from 505.3 to
+**580.8 tok/s (+14.9%)** and matched stock on all 48 greedy chat outputs.
+The reverse-order run measured an 11.2% gain and matched 38 of 48 stock
+outputs. The launch default is this 32-node tree.
+[Retest, latency, and checkpoints](results/rtx_pro_6000_retest/REPORT.md)
 
-The RTX PRO 6000 hot-path follow-up matched serialized AR on all 40
-1,024-token outputs with the verified width-eight chain, at **2.05×** AR
-throughput at C1 and **1.81×** at C2 and C8. In a separate warmed chat
-benchmark, accepted-prefix GDN replay improved native DFlash2 throughput
-by **16–18% at C8** and **26–27% at C16** across both launch orders.
-Replay's greedy outputs varied with batching. [Parity, cancellation, and profiling results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
+The later hot-path run used the verified width-eight chain. It matched
+serialized AR on all 40 outputs of 1,024 tokens, at **2.05×** AR throughput
+at one client and **1.81×** at two and eight clients. On a warmed 512-token
+chat set, accepted-prefix replay improved native DFlash2 by **16–18% at
+eight clients** and **26–27% at 16 clients** in both launch orders.
+[Cancellation and Nsight results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
 ##### RTX PRO 6000 · FP8 verification tactics
 
@@ -209,11 +220,11 @@ frozen prompt set by 3.8%. [Draft KV graph measurements](results/rtx_pro_6000_kv
 
 [Streamed chat comparison for stock SGLang, ax-engine-sglang, and vLLM](results/rtx_pro_6000_plan_reuse/REPORT.md#sglang-ax-engine-sglang-and-vllm-on-rtx-pro-6000)
 
-##### RTX PRO 6000 · Qwen3.8-27B NVFP4
+##### Earlier pooled speed sweep
 
-The original speed sweep used SGLang 0.5.23, the same target checkpoint,
-ten frozen prompts and fixed 128-token greedy outputs. Rates are end-to-end
-output tok/s pooled over two passes in speed mode.
+Ten frozen prompts, 128-token outputs, and rates pooled across families.
+This sweep is the source of the 64-node tree result. The serving retest
+above splits code, math, and chat and uses the 32-node default.
 
 ![RTX PRO 6000 throughput for stock SGLang AR, stock DFlash2 and the AX Engine add-on at concurrency 1 and 8. The add-on leads at concurrency 1. The two speculative routes are close at concurrency 8.](docs/figures/rtx-27b-nvfp4-throughput.svg)
 
@@ -222,41 +233,27 @@ output tok/s pooled over two passes in speed mode.
 | 1, 10 requests | 54.41 | 124.50 (block 8) | **156.87** (tree 64) |
 | 8, 40 requests | 388.29 | **489.86** (block 8) | 484.78 (tree 32, chain width 8) |
 
-At concurrency one, tree 64 delivered **2.88×** stock AR and **1.26×**
-stock DFlash2. At concurrency eight, stock DFlash2 and the add-on traded
-the lead between passes and finished within about 1% of each other.
-[Full RTX benchmark and launch settings](results/rtx_27b_nvfp4_speed/REPORT.md)
+Tree 64 delivered **2.88×** stock AR and **1.26×** stock DFlash2 at one
+request. At eight requests the two speculative routes finished within
+about 1%. Tree 64 matched packed AR on one of ten complete sequences per
+pass. [Launch commands](results/rtx_27b_nvfp4_speed/REPORT.md)
 
-Fast tree 64 matched packed AR on one of ten complete sequences per pass.
-The opt-in parity profile (`AX_NVFP4_VERIFY_PARITY=1`) gives AR decode and
-verification the same projection kernels. Its tree and chain routes matched
-its own AR reference on all ten complete sequences, and AR and tree passed
-all 28 sampled distribution checks.
+##### Exact outputs
 
-| Parity profile, 10 requests of exactly 128 tokens | C1 tok/s | C8 tok/s |
-|---|---:|---:|
-| Parity AR | 51.82 | 241.60 |
-| Parity DFlash2 chain, width 8 | 115.43 | 474.94 |
-| Parity DFlash2 tree, 16 nodes | 128.53 | 466.20 |
-| Parity DFlash2 tree, 32 nodes | **131.58** | **538.61** |
-| Parity DFlash2 tree, 64 nodes, `AX_SSM_POSITIONS=8` | 114.10 | 411.01 |
+`AX_QUALITY_PROFILE=verified` turns on the parity numerics and refuses any
+route that lacks a recorded match to serialized AR. On RTX PRO 6000, AR and
+the width-eight chain matched at concurrency 1, 2, and 8: 1,000 of 1,000
+sequences at 128 tokens, and 120 of 120 at 1,024 tokens. The 16-node tree
+matched at 128 tokens and diverged on two of ten prompts at 1,024 tokens.
+The first differences were output tokens 330 and 493. The profile refuses
+the tree. In the verified-profile launch, the chain ran at 109–113 tok/s
+alone and 489–561 tok/s at eight clients.
 
-Every lane equalled parity AR on all ten inputs, and at concurrency eight
-every request equalled the same request alone. The two C8 passes of one lane
-differed by up to 45%, so compare C1. On the same pod, speed-profile tree 16
-reached 126.59 tok/s at C1, and no speed-profile lane kept its outputs at
-concurrency eight. The parity AR reference differs from packed AR.
-[RTX parity results and limits](docs/reports/2026-11-20-rtx-nvfp4-parity-forced-128.md)
-
-Those comparisons cover 128 tokens. With 1,024-token outputs, AR and chain 8
-still equalled the AR reference on every sequence at concurrency 1, 2 and 8,
-but the tree route differed on two of ten prompts, from output tokens 329 and
-492. `AX_QUALITY_PROFILE=verified` applies the measured parity settings and
-starts only on a route with exact-output evidence: AR, or the chain route
-(`AX_TREE=0`, draft block 8) at 109–113 tok/s alone and 489–561 tok/s at
-concurrency eight. It refuses the tree route. `ax-engine-sglang doctor` checks
-a launch against these rules without loading the model.
-[Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Profile settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
+`ax-engine-sglang doctor` checks a planned launch against these rules
+before any weights load. The speed-profile tables above do not carry this
+match. The parity iterations that produced the profile, including the
+faster value-tile timings, are in the performance notes.
+[Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Parity history](docs/performance.md#rtx-speed-and-parity-profiles) · [Launch settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
 
 #### GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
@@ -451,12 +448,12 @@ Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
 references. AR and MTP7 passed all 28 sampled distribution checks.
 [Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
 
-#### Qwen3.8-Flash-Next NVFP4 · MTP
+#### Earlier single-request MTP study
 
-These single-request results use SGLang 0.5.23. The B200 figures come from
-the second benchmark pass with a 256-token output limit. The Thor figures use
-two arm64 hosts with pipeline parallelism over 2.5 GbE. Each cell gives
-code / math / chat output tok/s.
+This study predates the 128-token serving retest above. It uses SGLang
+0.5.23. The B200 figures are the second pass with a 256-token output limit.
+The Thor figures use two arm64 hosts and pipeline parallelism over 2.5 GbE.
+Each cell gives code / math / chat output tok/s.
 
 ![Flash Next on B200. MTP7 with the QSA fix leads on code and math. Stock MTP3 leads on chat.](docs/figures/b200-flash-next-mtp-throughput.svg)
 

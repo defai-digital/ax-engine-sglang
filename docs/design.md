@@ -21,11 +21,15 @@ Only the accepted path advances the request's cache and recurrent state.
 When multiple requests are active, AX verifies a linear chain per request.
 Batching already lets one target pass serve several requests, and a chain
 avoids spending verification rows on extra branches for each request. The
-chain can also use an attention backend tuned for batched decoding. On RTX
-PRO 6000, the dense 27B tree delivered 1.26× stock DFlash2 throughput with
-one active request. At concurrency eight, the two routes were within about
-1%. [Round and backend design](decisions/2026-11-16-dual-attention-backend.md) ·
-[RTX benchmark](performance.md#rtx-pro-6000--qwen38-27b-nvfp4)
+chain can also use an attention backend tuned for batched decoding.
+
+On the RTX PRO 6000 serving retest, the 32-node tree led stock DFlash2 on
+every single-request workload: 324.7 / 270.9 / 152.2 output tok/s against
+229.3 / 188.5 / 125.2 on code / math / chat. At eight clients,
+accepted-prefix GDN replay led, at 996.8 / 898.1 / 580.8. The tree and chain
+route stayed ahead on code and math and was slower on chat.
+[Round and backend design](decisions/2026-11-16-dual-attention-backend.md) ·
+[RTX retest](../results/rtx_pro_6000_retest/REPORT.md)
 
 ## Fit the verifier to the model
 
@@ -33,10 +37,14 @@ Flash Next already has multi-token prediction (MTP). Its sparse attention
 indexer compresses keys in groups of four. In stock SGLang 0.5.23, later
 positions in a speculative window could overwrite keys before compression
 read them. AX enlarges the per-request ring buffer that holds those keys,
-which preserves them for longer verification windows. The wider MTP7
-configuration improved code and math throughput in the B200 run, while stock
-MTP3 led on chat. A longer window helps when the extra accepted tokens earn
-back the cost of checking them.
+which preserves them for longer verification windows.
+
+MTP7 with that wider window led code, and usually math, on B200, RTX PRO
+6000, two B300 GPUs, and Jetson Thor. Stock MTP3 led chat on most of those
+runs. On one Thor, an adaptive policy that picks the draft length from
+observed acceptance raised code, math, and chat throughput together.
+A longer window helps when the extra accepted tokens earn back the cost of
+checking them.
 [Ring fix](decisions/2026-11-17-qwen38-flash-next-feasibility.md#8-the-qsa-ring-fix-ax_qsa_ring-ax-engine-sglang-ax_qsapy-2026-11-17) ·
 [Flash Next benchmarks](performance.md#qwen38-flash-next-nvfp4--mtp)
 
@@ -44,10 +52,15 @@ back the cost of checking them.
 
 The target decides which tokens to emit on the configured numerical path.
 Batched verification and single-token AR can use different kernels and
-produce slightly different logits. On RTX PRO 6000 with dense NVFP4, the
-opt-in parity profile reproduced the AR token sequences on all ten greedy
-prompts when both routes used the same numerical settings. That profile cost
-throughput. We judge speed using matched end-to-end comparisons with AR and
-stock speculation where available, and report greedy token identity and
-sampled distribution checks for the tested configurations.
-[RTX parity report](reports/2026-11-19-rtx-nvfp4-parity.md) · [Serving performance](performance.md)
+produce slightly different logits. The default speed profile reports
+end-to-end throughput against AR and stock speculation. The opt-in verified
+profile forces the parity numerics and starts only on a route with a
+recorded token-for-token match.
+
+On RTX PRO 6000, that match covers AR and the width-eight DFlash2 chain:
+every sequence equalled the serialized AR reference at 128 tokens (1,000 of
+1,000) and at 1,024 tokens (120 of 120). The 16-node tree matched at 128
+tokens and diverged on two of ten prompts at 1,024 tokens, so the profile
+refuses the tree. `ax-engine-sglang doctor` applies these rules before any
+weights load.
+[Verified profile](reports/2026-11-21-verified-profile-gate.md) · [Serving performance](performance.md)

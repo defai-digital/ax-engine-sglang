@@ -1,10 +1,13 @@
-# Results history (2026-11-13 to 2026-11-17)
+# Results history (2026-11-13 to 2026-11-25)
 
 A record of what was tried, what was measured and what was decided, in order, so later work does
-not repeat a closed experiment or lose a number. Each entry gives the headline result and points to
-the full report or decision record. Numbers are measured end to end unless marked "projected" or
-"offline". Numbers from different GPUs (B200, H200, RTX PRO 6000, Apple M5) are not comparable with
-each other.
+not repeat a closed experiment or lose a number. Sections 1–9 are the research log through
+2026-11-17. Section 10 points at the serving campaigns after that date. The live comparison is
+[docs/performance.md](performance.md).
+
+Each entry gives the headline result and points to the full report or decision record. Numbers are
+measured end to end unless marked "projected" or "offline". Numbers from different GPUs, output
+budgets, or slot counts are not interchangeable.
 
 Throughout: greedy decoding, thinking off, "code / math / chat" = HumanEval / GSM8K / chat prompts
 (`benchmarks/baselines/prompts.py`), "x" = ratio of throughput (total output tokens / total time), 95% intervals
@@ -208,7 +211,7 @@ backends with their own CUDA graphs. Record: `docs/decisions/2026-11-16-dual-att
 | NVFP4 speed, 32-64 slots | after the fix: c = 1 code 1.42x, math 1.33x, chat 1.14x; c = 2-64 1.01x-1.21x | 12, 14 |
 | Sampled, grammar, logprob requests | stopped the server before; now run as chain rounds; acceptance equals stock | 15 |
 | Sampled tree verify (`AX_TREE_SAMPLING=1`) | bf16: 0 of 28 distribution tests fail (stock DFlash2 sampling fails 7, an upstream defect); NVFP4 kernels give row-count-dependent distributions; kept off by default (no speed gain shown) | 16 |
-| TensorRT-LLM 1.4 DFlash2 | ours leads at c = 1 (1.07x-1.72x) and on code; TensorRT-LLM leads chat c = 16 (0.81x bf16, 0.90x NVFP4). Same acceptance; its batch-16 round is 14-20% cheaper, for stock SGLang too | 17 |
+| TensorRT-LLM 1.4 DFlash2 | ours leads at c = 1 (1.07x-1.72x) and on code; TensorRT-LLM leads chat c = 16 (0.81x bf16, 0.90x NVFP4). Same acceptance; its batch-16 round is 14-20% cheaper, for stock SGLang too. Later retests did not repeat this TensorRT-LLM pair | 17 |
 
 ## 9. Qwen3.8-Flash-Next (2026-11-17) — MTP done, tree blocked
 
@@ -223,6 +226,25 @@ Record: `docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md`; report:
 | Wider MTP with the ring | MTP 7 vs. stock MTP 3, two passes within 1.5%: code 1.22x-1.30x, math 1.05x-1.15x, chat 0.80x-0.86x; MTP 9 / 12 no better (worse at c = 16) |
 | Plugin bug found | the tree's capture patches limited every server's target graph to batch 1; now scoped to the tree algorithm |
 
+## 10. Serving campaigns after 2026-11-17
+
+These rows are the measurements that supersede sections 8 and 9 as the current speed picture.
+Section 8 remains the TensorRT-LLM 1.4 comparison and the high-concurrency slot sweep. The
+128-token retests use a different budget, so their tok/s do not replace the 1,024-token ratios.
+
+| Campaign | Headline | Record |
+|---|---|---|
+| B200 27B NVFP4, 128 tokens, 8 slots, package 0.5.1 | One client: tree 632.5 / 516.5 / 333.8. Eight clients: GDN replay 1,599.5 / 1,428.3 / 949.6, ahead of stock DFlash2 by 11.2% / 21.8% / 5.1% | `results/blackwell_nvfp4_serving_retest/REPORT.md` |
+| RTX PRO 6000 27B retest | One client: 32-node tree leads BF16 and NVFP4. Eight clients, NVFP4: GDN replay chat 580.8 vs stock 505.3 (+14.9%, 48/48 chat match) | `results/rtx_pro_6000_retest/REPORT.md` |
+| Verified profile, RTX PRO 6000 | Width-eight chain matches serialized AR: 1,000/1,000 at 128 tokens, 120/120 at 1,024. Tree diverges on 2 of 10 prompts at 1,024 tokens and is refused | `docs/reports/2026-11-21-verified-profile-gate.md` |
+| Hot path, RTX PRO 6000 | Verified chain is 2.05× AR at one client and 1.81× at two and eight. Warmed chat replay is +16–18% at eight clients and +26–27% at 16 | `results/rtx_pro_6000_hotpath_validation/REPORT.md` |
+| RTX 5090 27B NVFP4 | Tree 32 is 2.35× AR and 1.08× stock DFlash2 at one request. At two requests the speculative routes are within 0.6%. Replay fits eight slots; stock snapshots hit the memory limit | `results/rtx_5090_27b_nvfp4/REPORT.md` |
+| Jetson Thor 27B vs Edge-LLM 0.12.0 | Tree 32 leads code and math. Edge-LLM DDTree 32 leads or ties chat. Edge-LLM AR matches stock SGLang AR | `results/edgellm_thor/REPORT.md` |
+| Flash Next BF16, two B300s, TP2 | MTP7 beats stock MTP3 by 18–38% on code and 6–16% on math. Stock MTP3 leads chat | `results/b300-flash-next-bf16/REPORT.md` |
+| Flash Next NVFP4, one Thor | AX vLLM adaptive MTP leads the measured SGLang, vLLM, and Edge-LLM MTP3 lanes at one and four requests | `docs/reports/2026-11-21-flash-next-single-thor.md` |
+| DFlash2 draft vocabulary | The 148,736-row head saves under 1% of a decode round. End-to-end throughput did not improve. The flag stays off | `results/dflash_draft_vocab/REPORT.md` |
+| FP8 verification tactics | Experimental. RTX PRO 6000 +1.95–2.61% and RTX 5090 +2.08–2.70% at eight clients, with output differences between tactics | `results/fp8_verify_tactics/REPORT.md` |
+
 ## Lessons that apply across tracks
 
 - Compare against the best public baseline on the same GPU and serving stack; stock settings change
@@ -236,4 +258,8 @@ Record: `docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md`; report:
   mode loaded with the plugin silently lost its multi-request CUDA graphs.
 - Check the engine's own invariants under the new load: a cap that looked safe (verify window <= the
   QSA ratio) still corrupted state whenever a window crossed a group boundary.
-- Run the speed comparison twice before claiming a ratio; here every cell repeated within 1.5%.
+- Run the speed comparison twice before claiming a ratio. In the 2026-11-17 study every cell
+  repeated within 1.5%. Later retests moved more than that between passes, so report both passes
+  when they diverge.
+- A 1,024-token, many-slot study and a 128-token, eight-slot retest answer different questions.
+  Keep the output budget and the slot count next to the tok/s.

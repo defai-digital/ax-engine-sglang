@@ -12,7 +12,39 @@ Each row compares output tokens per second within one workload and platform.
 The reports record checkpoint revisions, request limits and kernel settings.
 [Model routes and precision support](README.md#model-routes)
 
+For B200 and RTX PRO 6000, the matched serving retests are the current
+cross-route comparison: 128 greedy tokens, eight slots, and the same prompt
+corpus for code, math, and chat. The 1,024-token studies and the pooled
+ten-prompt sweeps use different budgets, so their tok/s do not substitute
+for the retest tables. The verified profile is the current exact-output
+gate. The parity tables under it are the measurements that produced that
+gate.
+
 ## B200 · Qwen3.8-27B
+
+### Serving retest
+
+Each route ran two streamed passes with the same inputs and exactly 128
+greedy output tokens per request. Each pass used eight prompts per
+workload at one client and 24 at eight clients. Values are code / math /
+chat output tok/s pooled over both passes. AX tree/chain used a 32-node
+tree for one eligible request and a width-eight chain for grouped requests.
+
+![B200 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](figures/b200-27b-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 136.0 / 136.0 / 136.4 | 448.5 / 408.1 / 281.3 | **632.5** / **516.5** / **333.8** | 456.6 / 415.3 / 286.6 |
+| 8 | 870.4 / 851.6 / 833.6 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5** / **1,428.3** / **949.6** |
+
+AX tree/chain led all three single-client workloads. Width-eight GDN
+replay led all three at eight clients and lowered chat p95 request latency
+from 1.41 to 1.34 s compared with stock DFlash2. An AR confirmation after
+checkpoint staging reached 953.0 tok/s on eight-client chat, close to the
+replay result.
+[Per-pass throughput and output agreement](../results/blackwell_nvfp4_serving_retest/REPORT.md#b200-qwen38-27b-nvfp4)
+
+### Earlier 1,024-token study
 
 The 64-slot NVFP4 run used 64 prompts per family, greedy decoding and a
 1,024-token output limit. Each result is the mean of two passes. Cells
@@ -49,33 +81,44 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
-### B200 DFlash2 serving retest
-
-Each route ran two streamed passes with the same inputs and exactly 128
-greedy output tokens per request. Each pass used eight prompts per
-workload at C1 and 24 at C8. Values are code / math / chat output tok/s
-pooled over both passes.
-
-![B200 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](figures/b200-27b-nvfp4-serving-retest.svg)
-
-| Clients | Stock AR | Stock DFlash2 | AX tree/chain | AX GDN replay |
-|---:|---:|---:|---:|---:|
-| 1 | 136.0 / 136.0 / 136.4 | 448.5 / 408.1 / 281.3 | **632.5** / **516.5** / **333.8** | 456.6 / 415.3 / 286.6 |
-| 8 | 870.4 / 851.6 / 833.6 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5** / **1,428.3** / **949.6** |
-
-AX tree/chain led all three single-client workloads. Width-eight GDN
-replay led all three at C8 and lowered chat p95 request latency from 1.41
-to 1.34 s compared with stock DFlash2. An AR confirmation after checkpoint
-staging reached 953.0 tok/s on C8 chat, close to the replay result.
-[Per-pass throughput and output agreement](../results/blackwell_nvfp4_serving_retest/REPORT.md#b200-qwen38-27b-nvfp4)
-
 ## RTX PRO 6000 · Qwen3.8-27B NVFP4
+
+### Serving retest
+
+Two passes per route used 128 greedy output tokens. Cells are code / math /
+chat output tok/s. The add-on used a 32-node tree for one eligible request
+and a width-eight chain for grouped requests. Package version at measurement
+was 0.4.0; the later B200 retest used 0.5.1 on the same prompt corpus.
+
+![RTX PRO 6000 Qwen3.8-27B BF16 and NVFP4 throughput at concurrency eight by workload and serving route.](figures/rtx-pro-6000-27b-retest-throughput.svg)
+
+#### BF16
+
+| Clients | Stock AR | Stock DFlash2 | AX tree / chain |
+|---:|---:|---:|---:|
+| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | **184.3** / **163.2** / **94.1** |
+| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **510.8** / **572.0** / **335.1** |
+
+#### NVFP4
+
+| Clients | Stock AR | Stock DFlash2 | AX tree / chain | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | **324.7** / **270.9** / **152.2** | 235.8 / 195.2 / 128.9 |
+| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8** / **898.1** / **580.8** |
+
+At eight clients, NVFP4 GDN replay raised chat from 505.3 to 580.8 tok/s
+and matched stock on 48 of 48 greedy chat outputs. A reverse-order run
+measured 560.5 against 503.9 tok/s and matched 38 of 48.
+[Latency, checkpoints, and output agreement](../results/rtx_pro_6000_retest/REPORT.md)
+
+### Earlier pooled speed sweep
 
 All lanes used SGLang 0.5.23, a fixed 128-token greedy output, FlashInfer
 attention and FlashInfer CUTLASS NVFP4 GEMM. The tests used the same frozen
 prompts and include prefill and local HTTP overhead. The table pools two
-passes by dividing total output tokens by total wall time. NVFP4 describes
-the target checkpoint. The DFlash2 drafter was BF16.
+passes by dividing total output tokens by total wall time. Rates are pooled
+across families, so they are lower than the per-workload retest above.
+NVFP4 describes the target checkpoint. The DFlash2 drafter was BF16.
 
 ![RTX PRO 6000 throughput by serving route and concurrency. Both panels use the same output token rate scale.](figures/rtx-27b-nvfp4-throughput.svg)
 
@@ -92,7 +135,10 @@ about 1%. [Full RTX sweep, per-pass rates and launch commands](../results/rtx_27
 
 ### RTX speed and parity profiles
 
-The speed sweep ran with verification parity disabled. Tree 64 matched
+The tables in this subsection record the steps that produced the current
+verified profile. The profile itself is under
+[Verified profile gate](#verified-profile-gate). The speed sweep ran with
+verification parity disabled. Tree 64 matched
 packed AR on one of ten complete 128-token sequences in each pass. A
 separate verification run used a 32-token output budget and AR configured
 with the same parity numerics as the speculative lanes. Tree and chain

@@ -23,8 +23,9 @@ python -m pip install https://github.com/defai-digital/ax-engine-sglang/releases
 ```
 
 Use `python -m pip install ./ax-engine-sglang` from a source checkout. Add
-`--no-deps` when you already have the pinned SGLang environment. The Jetson
-Thor smoke test used the 0.2.1 wheel in `lmsysorg/sglang:v0.5.23-cu130`.
+`--no-deps` when you already have the pinned SGLang environment. An earlier
+installed-wheel check on Jetson Thor used the 0.2.1 wheel in
+`lmsysorg/sglang:v0.5.23-cu130`. The current package is 0.5.1.
 
 ```bash
 ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
@@ -36,9 +37,11 @@ ax-engine-sglang serve RadixArk/Qwen3.8-27B-NVFP4 \
 The command enables the plugin, passes the server flags to SGLang and stops
 startup if AX fails to load. An existing `SGLANG_PLUGINS` allowlist retains
 its entries. To use the upstream launcher directly, set `SGLANG_PLUGINS=ax-engine`.
-On Jetson Thor, the installed wheel served a 32-token request with six tree
+On Jetson Thor, the 0.2.1 wheel served a 32-token request with six tree
 rounds and rejected a checkpoint setting mismatch before loading weights.
-[Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#021-installed-wheel-smoke-on-jetson-thor)
+That check is a startup record for the installed wheel, not a 0.5.1
+throughput result.
+[Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#installed-wheel-smoke-on-jetson-thor-v021)
 
 ## Experimental GDN replay for DFlash2 chains
 
@@ -100,12 +103,26 @@ off for hot weight replacement.
 
 ## B200 benchmark results
 
-Tested on SGLang 0.5.23 (and 0.5.22 for the single-request tree), one B200, greedy unless noted,
-64 prompts per family, 1,024 tokens. Full records:
+Two studies, both greedy, SGLang 0.5.23, one B200. Read the serving retest
+when comparing routes on the shared 128-token corpus. Read the earlier study
+for concurrency up to 64 and for TensorRT-LLM 1.4. Jetson Thor is measured
+separately. [Jetson Thor](#jetson-thor)
+
+**Serving retest, 128 tokens, eight slots, package 0.5.1.** Code / math /
+chat output tok/s. The add-on used a 32-node tree at one request and a
+width-eight chain when requests were grouped.
+
+| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | 448.5 / 408.1 / 281.3 | 632.5 / 516.5 / 333.8 | 456.6 / 415.3 / 286.6 |
+| 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | 1,599.5 / 1,428.3 / 949.6 |
+
+GDN replay led at eight clients by 11.2% / 21.8% / 5.1%.
+[Retest](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/blackwell_nvfp4_serving_retest/REPORT.md)
+
+**Earlier 1,024-token study.** 64 prompts per family. Full records:
 [dual attention backend](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-16-dual-attention-backend.md),
 [Flash-Next](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md).
-Jetson Thor (SM110, aarch64) is measured separately with 12 prompts and 512 tokens; see
-[Jetson Thor](#jetson-thor).
 
 | Model | Mode | Result vs. stock SGLang |
 |---|---|---|
@@ -151,7 +168,7 @@ The tree is refused on Qwen4-Exp targets. If the target's or drafter's `config.j
 
 | Variable | Meaning |
 |---|---|
-| `FC1_TREE_N` | nodes verified per round, root included (32 measured best on B200 and 64 on RTX PRO 6000 for single-request 27B NVFP4). 16, 32 and 64 use the plugin's host-length FlashInfer plan; other sizes use SGLang's own plan |
+| `FC1_TREE_N` | nodes verified per round, root included. The launch default is 32, which is the tree in the serving retests. A 64-node tree was fastest in the earlier pooled RTX sweep. 16, 32 and 64 use the plugin's host-length FlashInfer plan; other sizes use SGLang's own plan |
 | `FC1_DRAFT_BLOCK` | tokens drafted per round (16 on the 9B and the 27B; at most 32 with `FC1_TREE64=1`) |
 | `AX_LATTICE=1` | build the tree from the DFlash2 selector lattice (needs a DFlash2 drafter) |
 | `AX_FAST=1` | per-round overhead fixes (no host readback of the prefix length) |
@@ -186,19 +203,26 @@ and can run without an n-gram table.
 
 ## RTX PRO 6000
 
-For single-request Qwen3.8-27B NVFP4 serving, the fastest setting in the
-128-token sweep used a 64-node tree, a draft block of 16 and verification
-parity disabled. It reached **156.87 output tok/s** at **0.818 s median
-request latency**. At eight serving slots, set `AX_CHAIN_WIDTH=8`,
-`AX_CHAIN_GRAPH_WIDTHS=8`, `AX_CHAIN_DRAFT_WIDTHS=8` and `AX_SSM_POSITIONS=8`
-to reproduce the measured cache allocation. Tree 64 matched packed AR exactly
-on one of ten complete outputs per pass.
+The current single-request default is a 32-node tree (`FC1_TREE_N=32`).
+On the per-workload NVFP4 retest that tree led stock DFlash2 at one client
+(324.7 / 270.9 / 152.2 against 229.3 / 188.5 / 125.2 output tok/s on code /
+math / chat). At eight clients, accepted-prefix GDN replay led
+(996.8 / 898.1 / 580.8). For that chain, set `AX_CHAIN_WIDTH=8`,
+`AX_CHAIN_GRAPH_WIDTHS=8`, `AX_CHAIN_DRAFT_WIDTHS=8`, and
+`AX_SSM_POSITIONS=8`.
+[Retest](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_pro_6000_retest/REPORT.md)
 
-At concurrency eight, stock `DFLASH` with `--speculative-num-draft-tokens 8`
-averaged **489.86 aggregate output tok/s** over two 40-request passes. Plugin
-tree 32 averaged **484.78 tok/s** with width-eight chain rounds for grouped
-requests. Packed AR reached **388.29 tok/s**.
-[Launch commands and all ten measured configurations](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_27b_nvfp4_speed/REPORT.md)
+An earlier sweep pooled ten frozen prompts. There a 64-node tree reached
+**156.87 output tok/s** at **0.818 s median request latency** (2.88× packed
+AR, 1.26× stock DFlash2). At eight requests, stock DFlash2 averaged
+**489.86** tok/s and tree 32 with a width-eight chain averaged **484.78**.
+Packed AR reached **388.29**. Tree 64 matched packed AR on one of ten
+complete outputs per pass.
+[Pooled sweep](https://github.com/defai-digital/ax-engine-sglang/blob/main/results/rtx_27b_nvfp4_speed/REPORT.md)
+
+For a recorded token-for-token match, use `AX_QUALITY_PROFILE=verified`
+with `AX_TREE=0` and a draft block of 8. That route matched serialized AR
+on RTX PRO 6000 at 128 and 1,024 tokens. The tree route is refused.
 
 ## Jetson Thor
 
