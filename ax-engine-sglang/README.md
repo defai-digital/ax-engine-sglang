@@ -87,6 +87,17 @@ packing on the native FA2 verify CUDA graph. It requires the GDN replay
 launch. Eight-client streamed chat was 1.45% slower on the RTX PRO 6000.
 [Replay planning measurements](../results/rtx_pro_6000_plan_reuse/REPORT.md)
 
+Add `AX_DFLASH_DRAFT_VOCAB=1` to this launch to try Splash-style draft
+vocabulary reduction. Use `--attention-backend flashinfer` and
+`--fp4-gemm-backend flashinfer_cutlass` for the NVFP4 checkpoint.
+On eligible greedy batches, the draft graph projects
+148,736 of 248,320 Qwen vocabulary rows and returns full-vocabulary token
+IDs for verification. Batches with sampling, grammar constraints, or an
+excluded token in any request's last 64 scheduler-visible tokens use the
+full draft head. The packed head is for a static checkpoint. Keep the option
+off for hot weight replacement.
+[Thor validation and benchmark commands](../results/dflash_draft_vocab/REPORT.md)
+
 ## B200 benchmark results
 
 Tested on SGLang 0.5.23 (and 0.5.22 for the single-request tree), one B200, greedy unless noted,

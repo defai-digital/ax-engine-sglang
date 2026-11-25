@@ -331,6 +331,19 @@ drafter. Its FlashInfer follow-up changed host load, and the chain lane
 overlapped a download. See the report for the conditions and the separate
 Triton lanes. [Jetson Thor results](reports/2026-11-19-jetson-thor.md)
 
+### DFlash2 draft vocabulary
+
+Thor-01 measured an experimental 148,736-row draft head with the
+Qwen3.8-27B NVFP4 checkpoint. The CUDA graph probe timed the projection
+and top-k on synthetic activations. The serving benchmark compares it
+with the full 248,320-row draft head using width-eight DFlash2 and
+GDN replay. Thor-01 gained 0.14–0.86% at C1 and was within 0.11%
+of the full-head throughput at C2. All 16 greedy outputs matched
+at both concurrencies in both launch orders. RTX PRO 6000 and B200
+also gained at C1. Their C8 gains depended on launch order and their
+C8 output comparisons differed.
+[All three GPUs, both launch orders, and reproduction commands](../results/dflash_draft_vocab/REPORT.md)
+
 ### FP8 verification projections
 
 The Thor-01 (SM110) probe timed the default cuBLAS tactic and the fastest

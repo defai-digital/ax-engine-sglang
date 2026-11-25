@@ -334,6 +334,23 @@ BF16 used a 384-token limit.
 
 [Thor workload details and launch settings](docs/performance.md#jetson-thor--qwen38-27b)
 
+##### DFlash2 draft vocabulary on Thor and Blackwell
+
+The experimental draft vocabulary subset reduced Thor-01 projection and
+top-k time by **39.8–40.5%** in the isolated CUDA graph probe. With the
+same width-eight GDN replay configuration, end-to-end throughput improved
+in both launch orders at C1. At higher concurrency the effect varied.
+
+![DFlash2 draft vocabulary throughput change at one and multiple clients across both launch orders on Thor-01, RTX PRO 6000 and B200.](docs/figures/dflash-draft-vocab-serving.svg)
+
+| GPU | C1 output throughput change | Multi-client change |
+|---|---:|---:|
+| Thor-01 | +0.14% to +0.86% | C2 · −0.10% to −0.02% |
+| RTX PRO 6000 | +0.43% to +1.75% | C8 · −0.71% to +0.99% |
+| B200 | +0.47% to +6.52% | C8 · −14.03% to +2.46% |
+
+[Serving validation, output agreement, and projection timings](results/dflash_draft_vocab/REPORT.md)
+
 ##### Thor-01 · FP8 verification projections
 
 The fastest bit-exact tactics reduced 64-row projection time by **4.49%**

@@ -56,6 +56,34 @@ timed replay pass requires at least one optimized round and zero fallbacks
 at the requested live batch size. The results also record smaller batches.
 [RTX PRO 6000 validation and workload settings](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
+## DFlash2 draft vocabulary subset
+
+Use a local Qwen3.8-27B NVFP4 target and DFlash2 drafter with SGLang 0.5.23.
+Set `ELIGIBLE_IDS` and `FALLBACK_IDS` to JSON arrays of token-ID lists.
+Eligible prompts need their latest 64 IDs in `[0, 148352)` or
+`[247936, 248320)`. Each fallback prompt must contain an ID from
+`[148352, 247936)` in its last 32 tokens.
+
+```bash
+run=results/dflash_draft_vocab/raw/local
+python benchmarks/sglang/ab_dflash_draft_vocab.py \
+  --target "$TARGET" --draft "$DRAFT" --input-ids "$ELIGIBLE_IDS" \
+  --fallback-ids "$FALLBACK_IDS" --check-sampling --concurrency 1 2 \
+  --kv-tokens 4096 --output-tokens 128 --out "$run/ab"
+python benchmarks/sglang/probe_dflash_draft_head.py \
+  --target "$TARGET" --out "$run/head.json"
+```
+
+The serving benchmark runs both launch orders and requires subset graph
+replay at each measured concurrency. Inspect `summary.json` for output
+throughput, p95 latency, tokens per verify, exact outputs, and replay counts
+by live and padded graph rows. Both lanes use the Python radix tree with
+radix caching disabled.
+The projection probe measures the checkpoint's NVFP4 head and top-k with
+synthetic activations. For the Runpod comparison, use
+`--concurrency 1 8 --kv-tokens 8192`.
+[Thor-01, RTX PRO 6000 and B200 results](../../results/dflash_draft_vocab/REPORT.md)
+
 ## DFlash2 FP8 verification tactics
 
 `ab_fp8_verify.py` runs on one RTX PRO 6000 or RTX 5090 with SGLang 0.5.23,

@@ -406,16 +406,13 @@ serialized 1,024-token AR comparison.
 
 ### Splash DFlash2 follow-up
 
-1. **Measure how much time the draft vocabulary head takes.** Splash
-   projects onto 59.8% of Qwen's vocabulary when the recent 64 tokens of
-   every lane fit that subset. It falls back to the full draft head when
-   a lane leaves it. SGLang's native draft graph already includes greedy
-   selection over the target's shared head. Profile that operation at C1
-   and C8 first. A useful CUDA prototype would pack the selected weight
-   rows once, map draft IDs back before verification, and keep the full
-   target head. Start with greedy TP1 and check prompts in and out of the
-   subset, acceptance, and complete outputs.
-   [Splash vocabulary policy](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/docs/models.md#drafts)
+1. **Reduce draft vocabulary projection.** Splash uses a 59.8% Qwen
+   vocabulary subset when the last 64 tokens of every request qualify.
+   The AX prototype rounds the ID ranges outward to NVFP4 scale tiles,
+   packs the weights once, and remaps draft proposals to global IDs.
+   Thor-01 cut isolated projection and top-k time by 39.8–40.5% at
+   7, 14, and 56 draft rows.
+   [Thor serving and projection tests](../../results/dflash_draft_vocab/REPORT.md) · [Splash vocabulary policy](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/docs/models.md#drafts)
 2. **Score verified rows by expected committed tokens per millisecond.**
    Splash calibrates the cost of row counts and adds a term for context
    history. It estimates conditional acceptance by draft confidence and
@@ -439,3 +436,24 @@ Draft KV append takes 0.35 ms at the median. Use the CUDA trace to choose
 the first experiment and check its gain in both launch orders. Require
 the serialized AR parity gate before changing the verified profile.
 [RTX replay trace](../../results/rtx_pro_6000_hotpath_validation/REPORT.md#nsight-attribution) · [Splash release measurements](https://github.com/incoai/splash/blob/d40c250ff248938edebdb91fb6124514e32daeaa/docs/release-notes/1.7.0.md)
+
+The ax-engine-vLLM audit found that C8 clients could yield at most three
+live requests on an RTX 5090. Several faster NVFP4 kernels on synthetic
+operands also changed live outputs. AX's draft vocabulary benchmark
+now records live and padded CUDA graph rows for both draft and verify,
+compares complete greedy outputs, and requires observed subset replay
+at the requested concurrency. The current SGLang width-eight chain
+produces 48 live rows at six requests. Its graph rows depend on the
+configured capture sizes. vLLM's five-proposal lane produces 48 live
+rows at eight requests.
+[vLLM graph accounting change](https://github.com/defai-digital/ax-engine-vllm/commit/c0b548d65a631a7b212d462740c024d087817cf5) · [vLLM validation results](https://github.com/defai-digital/ax-engine-vllm/blob/baf2630/results/REPORT.md#48-row-nvfp4-tactic-sweep)
+
+AX vLLM's five-proposal RTX PRO 6000 lane combined GDN replay with
+asynchronous accepted-state commit. Throughput increased from 717.09
+to 753.62 tok/s at C8 in that combined comparison. On SGLang, a
+separate overlap experiment would need to trace the dependency from
+accepted-state commit to the next target verify and check that the
+draft graph and commit kernel use disjoint state buffers on every
+replay. Compare it against the existing serial GDN replay lane at
+the same verified width.
+[vLLM overlap implementation](https://github.com/defai-digital/ax-engine-vllm/commit/a1133e422c8b958033067dc6559d29942b40f47d) · [Five-proposal serving retest](https://github.com/defai-digital/ax-engine-vllm/blob/baf2630/results/REPORT.md#rtx-pro-6000-and-b200-retest)

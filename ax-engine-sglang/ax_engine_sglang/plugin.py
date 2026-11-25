@@ -74,6 +74,9 @@ def _install_fixes(config):
     if config.dflash_plan_reuse:
         from . import ax_dflash_plan
         ax_dflash_plan.install()
+    if config.dflash_draft_vocab:
+        from . import ax_dflash_draft_vocab
+        ax_dflash_draft_vocab.install()
     if config.gdn_chain_replay:
         from . import ax_dflash_activity
         ax_dflash_activity.install()

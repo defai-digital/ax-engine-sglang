@@ -114,8 +114,20 @@ class DraftKVGraphTests(unittest.TestCase):
 
         self.assertEqual(before["rounds"], {"2": 1})
         self.assertEqual(snapshot(None, None).internal_state["ax_dflash_activity"], {
-            "rounds": {"2": 2}, "optimized": {"kv_graph": {"2": 1}}, "capture_attempts": 1,
+            "rounds": {"2": 2}, "optimized": {"kv_graph": {"2": 1}}, "graphs": {}, "capture_attempts": 1,
         })
+
+    def test_activity_records_live_and_captured_graph_shapes(self):
+        activity = Activity()
+        runner = SimpleNamespace(ragged_verify_mode=False, captured_req_width=8,
+                                 model_runner=SimpleNamespace(is_draft_worker=True),
+                                 _replay_graph_key=SimpleNamespace(size=8))
+        batch = SimpleNamespace(batch_size=6, forward_mode=SimpleNamespace(is_target_verify=lambda: True))
+        execute = activity.wrap_graph(lambda runner, batch: batch)
+        self.assertIs(execute(runner, batch), batch)
+        runner.model_runner.is_draft_worker = False
+        execute(runner, batch)
+        self.assertEqual(activity.graphs, {"draft": {"6:8:8": 1}, "verify": {"6:8:8": 1}})
 
 
 if __name__ == "__main__":
