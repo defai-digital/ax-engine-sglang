@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture, qualify and compare FP8 DFlash2 verification tactics on RTX PRO 6000."""
+"""Capture, qualify and compare FP8 DFlash2 verification tactics on SM120."""
 
 import argparse
 from contextlib import contextmanager

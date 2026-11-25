@@ -14,6 +14,20 @@ class CublasFp8GemmRunner:
     pass
 
 
+class FP8RuntimeTests(unittest.TestCase):
+    def test_runtime_accepts_the_two_supported_gpu_models(self):
+        runtime = {"sglang": "0.5.23", "flashinfer": "0.7.2", "capability": [12, 0]}
+        for name in ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "NVIDIA GeForce RTX 5090"):
+            with self.subTest(gpu=name), patch.object(fp8, "runtime_id", return_value={**runtime, "gpu": name}):
+                self.assertEqual(fp8.require_runtime(None)["gpu"], name)
+
+        for gpu, capability in (("NVIDIA Thor", [11, 0]), ("NVIDIA GeForce RTX 5080", [12, 0])):
+            identity = {**runtime, "gpu": gpu, "capability": capability}
+            with self.subTest(gpu=gpu), patch.object(fp8, "runtime_id", return_value=identity):
+                with self.assertRaisesRegex(ValueError, "RTX PRO 6000 or RTX 5090"):
+                    fp8.require_runtime(None)
+
+
 class FP8VerifyBenchmarkTests(unittest.TestCase):
     def setUp(self):
         config = object()

@@ -33,9 +33,10 @@ def runtime_id(torch):
 def require_runtime(torch):
     runtime = runtime_id(torch)
     if (runtime["sglang"] != "0.5.23" or runtime["flashinfer"] != "0.7.2"
-            or runtime["capability"] != [12, 0] or "RTX PRO 6000" not in runtime["gpu"]):
-        raise ValueError(f"FP8 verification benchmarks require RTX PRO 6000, SGLang 0.5.23 "
-                         f"and FlashInfer 0.7.2. Found {runtime}")
+            or runtime["capability"] != [12, 0]
+            or not any(name in runtime["gpu"] for name in ("RTX PRO 6000", "RTX 5090"))):
+        raise ValueError(f"FP8 verification benchmarks require an RTX PRO 6000 or RTX 5090 "
+                         f"with SGLang 0.5.23 and FlashInfer 0.7.2. Found {runtime}")
     return runtime
 
 

@@ -171,11 +171,9 @@ benchmark, accepted-prefix GDN replay improved native DFlash2 throughput
 by **16–18% at C8** and **26–27% at C16** across both launch orders.
 Replay's greedy outputs varied with batching. [Parity, cancellation, and profiling results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
-The FP8 verification benchmark compares tactics on live QKVZ and QKV
-operands before timing them in DFlash2 serving. On Thor, the fastest
-bit-exact tactics took 4.5% and 5.9% less time for the two 64-row synthetic
-projections. RTX PRO 6000 serving gains remain unmeasured.
-[FP8 results and reproduction steps](results/fp8_verify_tactics/REPORT.md)
+The RTX PRO 6000 serving comparison for FP8 verification tactics is
+pending.
+[RTX 5090 serving results](#rtx-5090--fp8-verification-tactics) · [Thor-01 projection results](#thor-01--fp8-verification-projections)
 
 With GDN replay already enabled, a separate draft KV graph added 0.8%
 to eight-client streamed chat throughput and reduced throughput on the
@@ -278,6 +276,21 @@ with about **0.017 GiB** of replay buffers. The two-slot runs matched all
 also passed cancellation and slot reuse checks.
 [Replay benchmark and validation](results/rtx_5090_27b_nvfp4/REPORT.md#accepted-prefix-gdn-replay-follow-up)
 
+##### RTX 5090 · FP8 verification tactics
+
+The cuDNN candidate raised end-to-end throughput by **2.08–2.70%** on
+Qwen3.8-27B NVFP4 at eight concurrent clients. It matched the default
+cuBLAS lane on **10 of 64** complete greedy outputs in each launch order.
+
+![RTX 5090 Qwen3.8-27B NVFP4 throughput for default and candidate FP8 tactics across both launch orders, at eight concurrent clients.](docs/figures/rtx-5090-27b-fp8-verify-throughput.svg)
+
+| First lane | Default (output tok/s) | Candidate (output tok/s) | Change | Exact outputs |
+|---|---:|---:|---:|---:|
+| Default | 802.33 | 824.01 | +2.70% | 10/64 |
+| Candidate | 807.25 | 824.02 | +2.08% | 10/64 |
+
+[Latency, graph coverage, and output checks](results/fp8_verify_tactics/REPORT.md#paired-serving-comparison)
+
 #### Jetson Thor · Qwen3.8-27B
 
 Single-request SGLang 0.5.23 runs on arm64 with FlashInfer. Each row gives
@@ -292,6 +305,23 @@ BF16 used a 384-token limit.
 | BF16 | 4.6 / 4.6 / 4.6 | 43.1 / 29.6 / 12.5 | **47.5 / 37.6 / 18.3** |
 
 [Thor workload details and launch settings](docs/performance.md#jetson-thor--qwen38-27b)
+
+##### Thor-01 · FP8 verification projections
+
+The fastest bit-exact tactics reduced 64-row projection time by **4.49%**
+for GDN QKVZ and **5.88%** for attention QKV versus default cuBLAS. The
+test timed individual projections on synthetic CUDA inputs.
+
+![Thor-01 synthetic FP8 projection time reduction versus default cuBLAS at 48, 64, 96, and 128 rows. The largest measured reduction was 5.88% for 64-row attention QKV.](docs/figures/thor-01-fp8-projection-time.svg)
+
+| Verification rows | GDN QKVZ time reduction | Attention QKV time reduction |
+|---:|---:|---:|
+| 48 | 4.65% | 4.55% |
+| 64 | **4.49%** | **5.88%** |
+| 96 | 0.62% | 1.70% |
+| 128 | 0.84% | 1.07% |
+
+[Before and after timings](docs/performance.md#fp8-verification-projections) · [Benchmark report](results/fp8_verify_tactics/REPORT.md)
 
 ### Qwen3.8-Flash-Next
 

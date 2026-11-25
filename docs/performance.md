@@ -182,6 +182,20 @@ and zero errors. The median C16 target-verify GPU span fell from 33.5 ms
 to 23.4 ms, with draft KV append near 0.36 ms in both lanes.
 [Throughput, token scores, and Nsight attribution](../results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
+### FP8 tactic serving comparison
+
+The assigned Runpod host had no free GPU. RTX PRO 6000 serving throughput
+with the candidate tactics remains pending. The reference is the earlier
+accepted-prefix replay run on 64 held-out UltraChat prompts, with 512 output
+tokens per request. The reference ranges cover both launch orders.
+
+| Live clients | Replay reference (output tok/s) | Candidate (output tok/s) |
+|---:|---:|---:|
+| 8 | 771.72–782.87 | Pending |
+| 16 | 1,200.63–1,202.68 | Pending |
+
+[Prior RTX warm chat measurements](../results/rtx_pro_6000_hotpath_validation/REPORT.md#warmed-chat-throughput) · [RTX 5090 serving measurements](#fp8-verification-tactics-at-c8) · [Thor-01 projection measurements](#fp8-verification-projections)
+
 ### Chain width by batch size
 
 On the speed profile (no exact-output claim) the better fixed chain width
@@ -251,6 +265,27 @@ two concurrent requests. It replaced 3.38 GiB of speculative SSM
 snapshots with about 0.017 GiB of replay buffers in the two-slot runs.
 [Replay evidence and test settings](../results/rtx_5090_27b_nvfp4/REPORT.md#accepted-prefix-gdn-replay-follow-up)
 
+### FP8 verification tactics at C8
+
+Both lanes used width-eight DFlash2 with accepted-prefix GDN replay.
+Each timed pass ran 64 held-out UltraChat prompts to 512 greedy output
+tokens per request. The candidate used cuDNN for GDN QKVZ and attention
+QKV at 64 verification rows.
+
+![RTX 5090 end-to-end throughput for default and candidate FP8 tactics in both launch orders at C8.](figures/rtx-5090-27b-fp8-verify-throughput.svg)
+
+| First lane | Default (output tok/s) | Candidate (output tok/s) | Change | Default → candidate p95 (s) | Exact outputs |
+|---|---:|---:|---:|---:|---:|
+| Default | 802.33 | 824.01 | +2.70% | 6.31 → 6.10 | 10/64 |
+| Candidate | 807.25 | 824.02 | +2.08% | 6.30 → 6.10 | 10/64 |
+
+Each lane reproduced all 64 of its own outputs across launch orders.
+The candidate replayed 83 full eight-request tactic graphs per pass,
+with zero fallbacks at that size. The isolated projections differed
+by about 0.1% in paired timings. During serving, the candidate generated
+3.17 tokens per verification versus 3.09 for the default lane.
+[Full projection audit and serving results](../results/fp8_verify_tactics/REPORT.md#rtx-5090-live-qwen38-27b-nvfp4)
+
 ## Jetson Thor · Qwen3.8-27B
 
 All rows use the single-request FlashInfer lanes on a Linux arm64 Jetson
@@ -270,6 +305,27 @@ The Thor report also records Qwen3.5-9B BF16 with the original DFlash
 drafter. Its FlashInfer follow-up changed host load, and the chain lane
 overlapped a download. See the report for the conditions and the separate
 Triton lanes. [Jetson Thor results](reports/2026-11-19-jetson-thor.md)
+
+### FP8 verification projections
+
+The Thor-01 (SM110) probe timed the default cuBLAS tactic and the fastest
+bit-exact candidate on synthetic E4M3 inputs. Each pair below shows
+default → candidate median CUDA graph time per projection. Percentages
+are medians of three paired time reductions.
+
+![Thor-01 time reductions for bit-exact GDN QKVZ and attention QKV candidates against default cuBLAS, measured on synthetic CUDA inputs.](figures/thor-01-fp8-projection-time.svg)
+
+| Verification rows | GDN QKVZ (µs) | Time reduction | Attention QKV (µs) | Time reduction |
+|---:|---:|---:|---:|---:|
+| 48 | 340.45 → 324.62 | 4.65% | 298.29 → 284.72 | 4.55% |
+| 64 | 350.07 → 334.34 | **4.49%** | 312.32 → 294.06 | **5.88%** |
+| 96 | 334.06 → 331.89 | 0.62% | 302.93 → 298.91 | 1.70% |
+| 128 | 339.12 → 336.51 | 0.84% | 309.77 → 306.19 | 1.07% |
+
+The probe excluded 32 of 182 candidate and shape combinations after
+they changed BF16 output bits. The timing comparison covers individual
+projections on Thor-01.
+[Tactics, software versions, and workload](../results/fp8_verify_tactics/REPORT.md#thor-01-synthetic-cuda-measurements) · [Benchmark commands](../benchmarks/sglang/README.md#dflash2-fp8-verification-tactics)
 
 ## Qwen3.8-Flash-Next NVFP4 · MTP
 

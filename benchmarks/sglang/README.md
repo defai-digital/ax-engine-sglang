@@ -58,9 +58,10 @@ at the requested live batch size. The results also record smaller batches.
 
 ## DFlash2 FP8 verification tactics
 
-`ab_fp8_verify.py` runs on one RTX PRO 6000 with SGLang 0.5.23,
+`ab_fp8_verify.py` runs on one RTX PRO 6000 or RTX 5090 with SGLang 0.5.23,
 FlashInfer 0.7.2, and the AX plugin installed. Use local Qwen3.8-27B NVFP4
-and DFlash2 checkpoints. Set `TUNE_IDS` and `EVAL_IDS` to JSON files
+and DFlash2 checkpoints. Capture and qualify profiles separately for each
+GPU model. Set `TUNE_IDS` and `EVAL_IDS` to JSON files
 containing arrays of token-ID lists. Use distinct held-out evaluation prompts
 and keep both files fixed across comparable runs.
 
@@ -77,8 +78,11 @@ python benchmarks/sglang/ab_fp8_verify.py compare \
   --concurrency "$c" --profile "$run/probe/profile.json" --out "$run/compare"
 ```
 
-Repeat at C6, C8, C12, and C16 for 48, 64, 96, and 128 rows. Capture
-defaults to four distinct layers per projection. Check `probe.json` for
+The RTX 5090 C8 run used `--context-length 2048 --kv-tokens 8192
+--mem-fraction-static 0.94` for both server commands. The four supported
+concurrencies are C6, C8, C12, and C16, which use 48, 64, 96, and 128 rows
+when all clients are live. Capture defaults to four distinct layers per
+projection. Check `probe.json` for
 rejected kernels and paired timings. Run `compare` when the probe emits
 `profile.json`. It starts a fresh server for each lane in both launch
 orders and requires verified candidate graph replay at the requested live
