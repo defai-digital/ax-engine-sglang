@@ -7,6 +7,10 @@
   the indicated draft block size.
 - **SGLang + ax-engine-sglang** enables the AX Engine add-on and uses the
   verifier and width shown for that run.
+- **Stock vLLM** is `0.34.0rc1.dev1105+g2f170a0fe` with no plugins, run on
+  the same checkpoint, drafter, prompts and output budget as the table it
+  joins. Its DFlash2 lanes use `num_speculative_tokens: 7`, the drafter's
+  eight-position block.
 
 Each row compares output tokens per second within one workload and platform.
 The reports record checkpoint revisions, request limits and kernel settings.
@@ -95,22 +99,32 @@ was 0.4.0; the later B200 retest used 0.5.1 on the same prompt corpus.
 
 #### BF16
 
-| Clients | Stock AR | Stock DFlash2 | AX tree / chain |
-|---:|---:|---:|---:|
-| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | **184.3** / **163.2** / **94.1** |
-| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **510.8** / **572.0** / **335.1** |
+| Clients | Stock AR | Stock DFlash2 | Stock vLLM DFlash2 | AX tree / chain |
+|---:|---:|---:|---:|---:|
+| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | 135.3 / 120.6 / 73.7 | **184.3** / **163.2** / **94.1** |
+| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **520.8** / **664.0** / **382.0** | 510.8 / 572.0 / 335.1 |
 
 #### NVFP4
 
-| Clients | Stock AR | Stock DFlash2 | AX tree / chain | AX GDN replay |
-|---:|---:|---:|---:|---:|
-| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | **324.7** / **270.9** / **152.2** | 235.8 / 195.2 / 128.9 |
-| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8** / **898.1** / **580.8** |
+| Clients | Stock AR | Stock DFlash2 | Stock vLLM DFlash2 | AX tree / chain | AX GDN replay |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | 279.8 / 266.4 / **154.5** | **324.7** / **270.9** / 152.2 | 235.8 / 195.2 / 128.9 |
+| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | **1,002.3** / **980.1** / **704.0** | 907.7 / 823.3 / 487.0 | 996.8 / 898.1 / 580.8 |
 
 At eight clients, NVFP4 GDN replay raised chat from 505.3 to 580.8 tok/s
-and matched stock on 48 of 48 greedy chat outputs. A reverse-order run
-measured 560.5 against 503.9 tok/s and matched 38 of 48.
-[Latency, checkpoints, and output agreement](../results/rtx_pro_6000_retest/REPORT.md)
+over stock SGLang DFlash2 and matched it on 48 of 48 greedy chat outputs.
+A reverse-order run measured 560.5 against 503.9 tok/s and matched 38 of
+48.
+
+Stock vLLM ran later on the same GPU with the same token IDs, 128 output
+tokens and pass order. The AX tree still led code and math at one client.
+vLLM's DFlash2 led every workload at eight clients on both checkpoints,
+and chat at one client on NVFP4. Its proposer accepted 5.8–6.5 tokens per
+verify on code and math, and about 3.1–3.3 on chat. Stock vLLM refuses
+Flash Next with DFlash2: "Qwen4Exp speculative decoding supports only its
+native MTP checkpoint and linear n-gram proposers". TensorRT-LLM 1.4.0rc3
+lanes are still running.
+[Latency, checkpoints, and output agreement](../results/rtx_pro_6000_retest/REPORT.md) · [Stock vLLM setup](../results/cross_engine_2026-11-25/REPORT.md#rtx-pro-6000-qwen38-27b-and-flash-next-dflash2)
 
 ### Earlier pooled speed sweep
 
@@ -415,6 +429,7 @@ gives code / math / chat output tok/s for that checkpoint's workload.
 | Edge-LLM MTP3 | 39.1 / 37.3 / 28.4 | 13.8 / 12.9 / 10.2 |
 | Edge-LLM DFlash2 chain 8 | 73.0 / 65.7 / 34.5 | 30.1 / 25.1 / 14.0 |
 | Edge-LLM DDTree 32 (`draft_top_k` 4) | 71.4 / 68.8 / **44.2** | 30.1 / 28.8 / 18.2 |
+| Stock vLLM DFlash2 chain 8 | 65.9 / 57.6 / 33.1 | 28.7 / 24.4 / 13.6 |
 | Stock SGLang + DFlash2 chain 16 | 93.0 / 73.5 / 30.6 | 43.1 / 29.6 / 12.5 |
 | SGLang + ax-engine-sglang tree 32 | **106.1 / 92.1** / 43.1 | **47.5 / 37.6 / 18.3** |
 
@@ -422,7 +437,13 @@ Edge-LLM's AR matched stock SGLang AR and its MTP3 ran 0–8% faster. Its
 DFlash2 chain verifies the drafter's `block_size` of 8 tokens per round,
 against SGLang's 16. The add-on's tree 32 ran 1.49 / 1.34 / 0.98 times as
 fast as Edge-LLM's DDTree 32 on NVFP4 and 1.58 / 1.31 / 1.01 times on BF16.
-[Edge-LLM setup and failed lanes](../results/edgellm_thor/REPORT.md)
+Stock vLLM `0.34.0rc1.dev1105+g2f170a0fe` ran the same drafter with
+`num_speculative_tokens: 7`. It accepted 7.6 / 6.2 / 3.5 tokens per verify
+on NVFP4, but this build runs speculative verification on Thor without CUDA
+graphs. Tree 32 ran 1.61 / 1.60 / 1.30 times as fast on NVFP4 and
+1.66 / 1.54 / 1.35 times on BF16. Stock vLLM refuses Flash Next with
+DFlash2.
+[Edge-LLM setup and failed lanes](../results/edgellm_thor/REPORT.md) · [Stock vLLM lanes](../results/cross_engine_2026-11-25/REPORT.md#jetson-thor-qwen38-27b-dflash2)
 
 The Thor report also records Qwen3.5-9B BF16 with the original DFlash
 drafter. Its FlashInfer follow-up changed host load, and the chain lane
@@ -515,6 +536,33 @@ The probe excluded 32 of 182 candidate and shape combinations after
 they changed BF16 output bits. The timing comparison covers individual
 projections on Thor-01.
 [Tactics, software versions, and workload](../results/fp8_verify_tactics/REPORT.md#thor-01-synthetic-cuda-measurements) · [Benchmark commands](../benchmarks/sglang/README.md#dflash2-fp8-verification-tactics)
+
+## Qwen3.8-Flash-Next BF16 · MTP
+
+BF16 weights are about 360 GB. Two B200s served `Qwen/Qwen3.8-Flash-Next`
+with tensor parallelism of 2. The PLE table stayed in pinned host memory.
+Package 0.5.1, SGLang 0.5.23, 24 greedy prompts per workload, a 256-token
+limit, and two passes. Cells are code / math / chat output tok/s. This is
+not the 128-token single-GPU retest.
+
+![Two B200s, Qwen3.8-Flash-Next BF16. Stock vLLM MTP3 leads at four and sixteen clients. AX MTP7 leads code and math at one client.](figures/b200x2-flash-next-bf16-throughput.svg)
+
+| Clients | Stock SGLang MTP3 | Stock vLLM MTP3 | AX MTP7 |
+|---:|---:|---:|---:|
+| 1 | 406.7 / 430.3 / 336.9 | 508.9 / 483.5 / **369.5** | **535.9 / 506.6** / 303.8 |
+| 4 | 877.1 / 979.5 / 754.3 | **1,260.3 / 1,270.7 / 945.0** | 943.2 / 1,029.8 / 654.3 |
+| 16 | 1,042.3 / 2,117.8 / 1,599.7 | **2,589.4 / 2,671.9 / 1,943.0** | 2,078.6 / 2,230.6 / 1,443.4 |
+
+Mean acceptance length was 3.93 / 3.50 / 2.64 for stock SGLang MTP3,
+3.92 / 3.52 / 2.62 for stock vLLM MTP3, and 7.40 / 5.56 / 3.12 for AX
+MTP7. The two MTP3 lanes accepted the same number of tokens per verify.
+Stock autoregressive rows and the still-pending TensorRT-LLM lanes are in
+the report.
+[Two-B200 report](../results/cross_engine_2026-11-25/REPORT.md#two-b200-gpus-qwen38-flash-next-bf16)
+
+An earlier two-B300 TP2 run used package 0.2.0, the same prompt file, and
+the second pass only. B300 is not a recorded board on the platform list.
+[Two-B300 report](../results/b300-flash-next-bf16/REPORT.md)
 
 ## Qwen3.8-Flash-Next NVFP4 · MTP
 

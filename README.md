@@ -1,6 +1,6 @@
 # AX Engine for SGLang
 
-**AX Engine's Linux CUDA edition for NVIDIA GPUs on amd64 and arm64.**
+**AX Engine's Linux CUDA edition for NVIDIA Hopper, NVIDIA Blackwell, and the NVIDIA Jetson series.**
 
 `ax-engine-sglang` is a Python add-on for SGLang. SGLang runs the server,
 schedules requests, and executes the model on CUDA. The add-on changes
@@ -14,10 +14,19 @@ and the benchmark record schema. Serving paths and checkpoints stay
 specific to each runtime.
 [Documentation](docs/README.md) · [How it works](docs/design.md) · [Benchmarks](docs/performance.md) · [AX Engine](https://github.com/defai-digital/ax-engine)
 
+## Contents
+
+- [Quick start](#quick-start)
+- [What it accelerates](#what-it-accelerates)
+- [Supported platforms](#supported-platforms)
+- [Measured throughput](#measured-throughput): [Qwen3.8-27B NVFP4](#qwen38-27b-nvfp4) · [Flash Next NVFP4](#qwen38-flash-next-nvfp4) · [Flash Next BF16](#qwen38-flash-next-bf16) · [Exact outputs](#exact-outputs)
+- [Repository](#repository)
+- [License](#license)
+
 ## Quick start
 
-Use Python 3.11 or 3.12 on Linux with an NVIDIA GPU and a CUDA
-13-compatible driver. SGLang 0.5.23 is the reference runtime. Install the
+Use Python 3.11 or 3.12 on Linux with a Hopper, Blackwell, or Jetson GPU
+and a CUDA 13-compatible driver. SGLang 0.5.23 is the reference runtime. Install the
 v0.5.1 wheel in a fresh virtual environment:
 
 ```bash
@@ -57,18 +66,32 @@ SGLang supports them. The add-on adds these routes.
 |---|---|---|
 | Qwen3.5-9B | BF16 | DFlash v1 tree on an eligible request |
 | Qwen3.8-27B dense | BF16 and NVFP4 | DFlash2 tree for one eligible request, and chain verification when requests are grouped. Accepted-prefix GDN replay is an experimental chain option. `AX_BTREE` (off by default) gives each request in a batch of 2–8 its own tree in one target pass |
-| Qwen3.8-Flash-Next | NVFP4 | SGLang MTP plus a QSA pending-ring fix. This target does not expose the auxiliary states DFlash2 reads, so the tree is unavailable |
+| Qwen3.8-Flash-Next (Qwen4-Exp) | BF16 and NVFP4 | SGLang MTP plus a QSA pending-ring fix. This target does not expose the auxiliary states DFlash2 reads, so the tree is unavailable. BF16 needs two GPUs |
 
 A route is faster when the tokens accepted per target pass save more time
 than drafting and verification add.
 [Model routes](docs/README.md#model-routes) · [Design](docs/design.md)
 
-## Platforms
+## Supported platforms
 
-| Host | Recorded NVIDIA GPUs |
-|---|---|
-| Linux amd64 | B200, RTX PRO 6000 Blackwell Server Edition, GeForce RTX 5090 |
-| Linux arm64 | Jetson Thor |
+On Linux amd64 the supported platforms are NVIDIA Hopper and NVIDIA
+Blackwell. On Linux arm64 it is the NVIDIA Jetson series. A row is a board
+with a recorded run. The platform name does not extend that record to
+every other board in the family. Compute capability is the kernel
+boundary: H100 and H200 are SM90, B200 is SM100, the RTX boards are SM120,
+and Jetson Thor is SM110.
+
+SGLang 0.5.22 served Qwen3.8-27B BF16 on one H200. H100 is the same SM90
+target. The throughput tables below are the Blackwell and Jetson runs.
+[H200 baselines](results/track_a_stage0_h200/REPORT.md)
+
+| Host | Platform | Recorded board |
+|---|---|---|
+| Linux amd64 (x86_64) | NVIDIA Hopper | H200 (SM90). H100 is the same SM90 target |
+| Linux amd64 (x86_64) | NVIDIA Blackwell | B200 (SM100) |
+| Linux amd64 (x86_64) | NVIDIA Blackwell | RTX PRO 6000 Blackwell Server Edition (SM120) |
+| Linux amd64 (x86_64) | NVIDIA Blackwell | GeForce RTX 5090 (SM120) |
+| Linux arm64 (aarch64) | NVIDIA Jetson series | Jetson Thor (SM110) |
 
 The plugin also accepts SGLang 0.5.22 when its source anchors match. On
 0.5.22, supply the launch settings yourself. `AX_AUTO_DEFAULTS` fills them
@@ -130,7 +153,17 @@ stayed with a three-step MTP window.
 | RTX PRO 6000 | 1 | 183.5 / 164.1 / 134.0 | 218.9 / 174.0 / 114.7 | AX MTP3, 135.0 |
 | RTX PRO 6000 | 8 | 679.0 / 582.6 / 455.4 | 728.0 / 542.7 / 356.5 | stock MTP3, 455.4 |
 
-[Flash Next tables](docs/performance.md#qwen38-flash-next-nvfp4-mtp)
+[Flash Next NVFP4 tables](docs/performance.md#qwen38-flash-next-nvfp4-mtp)
+
+### Qwen3.8-Flash-Next BF16
+
+BF16 weights are about 360 GB, so this checkpoint does not fit one B200.
+Two B200s served it with tensor parallelism of 2 and the PLE table in
+pinned host memory. The greedy limit was 256 tokens at concurrency 1, 4,
+and 16. AX MTP7 led code and math at one client. Stock vLLM MTP3 led chat
+there, and led every workload at 4 and 16 clients. TensorRT-LLM was still
+pending.
+[Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
 
 ### Exact outputs
 

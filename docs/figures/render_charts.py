@@ -15,6 +15,7 @@ AR = "#a3adb9"          # stock autoregressive
 STOCK = "#6b7a8d"       # stock speculative route
 STOCK2 = "#3f4d60"      # second stock speculative route
 VLLM = "#8f86b5"        # stock vLLM
+VLLM_DEEP = "#5b4f8c"   # stock vLLM speculative route when its AR is also shown
 EDGE = ["#e0c4a2", "#c99a64", "#a9703a", "#7a4c22"]   # TensorRT Edge-LLM AR, MTP3, chain 8, DDTree 32
 AX_PALE = "#c4e6cf"
 AX_LIGHT = "#8fd0a6"
@@ -25,8 +26,8 @@ WORKLOADS = ["Code", "Math", "Chat"]
 
 
 def split(*cells):
-    """'a / b / c' strings to per-workload floats."""
-    return [[float(x.replace(",", "")) for x in cell.split(" / ")] for cell in cells]
+    """'a / b / c' strings to per-workload floats; None for a lane that has no result yet."""
+    return [[None] * 3 if cell is None else [float(x.replace(",", "")) for x in cell.split(" / ")] for cell in cells]
 
 
 def main():
@@ -46,6 +47,28 @@ def main():
         xlabel="End-to-end output tokens per second · same scale in all panels",
         description="Stock AR, stock MTP3 and AX Engine MTP7 at concurrency 1, 4 and 16 for code, math and chat. "
                     "MTP7 leads on code and math; stock MTP3 leads on chat.",
+    )
+
+    bar_chart(
+        OUT / "b200x2-flash-next-bf16-throughput.svg",
+        title="Two B200 GPUs · Qwen3.8-Flash-Next BF16",
+        subtitle="TP2 · PLE in pinned host memory · 24 greedy prompts per workload · 256-token limit · two passes",
+        series=[("Stock SGLang AR", AR), ("Stock vLLM AR", VLLM), ("Stock SGLang MTP3", STOCK),
+                ("Stock vLLM MTP3", VLLM_DEEP), ("AX Engine MTP7", AX_DEEP)],
+        panels=[
+            {"title": "Concurrency 1", "categories": WORKLOADS,
+             "values": split("215.9 / 230.1 / 227.9", "220.1 / 223.6 / 223.3", "406.7 / 430.3 / 336.9",
+                             "508.9 / 483.5 / 369.5", "535.9 / 506.6 / 303.8")},
+            {"title": "Concurrency 4", "categories": WORKLOADS,
+             "values": split("549.2 / 644.8 / 615.0", "598.6 / 622.4 / 597.8", "877.1 / 979.5 / 754.3",
+                             "1,260.3 / 1,270.7 / 945.0", "943.2 / 1,029.8 / 654.3")},
+            {"title": "Concurrency 16", "categories": WORKLOADS,
+             "values": split("980.5 / 1,301.5 / 1,239.6", "1,233.5 / 1,383.4 / 1,278.4", "1,042.3 / 2,117.8 / 1,599.7",
+                             "2,589.4 / 2,671.9 / 1,943.0", "2,078.6 / 2,230.6 / 1,443.4")},
+        ],
+        xlabel="End-to-end output tokens per second · same scale in all panels",
+        description="Stock SGLang AR, stock vLLM AR, stock SGLang MTP3, stock vLLM MTP3 and AX Engine MTP7 at "
+                    "concurrency 1, 4 and 16. Stock vLLM MTP3 leads at C4 and C16; AX MTP7 leads code and math at C1.",
     )
 
     bar_chart(
@@ -128,36 +151,41 @@ def main():
     bar_chart(
         OUT / "rtx-pro-6000-27b-bf16-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B BF16",
-        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree / chain", AX_DEEP)],
+        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX_DEEP)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
-             "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "184.3 / 163.2 / 94.1")},
+             "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "135.3 / 120.6 / 73.7",
+                             "184.3 / 163.2 / 94.1")},
             {"title": "8 concurrent clients", "categories": WORKLOADS,
-             "values": split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "510.8 / 572.0 / 335.1")},
+             "values": split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "520.8 / 664.0 / 382.0",
+                             "510.8 / 572.0 / 335.1")},
         ],
-        description="BF16 throughput at one and eight clients for stock AR, stock DFlash2 and the AX tree/chain.",
+        description="BF16 throughput at one and eight clients for stock AR, stock DFlash2, stock vLLM DFlash2 and the "
+                    "AX tree/chain.",
         **retest,
     )
-    nvfp4 = [("1 concurrent client", "54.2 / 54.1 / 54.4", "229.3 / 188.5 / 125.2", "324.7 / 270.9 / 152.2",
-              "235.8 / 195.2 / 128.9"),
-             ("8 concurrent clients", "376.0 / 377.3 / 367.0", "819.2 / 760.5 / 505.3", "907.7 / 823.3 / 487.0",
-              "996.8 / 898.1 / 580.8")]
+    nvfp4 = [("1 concurrent client", "54.2 / 54.1 / 54.4", "229.3 / 188.5 / 125.2", "279.8 / 266.4 / 154.5",
+              "324.7 / 270.9 / 152.2", "235.8 / 195.2 / 128.9"),
+             ("8 concurrent clients", "376.0 / 377.3 / 367.0", "819.2 / 760.5 / 505.3", "1,002.3 / 980.1 / 704.0",
+              "907.7 / 823.3 / 487.0", "996.8 / 898.1 / 580.8")]
     bar_chart(
         OUT / "rtx-pro-6000-27b-nvfp4-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
-        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree / chain", AX), ("AX GDN replay", AX_DEEP)],
+        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX),
+                ("AX GDN replay", AX_DEEP)],
         panels=[{"title": t, "categories": WORKLOADS, "values": split(*cells)} for t, *cells in nvfp4],
-        description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree/chain and "
-                    "AX GDN replay.",
+        description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, stock vLLM DFlash2, the "
+                    "AX tree/chain and AX GDN replay.",
         **retest,
     )
-    bf16_c8 = split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "510.8 / 572.0 / 335.1")
+    bf16_c8 = split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "520.8 / 664.0 / 382.0",
+                    "510.8 / 572.0 / 335.1")
     bar_chart(
         OUT / "rtx-pro-6000-27b-retest-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B at concurrency 8",
         subtitle="128 greedy output tokens per request · two passes per route",
-        series=[("Stock SGLang AR", AR), ("Stock DFlash2, width 8", STOCK), ("AX tree 32 / chain 8", AX),
-                ("AX GDN replay, width 8", AX_DEEP)],
+        series=[("Stock SGLang AR", AR), ("Stock DFlash2, width 8", STOCK), ("Stock vLLM DFlash2, width 8", VLLM),
+                ("AX tree 32 / chain 8", AX), ("AX GDN replay, width 8", AX_DEEP)],
         panels=[{"title": "BF16", "categories": WORKLOADS, "values": bf16_c8 + [[None, None, None]],
                  "missing": "not run"},
                 {"title": "NVFP4", "categories": WORKLOADS, "values": split(*nvfp4[1][1:])}],
@@ -290,19 +318,20 @@ def main():
             ("Edge-LLM MTP3", EDGE[1], "39.1 / 37.3 / 28.4", "13.8 / 12.9 / 10.2"),
             ("Edge-LLM DFlash2 chain 8", EDGE[2], "73.0 / 65.7 / 34.5", "30.1 / 25.1 / 14.0"),
             ("Edge-LLM DDTree 32", EDGE[3], "71.4 / 68.8 / 44.2", "30.1 / 28.8 / 18.2"),
+            ("Stock vLLM DFlash2 chain 8", VLLM, "65.9 / 57.6 / 33.1", "28.7 / 24.4 / 13.6"),
             ("Stock SGLang DFlash2 chain 16", STOCK2, "93.0 / 73.5 / 30.6", "43.1 / 29.6 / 12.5"),
             ("AX Engine tree 32", AX_DEEP, "106.1 / 92.1 / 43.1", "47.5 / 37.6 / 18.3")]
     bar_chart(
         OUT / "jetson-thor-27b-throughput.svg",
         title="Jetson Thor · Qwen3.8-27B",
-        subtitle="Concurrency 1 · arm64 · SGLang 0.5.23 and TensorRT Edge-LLM 0.12.0 · same checkpoint, drafter, prompts",
+        subtitle="Concurrency 1 · arm64 · SGLang 0.5.23, vLLM 0.34.0rc1 and TensorRT Edge-LLM 0.12.0 · same checkpoint, drafter, prompts",
         series=[(name, color) for name, color, *_ in thor],
         panels=[{"title": "BF16 · 8 prompts · 384-token limit", "categories": WORKLOADS,
                  "values": split(*[row[3] for row in thor])},
                 {"title": "NVFP4 · 12 prompts · 512-token limit", "categories": WORKLOADS,
                  "values": split(*[row[2] for row in thor])}],
         xlabel="Output tokens per second · each precision has its own scale", share_scale=False,
-        description="Stock SGLang, TensorRT Edge-LLM and the add-on, grouped by BF16 or NVFP4 and workload.",
+        description="Stock SGLang, stock vLLM, TensorRT Edge-LLM and the add-on, grouped by BF16 or NVFP4 and workload.",
     )
 
     bar_chart(
