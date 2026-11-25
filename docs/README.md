@@ -55,7 +55,6 @@ supply the launch settings explicitly. `AX_AUTO_DEFAULTS` fills them on
 
 | Architecture | Recorded deployment | Evidence |
 |---|---|---|
-| Linux amd64 | Two NVIDIA B300 GPUs | [Flash Next BF16 serving](../results/b300-flash-next-bf16/REPORT.md) |
 | Linux amd64 | NVIDIA B200 (SM100) | [27B and Flash Next serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) |
 | Linux amd64 | NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
 | Linux amd64 | NVIDIA GeForce RTX 5090 (SM120) | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |
@@ -76,7 +75,7 @@ record applies to its checkpoint, GPU and serving configuration.
 |---|---|---|---|
 | Qwen3.5-9B (Gated DeltaNet) | BF16 | DFlash v1 tree on eligible single requests. The tree launcher takes a matching drafter and n-gram table | [Jetson Thor 9B benchmark](reports/2026-11-19-jetson-thor.md#2-qwen35-9b-bf16-dflash-drafter-z-labqwen35-9b-dflash) |
 | Qwen3.8-27B dense (Gated DeltaNet) | BF16 and NVFP4 | DFlash2 tree for eligible single requests and chain verification for grouped requests. The current default tree has 32 nodes. Accepted-prefix GDN replay is an experimental chain option | [Dense 27B performance](performance.md) |
-| Qwen3.8-Flash-Next (Qwen4-Exp) | BF16 on two B300 GPUs, and NVFP4 | SGLang MTP with the QSA pending-ring fix. DFlash2 stays unavailable: this target does not expose the auxiliary hidden states the drafter reads | [BF16 on two B300s](../results/b300-flash-next-bf16/REPORT.md) · [NVFP4 serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Single Thor](reports/2026-11-21-flash-next-single-thor.md) |
+| Qwen3.8-Flash-Next (Qwen4-Exp) | NVFP4 | SGLang MTP with the QSA pending-ring fix. DFlash2 stays unavailable: this target does not expose the auxiliary hidden states the drafter reads | [NVFP4 serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Single Thor](reports/2026-11-21-flash-next-single-thor.md) |
 
 ### NVFP4 deployment
 

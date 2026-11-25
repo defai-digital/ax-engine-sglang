@@ -76,7 +76,7 @@ sibling AX engines. [Performance review](docs/decisions/2026-11-21-dflash-hotpat
 
 | Host | NVIDIA configurations with recorded runs |
 |---|---|
-| Linux amd64 (x86_64) | B300, B200, RTX PRO 6000, and GeForce RTX 5090 |
+| Linux amd64 (x86_64) | B200, RTX PRO 6000, and GeForce RTX 5090 |
 | Linux arm64 (aarch64) | Jetson Thor |
 
 SGLang 0.5.23 is the reference runtime. Use a CUDA-enabled SGLang environment
@@ -94,7 +94,7 @@ SGLang. The table lists the routes accelerated by this add-on.
 |---|---|---|
 | Qwen3.5-9B | BF16 | DFlash v1 tree verification on eligible requests |
 | Qwen3.8-27B dense | BF16 and NVFP4 | DFlash2 tree verification for eligible single requests and chain verification for grouped requests; experimental per-request trees for two to eight grouped requests (`AX_BTREE`) |
-| Qwen3.8-Flash-Next (Qwen4-Exp) | BF16 and NVFP4 | SGLang MTP with the QSA pending-ring fix. DFlash2 tree serving remains unavailable |
+| Qwen3.8-Flash-Next (Qwen4-Exp) | NVFP4 | SGLang MTP with the QSA pending-ring fix. DFlash2 tree serving remains unavailable |
 
 For NVFP4, load an existing SGLang-compatible NVFP4 checkpoint with the
 GPU kernels required by that checkpoint. Dense 27B and Flash Next were
@@ -102,7 +102,7 @@ verified on separate serving routes. [Model routes and precision support](docs/R
 
 ## Measured throughput
 
-[B300](#b300) · [B200](#b200) · [RTX PRO 6000](#rtx-pro-6000) · [GeForce RTX 5090](#geforce-rtx-5090) · [Jetson Thor](#jetson-thor)
+[B200](#b200) · [RTX PRO 6000](#rtx-pro-6000) · [GeForce RTX 5090](#geforce-rtx-5090) · [Jetson Thor](#jetson-thor)
 
 Results are grouped by GPU, then by model (Qwen3.8-27B, then Qwen3.8-Flash-Next).
 
@@ -110,36 +110,9 @@ Rates are output tokens per second. A cell written as three numbers is
 code / math / chat. The B200, RTX PRO 6000, and Flash Next serving retests
 share one protocol: SGLang 0.5.23, eight request slots, 128 greedy output
 tokens, and two streamed passes on the same prompt corpus. The Jetson,
-RTX 5090, B300, and 1,024-token studies use the budgets named in their
+RTX 5090, and 1,024-token studies use the budgets named in their
 headings. Compare rates inside one table. Launch commands and per-pass
 results are in [Serving performance](docs/performance.md).
-
-### B300
-
-#### Two B300 GPUs · Qwen3.8-Flash-Next BF16
-
-SGLang 0.5.23 ran the BF16 checkpoint with TP2 and an on-GPU BF16 KV cache.
-The table and chart show end-to-end output tok/s from the second pass, with
-24 greedy prompts per family and a 256-token output limit.
-
-![Qwen3.8-Flash-Next BF16 on two B300 GPUs. Stock AR, stock MTP3, and AX Engine MTP7 throughput at concurrency 1, 4, and 16.](docs/figures/b300-flash-next-bf16-throughput.svg)
-
-| Workload | Concurrency | Stock SGLang AR | Stock SGLang MTP3 | AX Engine MTP7 |
-|---|---:|---:|---:|---:|
-| Code | 1 | 184.9 | 306.6 | **390.0** |
-| Code | 4 | 389.6 | 520.7 | **615.4** |
-| Code | 16 | 794.5 | 1,199.7 | **1,649.8** |
-| Math | 1 | 206.8 | 353.9 | **409.9** |
-| Math | 4 | 550.4 | 649.4 | **735.2** |
-| Math | 16 | 1,258.0 | 1,606.1 | **1,708.0** |
-| Chat | 1 | 207.2 | **294.4** | 268.0 |
-| Chat | 4 | 534.1 | **584.5** | 521.1 |
-| Chat | 16 | 1,069.6 | **1,272.6** | 1,169.6 |
-
-MTP7 beat stock MTP3 by **18–38% on code** and **6–16% on math**.
-Stock MTP3 led on chat. Both MTP routes matched AR on six of seven greedy
-references. AR and MTP7 passed all 28 sampled distribution checks.
-[Full B300 benchmark and launch settings](results/b300-flash-next-bf16/REPORT.md)
 
 ### B200
 

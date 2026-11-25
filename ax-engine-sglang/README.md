@@ -162,9 +162,9 @@ and can run without an n-gram table.
 
 ## Benchmark results
 
-Grouped by GPU: B200, RTX PRO 6000, RTX 5090, then Jetson Thor (B300 results are in the
-[top-level README](../README.md#measured-throughput)). Within a GPU, Qwen3.8-27B comes before
-Qwen3.8-Flash-Next.
+Grouped by GPU: B200, RTX PRO 6000, RTX 5090, then Jetson Thor. Within a GPU,
+Qwen3.8-27B comes before Qwen3.8-Flash-Next. The same grouping is in the
+[top-level README](../README.md#measured-throughput).
 
 ### B200
 
