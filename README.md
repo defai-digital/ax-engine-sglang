@@ -1,6 +1,8 @@
-# AX Engine for SGLang
+<p align="center">
+  <img src="docs/images/ax-engine-icon.png" width="128" alt="">
+</p>
 
-<img src="docs/images/ax-engine-icon.png" width="96" alt="AX Engine">
+# AX Engine for SGLang
 
 [![CI](https://img.shields.io/github/actions/workflow/status/defai-digital/ax-engine-sglang/ci.yml?branch=main&label=CI)](https://github.com/defai-digital/ax-engine-sglang/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/ax-engine-sglang?label=PyPI)](https://pypi.org/project/ax-engine-sglang/)
