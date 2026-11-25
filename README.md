@@ -16,12 +16,26 @@ specific to each runtime.
 
 ## Contents
 
+- [Components and workflow](#components-and-workflow)
 - [Quick start](#quick-start)
 - [What it accelerates](#what-it-accelerates)
 - [Supported platforms](#supported-platforms)
 - [Measured throughput](#measured-throughput): [Qwen3.8-27B NVFP4](#qwen38-27b-nvfp4) · [Flash Next NVFP4](#qwen38-flash-next-nvfp4) · [Flash Next BF16](#qwen38-flash-next-bf16) · [Exact outputs](#exact-outputs)
 - [Repository](#repository)
 - [License](#license)
+
+## Components and workflow
+
+![What AX Engine adds to SGLang](docs/images/ax-engine-sglang-components.svg)
+
+Clients still call SGLang. `ax-engine-sglang serve` loads the plugin into
+that server and forwards its flags. SGLang keeps the HTTP API, the
+scheduler, CUDA execution, and the stock autoregressive, MTP, and DFlash
+routes. The plugin adds the verify shape: a DFlash tree for one eligible
+greedy request, a chain when requests are grouped, and a wider QSA ring so
+Flash Next MTP can check a longer draft. The target model still decides
+every emitted token.
+[How it works](docs/design.md)
 
 ## Quick start
 
@@ -80,9 +94,10 @@ uses the same kernels; it is not a second report. On Linux amd64 that is
 NVIDIA Hopper and NVIDIA Blackwell. On Linux arm64 it is NVIDIA Jetson at
 SM110, which is Jetson Thor.
 
-SGLang 0.5.22 served Qwen3.8-27B BF16 on one H200 without the add-on.
-The add-on's current routes have no SM90 measurement yet. The throughput
-tables below are the Blackwell and Jetson runs.
+Hopper at SM90 covers H100 and H200. SGLang 0.5.22 served Qwen3.8-27B
+BF16 on one H200 without the add-on. The add-on's current routes have no
+SM90 measurement yet. The throughput tables below are the Blackwell and
+Jetson runs.
 [H200 baselines](results/track_a_stage0_h200/REPORT.md)
 
 | Platform | Host | Capability | Measured board |

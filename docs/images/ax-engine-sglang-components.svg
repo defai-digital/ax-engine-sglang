@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1248" width="960" height="1248" role="img">
+  <title>What AX Engine adds to SGLang</title>
+  <desc>SGLang keeps the HTTP server, scheduler, CUDA execution, and stock AR, MTP, and DFlash. AX Engine adds the verify shape: a DFlash tree for one eligible greedy request, a chain when requests are grouped, and a wider QSA ring so Flash Next MTP can check a longer draft. One step admits, selects that shape, drafts, verifies on the target, and streams only the accepted tokens.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1.4 L 8.2 5 L 0 8.6 Z" fill="#8aa0b8"/>
+    </marker>
+  </defs>
+  <rect width="960" height="1248" fill="#ffffff"/>
+
+  <text x="32" y="42" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="700">AX Engine for SGLang</text>
+  <text x="32" y="68" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="15">What the add-on changes, and one verification step</text>
+
+  <text x="32" y="108" fill="#1b3a4b" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">COMPONENTS</text>
+
+  <rect x="32" y="122" width="896" height="72" rx="12" fill="#f8f4ef" stroke="#e4d5c4"/>
+  <text x="48" y="150" fill="#6b4f3a" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Callers</text>
+  <text x="48" y="174" fill="#5e5146" font-family="Helvetica, Arial, sans-serif" font-size="14">OpenAI-compatible clients. The HTTP API stays SGLang's.</text>
+
+  <line x1="480" y1="194" x2="480" y2="222" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="32" y="230" width="896" height="248" rx="14" fill="#f4f7fb" stroke="#d3deea"/>
+  <text x="48" y="258" fill="#1b3a4b" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">SGLANG</text>
+  <text x="128" y="258" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="13">Unchanged. The add-on does not replace the server.</text>
+
+  <rect x="48" y="276" width="276" height="180" rx="10" fill="#ffffff" stroke="#d5deea"/>
+  <text x="64" y="304" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">SERVER</text>
+  <text x="64" y="332" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">HTTP and scheduler</text>
+  <text x="64" y="360" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Admits requests, builds the</text>
+  <text x="64" y="380" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">batch, and owns the KV cache.</text>
+  <text x="64" y="408" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Streams the accepted tokens.</text>
+
+  <rect x="342" y="276" width="276" height="180" rx="10" fill="#ffffff" stroke="#d5deea"/>
+  <text x="358" y="304" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">CUDA</text>
+  <text x="358" y="332" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Model execution</text>
+  <text x="358" y="360" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Loads the target and drafter.</text>
+  <text x="358" y="380" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Runs CUDA graphs and the</text>
+  <text x="358" y="408" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">attention kernels.</text>
+
+  <rect x="636" y="276" width="276" height="180" rx="10" fill="#ffffff" stroke="#d5deea"/>
+  <text x="652" y="304" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">STOCK ROUTES</text>
+  <text x="652" y="332" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">AR, MTP, DFlash</text>
+  <text x="652" y="360" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Stay available wherever</text>
+  <text x="652" y="380" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">SGLang already supports them.</text>
+  <text x="652" y="408" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">The target still samples.</text>
+
+  <line x1="480" y1="478" x2="480" y2="508" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="32" y="516" width="896" height="268" rx="14" fill="#eef8f2" stroke="#b7e0c8"/>
+  <text x="48" y="544" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">AX ENGINE ADDS</text>
+  <text x="188" y="544" fill="#3d6b52" font-family="Helvetica, Arial, sans-serif" font-size="13">The verify shape. Loaded by ax-engine-sglang serve.</text>
+
+  <rect x="48" y="562" width="276" height="198" rx="10" fill="#ffffff" stroke="#b7e0c8"/>
+  <text x="64" y="590" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">ONE REQUEST</text>
+  <text x="64" y="618" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">DFlash tree</text>
+  <text x="64" y="646" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">An eligible greedy request</text>
+  <text x="64" y="666" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">verifies a 32-node lattice</text>
+  <text x="64" y="686" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">in one target pass.</text>
+  <text x="64" y="714" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">doctor checks this before</text>
+  <text x="64" y="734" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">any weights load.</text>
+
+  <rect x="342" y="562" width="276" height="198" rx="10" fill="#ffffff" stroke="#b7e0c8"/>
+  <text x="358" y="590" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">GROUPED REQUESTS</text>
+  <text x="358" y="618" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">DFlash chain</text>
+  <text x="358" y="646" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">A width-8 chain per request.</text>
+  <text x="358" y="666" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">Optional accepted-prefix</text>
+  <text x="358" y="686" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">GDN replay on that chain.</text>
+  <text x="358" y="714" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">AX_BTREE, off by default,</text>
+  <text x="358" y="734" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">gives each request a tree.</text>
+
+  <rect x="636" y="562" width="276" height="198" rx="10" fill="#ffffff" stroke="#b7e0c8"/>
+  <text x="652" y="590" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.1">FLASH NEXT</text>
+  <text x="652" y="618" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Longer MTP window</text>
+  <text x="652" y="646" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">A wider QSA pending ring.</text>
+  <text x="652" y="666" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">MTP can verify more draft</text>
+  <text x="652" y="686" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">tokens without losing keys.</text>
+  <text x="652" y="714" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">This target has no DFlash</text>
+  <text x="652" y="734" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">auxiliary state, so no tree.</text>
+
+  <text x="32" y="816" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="13">The target model still decides every emitted token. Only the accepted prefix advances its cache.</text>
+
+  <text x="32" y="858" fill="#1b3a4b" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1.4">ONE VERIFY STEP</text>
+
+  <rect x="32" y="874" width="282" height="156" rx="10" fill="#f4f7fb" stroke="#d3deea"/>
+  <circle cx="54" cy="898" r="12" fill="#1b3a4b"/>
+  <text x="54" y="903" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">1</text>
+  <text x="74" y="903" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Request</text>
+  <text x="248" y="902" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">SGLANG</text>
+  <text x="48" y="934" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">The client calls SGLang's</text>
+  <text x="48" y="954" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">HTTP API. serve only loads</text>
+  <text x="48" y="974" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">the plugin and forwards flags.</text>
+
+  <line x1="316" y1="952" x2="334" y2="952" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="339" y="874" width="282" height="156" rx="10" fill="#f4f7fb" stroke="#d3deea"/>
+  <circle cx="361" cy="898" r="12" fill="#1b3a4b"/>
+  <text x="361" y="903" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">2</text>
+  <text x="381" y="903" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Schedule</text>
+  <text x="555" y="902" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">SGLANG</text>
+  <text x="355" y="934" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">SGLang admits the batch</text>
+  <text x="355" y="954" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">and decides which requests</text>
+  <text x="355" y="974" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">run in this step.</text>
+
+  <line x1="623" y1="952" x2="641" y2="952" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="646" y="874" width="282" height="156" rx="10" fill="#eef8f2" stroke="#b7e0c8"/>
+  <circle cx="668" cy="898" r="12" fill="#1f6b45"/>
+  <text x="668" y="903" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">3</text>
+  <text x="688" y="903" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Select</text>
+  <text x="868" y="902" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">AX</text>
+  <text x="662" y="934" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">One eligible request: tree.</text>
+  <text x="662" y="954" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">A group: chain. Flash Next:</text>
+  <text x="662" y="974" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">the longer MTP window.</text>
+
+  <text x="480" y="1056" fill="#8a8178" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="1.2">THEN</text>
+
+  <rect x="32" y="1070" width="282" height="148" rx="10" fill="#f4f7fb" stroke="#d3deea"/>
+  <circle cx="54" cy="1094" r="12" fill="#1b3a4b"/>
+  <text x="54" y="1099" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">4</text>
+  <text x="74" y="1099" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Draft</text>
+  <text x="248" y="1098" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">SGLANG</text>
+  <text x="48" y="1130" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">DFlash2 or the MTP head</text>
+  <text x="48" y="1150" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">proposes the candidates.</text>
+  <text x="48" y="1170" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">Those drafters are stock.</text>
+
+  <line x1="316" y1="1144" x2="334" y2="1144" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="339" y="1070" width="282" height="148" rx="10" fill="#eef8f2" stroke="#b7e0c8"/>
+  <circle cx="361" cy="1094" r="12" fill="#1f6b45"/>
+  <text x="361" y="1099" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">5</text>
+  <text x="381" y="1099" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Verify</text>
+  <text x="578" y="1098" fill="#1f6b45" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">AX</text>
+  <text x="355" y="1130" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">One target pass checks them.</text>
+  <text x="355" y="1150" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">Keep the accepted prefix.</text>
+  <text x="355" y="1170" fill="#24543a" font-family="Helvetica, Arial, sans-serif" font-size="13">Drop the rest.</text>
+
+  <line x1="623" y1="1144" x2="641" y2="1144" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="646" y="1070" width="282" height="148" rx="10" fill="#f4f7fb" stroke="#d3deea"/>
+  <circle cx="668" cy="1094" r="12" fill="#1b3a4b"/>
+  <text x="668" y="1099" fill="#ffffff" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="700" text-anchor="middle">6</text>
+  <text x="688" y="1099" fill="#142033" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Stream</text>
+  <text x="862" y="1098" fill="#5c6b7a" font-family="Helvetica, Arial, sans-serif" font-size="11" font-weight="700">SGLANG</text>
+  <text x="662" y="1130" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">SGLang emits the tokens</text>
+  <text x="662" y="1150" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">the target accepted.</text>
+  <text x="662" y="1170" fill="#3d4c5c" font-family="Helvetica, Arial, sans-serif" font-size="13">The cache advances on that path.</text>
+</svg>
