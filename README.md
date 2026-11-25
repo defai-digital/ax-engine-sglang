@@ -231,9 +231,9 @@ MTP7 on chat.
 Two passes per route used 128-token greedy outputs. Cells give end-to-end
 output tok/s in code / math / chat order.
 
-![RTX PRO 6000 Qwen3.8-27B BF16 and NVFP4 throughput at concurrency eight by workload and serving route.](docs/figures/rtx-pro-6000-27b-retest-throughput.svg)
-
 ##### BF16
+
+![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2 and the AX tree/chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
 
 | Clients | Stock AR | Stock DFlash2 | AX tree / chain |
 |---:|---:|---:|---:|
@@ -241,6 +241,8 @@ output tok/s in code / math / chat order.
 | 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **510.8** / **572.0** / **335.1** |
 
 ##### NVFP4
+
+![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree/chain and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
 
 | Clients | Stock AR | Stock DFlash2 | AX tree / chain | AX GDN replay |
 |---:|---:|---:|---:|---:|
@@ -436,6 +438,8 @@ The experimental draft vocabulary subset (`AX_DFLASH_DRAFT_VOCAB=1`,
 B200 draft graph and 583–860 µs per Thor-01 draft graph, at every live
 batch size tested. That saving is below 1% of a decode round, and
 end-to-end throughput did not improve.
+
+![Throughput change from the DFlash2 draft vocabulary subset on Thor-01 and B200 in both launch orders. Changes range from −2.47% to +2.33%.](docs/figures/dflash-draft-vocab-retest.svg)
 
 | GPU | Live requests | Draft graph saving | Share of round | Throughput change, warm servers |
 |---|---:|---:|---:|---:|

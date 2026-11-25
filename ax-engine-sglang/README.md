@@ -174,6 +174,8 @@ separately. [Jetson Thor](#jetson-thor)
 chat output tok/s. The add-on used a 32-node tree at one request and a
 width-eight chain when requests were grouped.
 
+![B200 Qwen3.8-27B NVFP4 serving retest at one and eight clients, with stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](https://raw.githubusercontent.com/defai-digital/ax-engine-sglang/main/docs/figures/b200-27b-nvfp4-serving-retest.svg)
+
 | Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
 |---:|---:|---:|---:|
 | 1 | 448.5 / 408.1 / 281.3 | 632.5 / 516.5 / 333.8 | 456.6 / 415.3 / 286.6 |
@@ -185,6 +187,8 @@ GDN replay led at eight clients by 11.2% / 21.8% / 5.1%.
 **Earlier 1,024-token study.** 64 prompts per family. Full records:
 [dual attention backend](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-16-dual-attention-backend.md),
 [Flash-Next](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/decisions/2026-11-17-qwen38-flash-next-feasibility.md).
+
+![B200 NVFP4 throughput for stock DFlash2 and the add-on at concurrency 1 and 16.](https://raw.githubusercontent.com/defai-digital/ax-engine-sglang/main/docs/figures/b200-27b-nvfp4-throughput.svg)
 
 | Model | Mode | Result vs. stock SGLang |
 |---|---|---|
@@ -235,6 +239,8 @@ on RTX PRO 6000 at 128 and 1,024 tokens. The tree route is refused.
 Jetson Thor (SM 11.0, aarch64, 122 GB unified memory) runs the same commands as above on
 `lmsysorg/sglang:v0.5.23-cu130`; the launch defaults detect SM110. Measured single-request output
 throughput (greedy, 12 prompts, 512 tokens; 27B bf16: 8 prompts, 384 tokens), code / math / chat:
+
+![Jetson Thor throughput for stock SGLang, TensorRT Edge-LLM and the add-on, grouped by BF16 or NVFP4 and prompt family.](https://raw.githubusercontent.com/defai-digital/ax-engine-sglang/main/docs/figures/jetson-thor-27b-throughput.svg)
 
 | Target | AR | Stock chain 16 | TensorRT Edge-LLM DDTree 32 | ax-engine-sglang tree |
 |---|---|---|---|---|

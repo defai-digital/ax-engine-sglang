@@ -1,0 +1,326 @@
+"""Render the README benchmark charts in one style.
+
+    python docs/figures/render_charts.py          # needs matplotlib
+
+Numbers are copied from the README tables (and the reports they link); a chart and its table must
+change together. Stock routes are gray, TensorRT Edge-LLM brown, AX Engine routes green.
+"""
+from pathlib import Path
+
+from chart_style import bar_chart, percent
+
+OUT = Path(__file__).resolve().parent
+
+AR = "#a3adb9"          # stock autoregressive
+STOCK = "#6b7a8d"       # stock speculative route
+STOCK2 = "#3f4d60"      # second stock speculative route
+VLLM = "#8f86b5"        # stock vLLM
+EDGE = ["#e0c4a2", "#c99a64", "#a9703a", "#7a4c22"]   # TensorRT Edge-LLM AR, MTP3, chain 8, DDTree 32
+AX_LIGHT = "#8fd0a6"
+AX = "#2e9e5f"          # green
+AX_DEEP = "#0b5d36"     # deep green
+AX_VLLM = "#5fb7a6"     # AX Engine for vLLM
+WORKLOADS = ["Code", "Math", "Chat"]
+
+
+def split(*cells):
+    """'a / b / c' strings to per-workload floats."""
+    return [[float(x.replace(",", "")) for x in cell.split(" / ")] for cell in cells]
+
+
+def main():
+    bar_chart(
+        OUT / "b300-flash-next-bf16-throughput.svg",
+        title="Two B300 GPUs · Qwen3.8-Flash-Next BF16",
+        subtitle="SGLang 0.5.23 · TP2 · second pass · 24 greedy prompts per workload · 256-token limit",
+        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("AX Engine MTP7", AX_DEEP)],
+        panels=[
+            {"title": "Concurrency 1", "categories": WORKLOADS,
+             "values": [[184.9, 206.8, 207.2], [306.6, 353.9, 294.4], [390.0, 409.9, 268.0]]},
+            {"title": "Concurrency 4", "categories": WORKLOADS,
+             "values": [[389.6, 550.4, 534.1], [520.7, 649.4, 584.5], [615.4, 735.2, 521.1]]},
+            {"title": "Concurrency 16", "categories": WORKLOADS,
+             "values": [[794.5, 1258.0, 1069.6], [1199.7, 1606.1, 1272.6], [1649.8, 1708.0, 1169.6]]},
+        ],
+        xlabel="End-to-end output tokens per second · same scale in all panels",
+        description="Stock AR, stock MTP3 and AX Engine MTP7 at concurrency 1, 4 and 16 for code, math and chat. "
+                    "MTP7 leads on code and math; stock MTP3 leads on chat.",
+    )
+
+    bar_chart(
+        OUT / "b200-27b-nvfp4-serving-retest.svg",
+        title="B200 · Qwen3.8-27B NVFP4",
+        subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
+        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree/chain", AX), ("AX GDN replay", AX_DEEP)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("136.0 / 136.0 / 136.4", "448.5 / 408.1 / 281.3", "632.5 / 516.5 / 333.8",
+                             "456.6 / 415.3 / 286.6")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("870.4 / 851.6 / 833.6", "1,438.4 / 1,172.9 / 903.2", "1,503.0 / 1,206.6 / 790.1",
+                             "1,599.5 / 1,428.3 / 949.6")},
+        ],
+        xlabel="End-to-end output tokens per second",
+        note="A separate warmed AR check reached 953.0 tok/s on chat at 8 clients.",
+        share_scale=False,
+        description="End-to-end throughput at one and eight concurrent clients by workload and serving route.",
+    )
+
+    bar_chart(
+        OUT / "b200-27b-nvfp4-throughput.svg",
+        title="B200 · Qwen3.8-27B NVFP4 · earlier 1,024-token study",
+        subtitle="64 prompts per workload · 1,024-token limit · 64 server slots · mean of two passes",
+        series=[("Stock SGLang + DFlash2 block 8", STOCK), ("SGLang + ax-engine-sglang", AX_DEEP)],
+        panels=[
+            {"title": "Concurrency 1 · AX tree 16", "categories": WORKLOADS,
+             "values": [[816, 733, 401], [1160, 971, 458]]},
+            {"title": "Concurrency 16 · AX chain 8", "categories": WORKLOADS,
+             "values": [[3628, 4670, 2980], [4379.5, 4989, 3110]]},
+        ],
+        xlabel="Output tokens per second · the panels use different scales",
+        share_scale=False, fmt=lambda v: f"{v:,.1f}".removesuffix(".0"),
+        description="Stock DFlash2 and the add-on on code, math and chat at concurrency one and sixteen.",
+    )
+
+    bar_chart(
+        OUT / "b200-dflash2-recurrent-replay-throughput.svg",
+        title="B200 · Qwen3.8-27B NVFP4 chat",
+        subtitle="DFlash2 width 8 · concurrency 16 · 32 slots · 64 chat prompts",
+        series=[("Stock GDN snapshots", STOCK), ("AX recurrent GDN replay (benchmark overlay)", AX_DEEP)],
+        panels=[{"categories": ["Chat · C16"], "values": [[2685.6], [2957.3]]}],
+        xlabel="Output tokens per second", legend_columns=2,
+        description="Stock DFlash2 reached 2,685.6 output tokens per second and the recurrent GDN replay overlay "
+                    "2,957.3.",
+    )
+
+    bar_chart(
+        OUT / "b200-flash-next-nvfp4-serving-retest.svg",
+        title="B200 · Qwen3.8-Flash-Next NVFP4",
+        subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
+        series=[("Stock AR", AR), ("Stock MTP3", STOCK), ("AX MTP3", AX), ("AX MTP7", AX_DEEP)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("136.9 / 136.4 / 130.6", "304.9 / 273.3 / 223.4", "302.8 / 270.9 / 213.3",
+                             "389.7 / 297.1 / 208.9")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("614.7 / 717.4 / 594.2", "720.7 / 947.0 / 684.5", "745.1 / 976.8 / 715.4",
+                             "1,126.9 / 978.8 / 607.5")},
+        ],
+        xlabel="End-to-end output tokens per second", note="All routes used pinned-host FP8 PLE.",
+        share_scale=False,
+        description="End-to-end throughput at one and eight concurrent clients by workload and serving route.",
+    )
+
+    bar_chart(
+        OUT / "b200-flash-next-mtp-throughput.svg",
+        title="B200 · Qwen3.8-Flash-Next NVFP4 · earlier MTP study",
+        subtitle="Concurrency 1 · second pass · 256-token limit · SGLang 0.5.23",
+        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("MTP7 + AX Engine QSA fix", AX_DEEP)],
+        panels=[{"categories": WORKLOADS,
+                 "values": split("204.9 / 212.5 / 211.7", "435.2 / 432.3 / 334.4", "547.9 / 487.7 / 296.8")}],
+        xlabel="Output tokens per second",
+        description="MTP7 with the QSA fix leads on code and math. Stock MTP3 leads on chat.",
+    )
+
+    retest = {"subtitle": "128 greedy output tokens per request · two passes per route",
+              "xlabel": "End-to-end output tokens per second", "share_scale": False}
+    bar_chart(
+        OUT / "rtx-pro-6000-27b-bf16-retest.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B BF16",
+        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree / chain", AX_DEEP)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "184.3 / 163.2 / 94.1")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "510.8 / 572.0 / 335.1")},
+        ],
+        description="BF16 throughput at one and eight clients for stock AR, stock DFlash2 and the AX tree/chain.",
+        **retest,
+    )
+    nvfp4 = [("1 concurrent client", "54.2 / 54.1 / 54.4", "229.3 / 188.5 / 125.2", "324.7 / 270.9 / 152.2",
+              "235.8 / 195.2 / 128.9"),
+             ("8 concurrent clients", "376.0 / 377.3 / 367.0", "819.2 / 760.5 / 505.3", "907.7 / 823.3 / 487.0",
+              "996.8 / 898.1 / 580.8")]
+    bar_chart(
+        OUT / "rtx-pro-6000-27b-nvfp4-retest.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
+        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree / chain", AX), ("AX GDN replay", AX_DEEP)],
+        panels=[{"title": t, "categories": WORKLOADS, "values": split(*cells)} for t, *cells in nvfp4],
+        description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree/chain and "
+                    "AX GDN replay.",
+        **retest,
+    )
+    bf16_c8 = split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "510.8 / 572.0 / 335.1")
+    bar_chart(
+        OUT / "rtx-pro-6000-27b-retest-throughput.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B at concurrency 8",
+        subtitle="128 greedy output tokens per request · two passes per route",
+        series=[("Stock SGLang AR", AR), ("Stock DFlash2, width 8", STOCK), ("AX tree 32 / chain 8", AX),
+                ("AX GDN replay, width 8", AX_DEEP)],
+        panels=[{"title": "BF16", "categories": WORKLOADS, "values": bf16_c8 + [[None, None, None]],
+                 "missing": "not run"},
+                {"title": "NVFP4", "categories": WORKLOADS, "values": split(*nvfp4[1][1:])}],
+        xlabel="End-to-end output tokens per second",
+        description="End-to-end output token throughput with eight concurrent clients.",
+    )
+
+    bar_chart(
+        OUT / "rtx-pro-6000-27b-fp8-verify-throughput.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
+        subtitle="DFlash2 GDN replay · 8 concurrent requests · 64 chat prompts × 512 tokens",
+        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DEEP)],
+        panels=[{"categories": ["Default first", "Candidate first"], "values": [[699.74, 710.20], [718.01, 724.04]]}],
+        xlabel="End-to-end output tokens per second · by launch order",
+        note="Complete greedy output matched on 57/64 prompts in each order.",
+        fmt=lambda v: f"{v:,.2f}",
+        description="End-to-end throughput across both launch orders for native GDN replay and replay with the same "
+                    "GPU's qualified FP8 tactics.",
+    )
+
+    bar_chart(
+        OUT / "rtx-27b-nvfp4-throughput.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · earlier pooled sweep",
+        subtitle="Ten frozen prompts · 128-token outputs · rates pooled across workloads · SGLang 0.5.23",
+        series=[("Stock SGLang AR", AR), ("Stock DFlash2 block 8", STOCK), ("SGLang + AX Engine", AX_DEEP)],
+        panels=[{"categories": ["C1 · 10 requests", "C8 · 40 requests"],
+                 "values": [[54.41, 388.29], [124.50, 489.86], [156.87, 484.78]],
+                 "suffix": [[None, None], [None, None], ["tree 64", "tree 32 / chain 8"]]}],
+        xlabel="End-to-end output tokens per second", fmt=lambda v: f"{v:,.2f}",
+        description="At concurrency one, AR 54.41, stock DFlash2 124.50 and AX Engine 156.87 output tokens/s. "
+                    "At concurrency eight, 388.29, 489.86 and 484.78.",
+    )
+
+    bar_chart(
+        OUT / "rtx-pro-6000-flash-next-nvfp4-throughput.svg",
+        title="RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4",
+        subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
+        series=[("Stock AR", AR), ("Stock MTP3", STOCK), ("AX MTP3", AX), ("AX MTP7", AX_DEEP)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("83.1 / 83.8 / 83.7", "183.5 / 164.1 / 134.0", "182.1 / 164.8 / 135.0",
+                             "218.9 / 174.0 / 114.7")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("414.1 / 421.5 / 399.3", "679.0 / 582.6 / 455.4", "594.2 / 572.4 / 405.5",
+                             "728.0 / 542.7 / 356.5")},
+        ],
+        xlabel="End-to-end output tokens per second", note="All routes used pinned-host FP8 PLE.",
+        share_scale=False,
+        description="End-to-end throughput at one and eight concurrent clients by workload and serving route.",
+    )
+
+    bar_chart(
+        OUT / "rtx-5090-27b-nvfp4-throughput.svg",
+        title="GeForce RTX 5090 · Qwen3.8-27B NVFP4",
+        subtitle="SGLang 0.5.23 · 128 greedy output tokens per request · two passes · two GPU request slots",
+        series=[("Stock SGLang AR", AR), ("Stock DFlash2 block 8", STOCK), ("SGLang + AX Engine", AX_DEEP)],
+        panels=[{"categories": ["C1 · 10 requests", "C2 · 40 requests"],
+                 "values": [[57.64, 101.77], [125.01, 182.38], [135.18, 181.36]],
+                 "suffix": [[None, None], [None, None], ["tree 32", "tree 32 / chain 8"]]}],
+        xlabel="End-to-end output tokens per second", fmt=lambda v: f"{v:,.2f}",
+        description="Concurrency 1: stock AR 57.64, stock DFlash2 125.01, AX Engine 135.18. Concurrency 2: 101.77, "
+                    "182.38 and 181.36 output tokens per second.",
+    )
+
+    bar_chart(
+        OUT / "rtx-5090-27b-gdn-replay-throughput.svg",
+        title="GeForce RTX 5090 · DFlash2 GDN replay",
+        subtitle="Qwen3.8-27B NVFP4 · width-8 chain · 128 output tokens per request",
+        series=[("Stock DFlash2", STOCK), ("AX GDN replay", AX_DEEP)],
+        panels=[{"categories": ["C1 · 2 slots", "C2 · 2 slots", "C8 · 8 slots"],
+                 "values": [[123.21, 178.67, None], [124.39, 181.19, 389.63]],
+                 "missing": "stock launch exceeded GPU memory"}],
+        xlabel="Output tokens per second", fmt=lambda v: f"{v:,.2f}", legend_columns=2,
+        description="Concurrency 1, stock 123.21 and replay 124.39. Concurrency 2, stock 178.67 and replay 181.19. "
+                    "Concurrency 8, replay 389.63. The stock launch exceeded GPU memory.",
+    )
+
+    bar_chart(
+        OUT / "rtx-5090-27b-fp8-verify-throughput.svg",
+        title="GeForce RTX 5090 · Qwen3.8-27B NVFP4",
+        subtitle="DFlash2 GDN replay · 8 concurrent requests · 64 chat prompts × 512 tokens",
+        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DEEP)],
+        panels=[{"categories": ["Default first", "Candidate first"], "values": [[802.33, 807.25], [824.01, 824.02]]}],
+        xlabel="End-to-end output tokens per second · by launch order",
+        note="Complete greedy output matched on 10/64 prompts in each order.",
+        fmt=lambda v: f"{v:,.2f}",
+        description="End-to-end throughput across both launch orders for native GDN replay and replay with the same "
+                    "GPU's qualified FP8 tactics.",
+    )
+
+    thor = [("Stock SGLang AR", AR, "13.4 / 13.5 / 13.5", "4.6 / 4.6 / 4.6"),
+            ("Edge-LLM AR", EDGE[0], "13.3 / 13.3 / 13.3", "4.7 / 4.7 / 4.7"),
+            ("Stock SGLang MTP3", STOCK, "36.2 / 35.2 / 27.0", "13.5 / 12.9 / 9.9"),
+            ("Edge-LLM MTP3", EDGE[1], "39.1 / 37.3 / 28.4", "13.8 / 12.9 / 10.2"),
+            ("Edge-LLM DFlash2 chain 8", EDGE[2], "73.0 / 65.7 / 34.5", "30.1 / 25.1 / 14.0"),
+            ("Edge-LLM DDTree 32", EDGE[3], "71.4 / 68.8 / 44.2", "30.1 / 28.8 / 18.2"),
+            ("Stock SGLang DFlash2 chain 16", STOCK2, "93.0 / 73.5 / 30.6", "43.1 / 29.6 / 12.5"),
+            ("AX Engine tree 32", AX_DEEP, "106.1 / 92.1 / 43.1", "47.5 / 37.6 / 18.3")]
+    bar_chart(
+        OUT / "jetson-thor-27b-throughput.svg",
+        title="Jetson Thor · Qwen3.8-27B",
+        subtitle="Concurrency 1 · arm64 · SGLang 0.5.23 and TensorRT Edge-LLM 0.12.0 · same checkpoint, drafter, prompts",
+        series=[(name, color) for name, color, *_ in thor],
+        panels=[{"title": "NVFP4 · 12 prompts · 512-token limit", "categories": WORKLOADS,
+                 "values": split(*[row[2] for row in thor])},
+                {"title": "BF16 · 8 prompts · 384-token limit", "categories": WORKLOADS,
+                 "values": split(*[row[3] for row in thor])}],
+        xlabel="Output tokens per second · each precision has its own scale", share_scale=False,
+        description="Stock SGLang, TensorRT Edge-LLM and the add-on, grouped by BF16 or NVFP4 and workload.",
+    )
+
+    bar_chart(
+        OUT / "thor-01-fp8-projection-time.svg",
+        title="Thor-01 · FP8 projection time reduction",
+        subtitle="Synthetic CUDA graph benchmark vs. default cuBLAS · bit-exact BF16",
+        series=[("GDN QKVZ", AX), ("Attention QKV", AX_DEEP)],
+        panels=[{"categories": ["48 rows", "64 rows", "96 rows", "128 rows"],
+                 "values": [[4.65, 4.49, 0.62, 0.84], [4.55, 5.88, 1.70, 1.07]]}],
+        xlabel="Projection time reduction (%)", fmt=lambda v: f"{v:.2f}%", legend_columns=2, tick_suffix="%",
+        description="Bit-exact projection times on synthetic CUDA inputs at 48, 64, 96 and 128 rows, relative to "
+                    "default cuBLAS.",
+    )
+
+    bar_chart(
+        OUT / "dflash-draft-vocab-retest.svg",
+        title="Qwen3.8-27B NVFP4 · DFlash2 draft vocabulary subset",
+        subtitle="Throughput change with the subset enabled, by launch order · fixed-code retest",
+        series=[("Full head first", AX), ("Subset first", AX_DEEP)],
+        panels=[{"categories": ["Thor-01 · C1", "Thor-01 · C2", "B200 · C1", "B200 · C8"],
+                 "values": [[2.19, 2.33, -1.07, -0.34], [-0.29, 0.05, -2.47, -1.47]]}],
+        xlabel="Change in output tokens per second vs. the full draft head (%)", fmt=percent, legend_columns=2, tick_suffix="%",
+        note="Thor-01 full-first gains came from a slow first server. B200 lanes are untimed; servers varied by up to 2.6%.",
+        description="Throughput change from the draft vocabulary subset on Thor-01 and B200 in both launch orders.",
+    )
+
+    single = [("Edge-LLM 0.12.0 MTP3", EDGE[1], "37.2 / 34.7 / 26.4", "89.8 / 90.3 / 67.0"),
+              ("Stock SGLang MTP3", STOCK, "42.3 / 38.8 / 28.9", "96.2 / 92.2 / 65.4"),
+              ("Stock vLLM MTP3", VLLM, "42.4 / 41.2 / 31.3", "101.0 / 101.5 / 75.8"),
+              ("AX SGLang adaptive MTP + 64K draft vocabulary", AX_DEEP, "59.8 / 49.1 / 33.6", "123.3 / 103.1 / 70.5"),
+              ("AX vLLM adaptive MTP + NVFP4 draft head", AX_VLLM, "62.4 / 53.3 / 36.9", "131.4 / 117.2 / 82.7")]
+    bar_chart(
+        OUT / "jetson-thor-single-flash-next-adaptive-mtp.svg",
+        title="One Jetson Thor · Qwen3.8-Flash-Next NVFP4",
+        subtitle="Greedy serving · 48 prompts per workload · 256-token limit · PLE table on local NVMe",
+        series=[(name, color) for name, color, *_ in single],
+        panels=[{"title": "1 concurrent request", "categories": WORKLOADS, "values": split(*[r[2] for r in single])},
+                {"title": "4 concurrent requests", "categories": WORKLOADS, "values": split(*[r[3] for r in single])}],
+        xlabel="End-to-end output tokens per second", legend_columns=2, share_scale=False,
+        description="Stock MTP on SGLang, vLLM and TensorRT Edge-LLM, and adaptive MTP with the add-ons.",
+    )
+
+    bar_chart(
+        OUT / "jetson-thor-flash-next-mtp-throughput.svg",
+        title="Two Jetson Thor hosts · Qwen3.8-Flash-Next NVFP4",
+        subtitle="Concurrency 1 · 24 prompts per workload · 256-token cap · two pipeline stages over 2.5 GbE",
+        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("MTP3 + AX QSA fix", AX),
+                ("MTP7 + AX QSA fix", AX_DEEP)],
+        panels=[{"categories": WORKLOADS,
+                 "values": split("18.3 / 19.0 / 19.2", "32.0 / 32.4 / 24.8", "33.3 / 32.5 / 25.7",
+                                 "43.1 / 37.5 / 22.8")}],
+        xlabel="Output tokens per second",
+        description="MTP7 with the QSA fix leads on code and math. MTP3 with the fix leads on chat.",
+    )
+
+
+if __name__ == "__main__":
+    main()
