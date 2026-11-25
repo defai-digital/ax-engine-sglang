@@ -28,13 +28,14 @@ specific to each runtime.
 
 ![What AX Engine adds to SGLang](docs/images/ax-engine-sglang-components.svg)
 
-Clients still call SGLang. `ax-engine-sglang serve` loads the plugin into
-that server and forwards its flags. SGLang keeps the HTTP API, the
-scheduler, CUDA execution, and the stock autoregressive, MTP, and DFlash
-routes. The plugin adds the verify shape: a DFlash tree for one eligible
-greedy request, a chain when requests are grouped, and a wider QSA ring so
-Flash Next MTP can check a longer draft. The target model still decides
-every emitted token.
+Callers use SGLang's HTTP API. An OpenAI-compatible client, or SGLang's own
+client, is the supported caller. This edition does not ship a client SDK.
+`ax-engine-sglang serve` loads the plugin into that server and forwards its
+flags. SGLang keeps the scheduler, CUDA execution, and the stock
+autoregressive, MTP, and DFlash routes. The plugin adds the verify shape:
+a DFlash tree for one eligible greedy request, a chain when requests are
+grouped, and a wider QSA ring so Flash Next MTP can check a longer draft.
+The target model still decides every emitted token.
 [How it works](docs/design.md)
 
 ## Quick start

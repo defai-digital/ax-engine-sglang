@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1248" width="960" height="1248" role="img">
   <title>What AX Engine adds to SGLang</title>
-  <desc>SGLang keeps the HTTP server, scheduler, CUDA execution, and stock AR, MTP, and DFlash. AX Engine adds the verify shape: a DFlash tree for one eligible greedy request, a chain when requests are grouped, and a wider QSA ring so Flash Next MTP can check a longer draft. One step admits, selects that shape, drafts, verifies on the target, and streams only the accepted tokens.</desc>
+  <desc>Callers use SGLang's HTTP API through an OpenAI-compatible client or SGLang's own client. This edition does not ship a client SDK. SGLang keeps the HTTP server, scheduler, CUDA execution, and stock AR, MTP, and DFlash. AX Engine adds the verify shape: a DFlash tree for one eligible greedy request, a chain when requests are grouped, and a wider QSA ring so Flash Next MTP can check a longer draft.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M 0 1.4 L 8.2 5 L 0 8.6 Z" fill="#8aa0b8"/>
@@ -16,7 +16,7 @@
 
   <rect x="32" y="122" width="896" height="72" rx="12" fill="#f8f4ef" stroke="#e4d5c4"/>
   <text x="48" y="150" fill="#6b4f3a" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Callers</text>
-  <text x="48" y="174" fill="#5e5146" font-family="Helvetica, Arial, sans-serif" font-size="14">OpenAI-compatible clients. The HTTP API stays SGLang's.</text>
+  <text x="48" y="174" fill="#5e5146" font-family="Helvetica, Arial, sans-serif" font-size="14">OpenAI-compatible clients, or SGLang's own client. No AX client SDK.</text>
 
   <line x1="480" y1="194" x2="480" y2="222" stroke="#8aa0b8" stroke-width="1.5" marker-end="url(#arrow)"/>
 
