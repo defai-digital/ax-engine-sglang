@@ -143,7 +143,7 @@ ax-engine-sglang tree / stock chain on FlashInfer: 1.10× / 1.27× / 1.46×;
 ax-engine-sglang tree / AR:
 10.3× / 8.1× / 3.9×.
 
-Teacher check over all six lanes: **passed**. 144 outputs, 40,152 tokens,
+Teacher check over all six SGLang lanes (the Edge-LLM rows were not checked): **passed**. 144 outputs, 40,152 tokens,
 0.32% mismatch rate, none over the tie threshold, worst regret 0.125 nats.
 Mismatch rows: AR 19, MTP3 22, chain FlashInfer 18, ax-engine-sglang tree FlashInfer 27,
 chain Triton 23, ax-engine-sglang tree Triton 21. Every lane matched AR exactly on all 8 code
