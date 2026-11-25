@@ -171,6 +171,12 @@ benchmark, accepted-prefix GDN replay improved native DFlash2 throughput
 by **16–18% at C8** and **26–27% at C16** across both launch orders.
 Replay's greedy outputs varied with batching. [Parity, cancellation, and profiling results](results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
+The FP8 verification benchmark compares tactics on live QKVZ and QKV
+operands before timing them in DFlash2 serving. On Thor, the fastest
+bit-exact tactics took 4.5% and 5.9% less time for the two 64-row synthetic
+projections. RTX PRO 6000 serving gains remain unmeasured.
+[FP8 results and reproduction steps](results/fp8_verify_tactics/REPORT.md)
+
 With GDN replay already enabled, a separate draft KV graph added 0.8%
 to eight-client streamed chat throughput and reduced throughput on the
 frozen prompt set by 3.8%. [Draft KV graph measurements](results/rtx_pro_6000_kv_graph/REPORT.md)

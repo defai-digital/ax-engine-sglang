@@ -55,3 +55,34 @@ that still stores its validation scripts under `track_l/`.
 timed replay pass requires at least one optimized round and zero fallbacks
 at the requested live batch size. The results also record smaller batches.
 [RTX PRO 6000 validation and workload settings](../../results/rtx_pro_6000_hotpath_validation/REPORT.md)
+
+## DFlash2 FP8 verification tactics
+
+`ab_fp8_verify.py` runs on one RTX PRO 6000 with SGLang 0.5.23,
+FlashInfer 0.7.2, and the AX plugin installed. Use local Qwen3.8-27B NVFP4
+and DFlash2 checkpoints. Set `TUNE_IDS` and `EVAL_IDS` to JSON files
+containing arrays of token-ID lists. Use distinct held-out evaluation prompts
+and keep both files fixed across comparable runs.
+
+```bash
+c=8
+run="results/fp8_verify_tactics/raw/rtx-c${c}"
+python benchmarks/sglang/ab_fp8_verify.py capture \
+  --target "$TARGET" --draft "$DRAFT" --input-ids "$TUNE_IDS" \
+  --concurrency "$c" --out "$run/capture"
+python benchmarks/sglang/ab_fp8_verify.py probe \
+  --operands "$run/capture/operands" --out "$run/probe"
+python benchmarks/sglang/ab_fp8_verify.py compare \
+  --target "$TARGET" --draft "$DRAFT" --input-ids "$EVAL_IDS" \
+  --concurrency "$c" --profile "$run/probe/profile.json" --out "$run/compare"
+```
+
+Repeat at C6, C8, C12, and C16 for 48, 64, 96, and 128 rows. Capture
+defaults to four distinct layers per projection. Check `probe.json` for
+rejected kernels and paired timings. Run `compare` when the probe emits
+`profile.json`. It starts a fresh server for each lane in both launch
+orders and requires verified candidate graph replay at the requested live
+batch size. `summary.json` records throughput, p95 request latency,
+tokens per verify, exact output sequences, and graph coverage. Use
+`--output-tokens 128` in a separate output directory for a short-output
+comparison.

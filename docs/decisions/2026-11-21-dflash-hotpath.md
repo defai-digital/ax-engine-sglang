@@ -387,3 +387,19 @@ that workload for a fresh matched engine comparison.
   wait before the next target verify, and a drain path for skipped
   drafts and teardown.
   [vLLM overlap implementation and trace](https://github.com/defai-digital/ax-engine-vllm/blob/464911d4a16a6eba0a0ad995a7caf7c0b38c3a7b/results/REPORT.md#follow-up-experiment-on-gdn-and-draft-overlap)
+
+### FP8 tactic benchmark
+
+Capture QKVZ and QKV inputs and native outputs inside actual width-eight
+target verification. Probe cuBLAS, cuDNN, and SM120 CUTLASS with rotating
+layer weights. A replay profile requires bit-identical BF16 outputs in eager
+and CUDA graphs and lower paired graph time. It binds the choice to the
+checkpoint config and weight index, runtime, row shape, workspace size, and
+native tactic. Serving measurements require graph coverage at the requested
+live batch in both launch orders.
+
+Start with 64 rows at C8, then repeat at 48, 96, and 128 rows. Compare
+throughput, p95 request latency, and generated IDs on held-out chat prompts.
+Before promoting a candidate to a verified serving profile, run the
+serialized 1,024-token AR comparison.
+[Benchmark commands](../../benchmarks/sglang/README.md#dflash2-fp8-verification-tactics) · [Measurement record](../../results/fp8_verify_tactics/REPORT.md)
