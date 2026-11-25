@@ -163,7 +163,8 @@ and can run without an n-gram table.
 ## Benchmark results
 
 Grouped by GPU: B200, RTX PRO 6000, RTX 5090, then Jetson Thor. Within a GPU,
-Qwen3.8-27B comes before Qwen3.8-Flash-Next. The same grouping is in the
+Qwen3.8-Flash-Next comes before Qwen3.8-27B, and BF16 comes before NVFP4.
+The same grouping is in the
 [top-level README](../README.md#measured-throughput).
 
 ### B200
@@ -195,11 +196,11 @@ GDN replay led at eight clients by 11.2% / 21.8% / 5.1%.
 
 | Model | Mode | Result vs. stock SGLang |
 |---|---|---|
+| Qwen3.8-Flash-Next NVFP4 | stock MTP 7 + `AX_QSA_RING=16` vs. stock MTP 3 | code 1.22x-1.30x, math 1.05x-1.15x, chat 0.80x-0.86x |
+| Qwen3.8-27B bf16 | tree at 1 request, chain width 8 / 16 above (16 slots) | c = 1: 1.09x-1.15x vs. the faster stock block; c = 2-16: 0.93x-1.09x |
 | Qwen3.8-27B NVFP4 | tree at 1 request, chain width 8 / 16 above (32-64 slots) | c = 1: code 1.42x, math 1.33x, chat 1.14x; c = 2-64: 1.01x-1.21x |
-| Qwen3.8-27B bf16 | same (16 slots) | c = 1: 1.09x-1.15x vs. the faster stock block; c = 2-16: 0.93x-1.09x |
 | Qwen3.8-27B, both | vs. TensorRT-LLM 1.4 DFlash2 | c = 1: 1.07x-1.72x; c = 16 chat 0.81x-0.90x (engine round cost) |
 | Qwen3.8-27B, both | tree 32 vs. TensorRT Edge-LLM 0.12.0 DDTree 32 on Jetson Thor | c = 1: code 1.49x-1.58x, math 1.31x-1.34x, chat 0.98x-1.01x |
-| Qwen3.8-Flash-Next NVFP4 | stock MTP 7 + `AX_QSA_RING=16` vs. stock MTP 3 | code 1.22x-1.30x, math 1.05x-1.15x, chat 0.80x-0.86x |
 
 Correctness checks: greedy token identity against the plugin's earlier builds (192 / 192), fp32
 teacher audit at the stock mismatch rate, stress runs with aborts, sampled tree verify matching plain
@@ -273,9 +274,9 @@ throughput (greedy, 12 prompts, 512 tokens; 27B bf16: 8 prompts, 384 tokens), co
 
 | Target | AR | Stock chain 16 | TensorRT Edge-LLM DDTree 32 | ax-engine-sglang tree |
 |---|---|---|---|---|
-| Qwen3.5-9B bf16 | 14.8 / 14.9 / 14.9 | 118.7 / 78.0 / 31.3 | not run | 125.5 / 98.2 / 46.2 |
-| Qwen3.8-27B NVFP4 | 13.4 / 13.5 / 13.5 | 93.0 / 73.5 / 30.6 | 71.4 / 68.8 / 44.2 | 106.1 / 92.1 / 43.1 |
 | Qwen3.8-27B bf16 | 4.6 / 4.6 / 4.6 | 43.1 / 29.6 / 12.5 | 30.1 / 28.8 / 18.2 | 47.5 / 37.6 / 18.3 |
+| Qwen3.8-27B NVFP4 | 13.4 / 13.5 / 13.5 | 93.0 / 73.5 / 30.6 | 71.4 / 68.8 / 44.2 | 106.1 / 92.1 / 43.1 |
+| Qwen3.5-9B bf16 | 14.8 / 14.9 / 14.9 | 118.7 / 78.0 / 31.3 | not run | 125.5 / 98.2 / 46.2 |
 
 All SGLang rows use FlashInfer attention. TensorRT Edge-LLM 0.12.0 served the same
 checkpoints, drafter and prompts; its AR matched SGLang AR. On Flash Next NVFP4 its MTP3 ran 6%
