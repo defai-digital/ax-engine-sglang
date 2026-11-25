@@ -1,4 +1,4 @@
-"""Argument checks of benchmarks/sglang/bench_27b_nvfp4.py (no server is started)."""
+"""CPU checks for the fixed-output NVFP4 benchmark and its comparison tools."""
 import contextlib
 import hashlib
 import importlib.util
@@ -17,6 +17,11 @@ spec.loader.exec_module(bench)
 mixed_spec = importlib.util.spec_from_file_location("ab_adaptive_width", ROOT / "benchmarks/sglang/ab_adaptive_width.py")
 mixed = importlib.util.module_from_spec(mixed_spec)
 mixed_spec.loader.exec_module(mixed)
+vocab_spec = importlib.util.spec_from_file_location(
+    "ab_dflash_draft_vocab", ROOT / "benchmarks/sglang/ab_dflash_draft_vocab.py",
+)
+vocab = importlib.util.module_from_spec(vocab_spec)
+vocab_spec.loader.exec_module(vocab)
 
 # Lengths of the published parity prompts.
 PROMPTS = [[0] * length for length in (2266, 44, 35, 27, 27, 26, 26, 24, 24, 23)]
@@ -184,6 +189,32 @@ class MixedWidthPassTests(unittest.TestCase):
         self.assertEqual(result["output_tokens"], 104)
         self.assertEqual(result["tokens_per_verify"], 4)
         self.assertEqual(result["p95_request_s"], 13)
+
+
+class DraftVocabularyPassTests(unittest.TestCase):
+    def test_batched_pass_submits_each_wave_in_one_request(self):
+        def generate(request, timeout):
+            payload = json.loads(request.data)
+            wave = payload["input_ids"]
+            self.assertTrue(payload["sampling_params"]["ignore_eos"])
+            waves.append(wave)
+            return io.StringIO(json.dumps([
+                {"output_ids": prompt, "meta_info": {"finish_reason": {"type": "length"}, "spec_verify_ct": 1}}
+                for prompt in wave
+            ]))
+
+        prompts = [[i, i] for i in range(5)]
+        waves = []
+        with patch.object(vocab.urllib.request, "urlopen", side_effect=generate):
+            result = vocab.run_batched_pass("http://localhost", prompts, 2, 2, True)
+        self.assertEqual(waves, [prompts[:2], prompts[2:4], prompts[4:]])
+        self.assertEqual([row["output_ids"] for row in result["rows"]], prompts)
+        self.assertEqual(result["tokens_per_verify"], 2)
+
+    def test_decode_profile_distinguishes_actual_batch_width_from_clients(self):
+        graphs = {"8": {"total": 2, "subset": 1}, "4": {"total": 2, "subset": 0}}
+        self.assertEqual(vocab.decode_profile(graphs, 8),
+                         {"rounds": 4, "mean_live_requests": 6.0, "full_batch_rounds": 2, "subset_rounds": 1})
 
 
 if __name__ == "__main__":

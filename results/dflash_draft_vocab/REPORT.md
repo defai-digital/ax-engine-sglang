@@ -88,7 +88,7 @@ index matched the Thor run. The KV limit was 4,096 tokens on Thor
 and 8,192 on the two Runpod GPUs. All observed live batch sizes had
 matching draft and verify graph sizes.
 
-![DFlash2 draft vocabulary speed changes on Thor-01, RTX PRO 6000 and B200 in both launch orders.](../../docs/figures/dflash-draft-vocab-serving.svg)
+![DFlash2 draft vocabulary throughput change on Thor-01, RTX PRO 6000 and B200, including the fixed-group B200 retest.](../../docs/figures/dflash-draft-vocab-serving.svg)
 
 | GPU | Clients | First lane | Full tok/s | Subset tok/s | Change | p95 full → subset (s) | Exact outputs | Subset replays at full batch |
 |---|---:|---|---:|---:|---:|---:|---:|---:|
@@ -119,8 +119,43 @@ outputs and replayed 7 of 26 eight-request rounds in each order.
 The observed end-to-end change ranged from +2.46% to −14.03% at C8.
 Its C1 change was +0.47% to +6.52% with all outputs matching.
 
+The −14.03% paired result came from a faster full-head control. Its
+throughput rose 19.15% across the two launch orders, while mean live
+requests per decode round rose from 5.61 to 6.96 and decode rounds
+fell from 123 to 98 for the same 2,048 output tokens. Subset throughput
+changed by 0.02% across the same orders and used the reduced head in
+18 of 123 rounds. The original test used 16 prompts with client slots
+refilled as requests completed. That arrival pattern changed the
+live batches and coincided with different NVFP4 outputs and acceptance.
+
 All three GPUs completed the sampled fallback and the three
 multilingual checks in both orders. The multilingual outputs
 matched the full-head controls. The flag remains experimental
 and off by default. The throughput gain was consistent only
 at C1 in this workload.
+
+## B200 retest with fixed request groups
+
+The retest used the same B200, checkpoints, and 16 frozen prompts. Each
+lane timed five repetitions, or 80 requests with 128 output tokens
+each. The benchmark submitted each group of eight pretokenized
+requests in a single API call and waited for it to finish before
+sending the next group. It warmed each lane on one group before timing.
+
+| First lane | Full tok/s | Subset tok/s | Change | Batch p95 full → subset (s) | Exact outputs |
+|---|---:|---:|---:|---:|---:|
+| Full | 1,269.97 | 1,265.19 | −0.38% | 0.945 → 0.987 | 80/80 |
+| Subset | 1,284.16 | 1,283.03 | −0.09% | 0.923 → 0.925 | 80/80 |
+
+All four passes had the same live-batch histogram, 640 decode rounds,
+315 eight-request rounds, and 2.930 output tokens per verification.
+Each lane also repeated all 80 outputs across launch orders. The subset
+ran in 285 of 640 total rounds and 70 of 315 eight-request rounds.
+Both excluded-ID and sampled requests used the full draft head.
+
+The controlled comparison put the C8 impact below 0.4% in both orders.
+The narrower head covers only the draft projection and top-k. A batch
+uses the full head whenever any request has a recent excluded token.
+Increasing coverage would require changing that batch-wide rule and
+measuring the cost of splitting the projection.
+[Reproduction flags](../../benchmarks/sglang/README.md#dflash2-draft-vocabulary-subset)

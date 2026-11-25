@@ -132,7 +132,10 @@ def generate(base_url, input_ids, length, speculative):
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=240 + length) as response:
         result = json.load(response)
-    wall_s = time.perf_counter() - started
+    return generation_row(result, time.perf_counter() - started, length, speculative)
+
+
+def generation_row(result, wall_s, length, speculative):
     output_ids = result["output_ids"]
     meta = result["meta_info"]
     if len(output_ids) != length or meta["finish_reason"]["type"] != "length":

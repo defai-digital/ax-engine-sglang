@@ -84,6 +84,16 @@ synthetic activations. For the Runpod comparison, use
 `--concurrency 1 8 --kv-tokens 8192`.
 [Thor-01, RTX PRO 6000 and B200 results](../../results/dflash_draft_vocab/REPORT.md)
 
+To check a multi-client result against a controlled admission pattern, use
+`--arrival-mode batch --concurrency 8 --repeats 5` in a fresh output
+directory. Each group of eight pretokenized inputs goes to SGLang in one
+`/generate` request. The next group starts when the previous group
+finishes. The reported p95 uses the time to receive that batch response.
+Check `decode_profile` for mean live requests, full-batch rounds, and
+subset replays. Check `matches_against_first_order` for output
+repeatability within each lane. The default `refill` mode launches
+independent requests and refills as they finish.
+
 ## DFlash2 FP8 verification tactics
 
 `ab_fp8_verify.py` runs on one RTX PRO 6000 or RTX 5090 with SGLang 0.5.23,

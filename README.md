@@ -341,15 +341,20 @@ top-k time by **39.8–40.5%** in the isolated CUDA graph probe. With the
 same width-eight GDN replay configuration, end-to-end throughput improved
 in both launch orders at C1. At higher concurrency the effect varied.
 
-![DFlash2 draft vocabulary throughput change at one and multiple clients across both launch orders on Thor-01, RTX PRO 6000 and B200.](docs/figures/dflash-draft-vocab-serving.svg)
+![DFlash2 draft vocabulary throughput change on Thor-01, RTX PRO 6000 and B200, including the B200 retest with fixed groups of eight requests.](docs/figures/dflash-draft-vocab-serving.svg)
 
-| GPU | C1 output throughput change | Multi-client change |
-|---|---:|---:|
-| Thor-01 | +0.14% to +0.86% | C2 · −0.10% to −0.02% |
-| RTX PRO 6000 | +0.43% to +1.75% | C8 · −0.71% to +0.99% |
-| B200 | +0.47% to +6.52% | C8 · −14.03% to +2.46% |
+| GPU | Request arrival | C1 throughput change | Multi-client change |
+|---|---|---:|---:|
+| Thor-01 | Slot refill | +0.14% to +0.86% | C2 · −0.10% to −0.02% |
+| RTX PRO 6000 | Slot refill | +0.43% to +1.75% | C8 · −0.71% to +0.99% |
+| B200 | Slot refill | +0.47% to +6.52% | C8 · −14.03% to +2.46% |
+| B200 | Fixed groups of eight | — | **C8 · −0.38% to −0.09%** |
 
-[Serving validation, output agreement, and projection timings](results/dflash_draft_vocab/REPORT.md)
+B200's original C8 full-head runs had 26 and 56 rounds with eight
+requests active. In the fixed-group retest, every lane ran 315 such
+rounds and all 80 generated outputs matched in each order.
+
+[B200 retest and launch settings](results/dflash_draft_vocab/REPORT.md#b200-retest-with-fixed-request-groups) · [Full serving and projection results](results/dflash_draft_vocab/REPORT.md)
 
 ##### Thor-01 · FP8 verification projections
 

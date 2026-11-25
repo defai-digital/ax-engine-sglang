@@ -339,9 +339,30 @@ and top-k on synthetic activations. The serving benchmark compares it
 with the full 248,320-row draft head using width-eight DFlash2 and
 GDN replay. Thor-01 gained 0.14–0.86% at C1 and was within 0.11%
 of the full-head throughput at C2. All 16 greedy outputs matched
-at both concurrencies in both launch orders. RTX PRO 6000 and B200
-also gained at C1. Their C8 gains depended on launch order and their
-C8 output comparisons differed.
+at both concurrencies in both launch orders.
+
+![DFlash2 draft vocabulary throughput change in both launch orders for the slot-refill runs and the fixed-group B200 retest.](figures/dflash-draft-vocab-serving.svg)
+
+#### B200 C8 retest
+
+The first test refilled client slots as requests finished. In the retest,
+SGLang admitted eight pretokenized requests together and finished
+each group before starting the next. The retest repeated the same
+16 prompts five times per lane.
+
+| Request arrival | First lane | Full tok/s | Subset tok/s | Change | Exact outputs |
+|---|---|---:|---:|---:|---:|
+| Slot refill | Full head | 933.75 | 956.69 | +2.46% | 14/16 |
+| Slot refill | Subset | 1,112.55 | 956.45 | −14.03% | 1/16 |
+| Fixed groups | Full head | 1,269.97 | 1,265.19 | −0.38% | 80/80 |
+| Fixed groups | Subset | 1,284.16 | 1,283.03 | −0.09% | 80/80 |
+
+The refill control reached full batches in 26 rounds in the first order
+and 56 in the reverse order. All four fixed-group runs recorded 315
+full batches and 2.930 output tokens per verification. The subset ran
+in 70 of those 315 full batches in each order.
+
+[B200 batch counts and reproduction flags](../results/dflash_draft_vocab/REPORT.md#b200-retest-with-fixed-request-groups)
 [All three GPUs, both launch orders, and reproduction commands](../results/dflash_draft_vocab/REPORT.md)
 
 ### FP8 verification projections
