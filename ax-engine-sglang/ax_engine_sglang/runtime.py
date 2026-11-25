@@ -22,7 +22,7 @@ class WorkerRuntime:
     accept_counts: dict = field(default_factory=dict)
     accept_rounds: int = 0
     stats: dict = field(default_factory=lambda: {
-        "tree": 0, "chain": 0, "chain_width": {}, "hook_tree": 0, "hook_chain": 0,
+        "tree": 0, "btree": 0, "chain": 0, "chain_width": {}, "hook_tree": 0, "hook_btree": 0, "hook_chain": 0,
         "alloc_checked": 0, "alloc_short": 0, "alloc_shrunk": 0, "replay": {},
     })
 
@@ -54,4 +54,5 @@ def activate_worker(worker) -> WorkerRuntime:
 
 
 def runtime_statistics():
-    return [state.stats for state in _runtimes if state.stats["tree"] or state.stats["chain"]]
+    return [state.stats for state in _runtimes
+            if state.stats["tree"] or state.stats["btree"] or state.stats["chain"]]

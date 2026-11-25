@@ -28,6 +28,13 @@ class PluginConfig:
     chain_attention: str | None = None
     chain_check: bool = False
     round_dump: str | None = None
+    lattice_trace: str | None = None
+    btree: int = 0
+    btree_native: bool = False
+    tree_temp: float = 1.0
+    tree_branch_penalty: float = 0.0
+    tree_tail: bool = True
+    tree_lmax: int = 99
     ssm_positions: int = 0
     ssm_conv_share: float = 0.05
     qsa_ring: int = 0
@@ -133,6 +140,10 @@ class PluginConfig:
             draft_widths=widths("AX_CHAIN_DRAFT_WIDTHS"),
             chain_attention=env.get("AX_CHAIN_ATTN") or None,
             chain_check=flag("AX_CHAIN_CHECK"), round_dump=env.get("AX_ROUND_DUMP") or None,
+            lattice_trace=env.get("AX_LATTICE_TRACE") or None,
+            btree=integer("AX_BTREE", 0), btree_native=flag("AX_BTREE_NATIVE"),
+            tree_temp=number("AX_TREE_TEMP", 1.0), tree_branch_penalty=number("AX_TREE_BRANCH_PENALTY", 0.0),
+            tree_tail=flag("AX_TREE_TAIL", True), tree_lmax=integer("AX_TREE_LMAX", 99),
             ssm_positions=integer("AX_SSM_POSITIONS", 0), ssm_conv_share=share,
             qsa_ring=integer("AX_QSA_RING", 0),
             qsa_stable_topk=flag("AX_QSA_STABLE_TOPK"),
@@ -198,6 +209,39 @@ class PluginConfig:
             if not self.graph_widths:
                 # Measured with one captured graph per width; the tree's own graph serves one width.
                 raise ValueError("AX_CHAIN_WIDTH_BY_BATCH needs its widths in AX_CHAIN_GRAPH_WIDTHS")
+        if self.lattice_trace and not self.lattice:
+            raise ValueError("AX_LATTICE_TRACE records the DFlash2 lattice: it needs AX_LATTICE=1")
+        if self.btree:
+            if not 2 <= self.btree <= 8:
+                raise ValueError("AX_BTREE is the largest batch served by one tree per request: 0 (off) or 2..8")
+            if not (self.tree and self.lattice and self.tree64 and self.branch_pilot):
+                raise ValueError("AX_BTREE extends the DFlash2 lattice tree: it needs AX_TREE=1, AX_LATTICE=1, "
+                                 "FC1_TREE64=1 and FC1_BRANCH_PILOT=1")
+            if self.nvfp4_verify_parity or self.gdn_recurrent_verify or self.tree_sampling:
+                raise ValueError("AX_BTREE serves greedy rounds with the tree GDN kernels: unset "
+                                 "AX_NVFP4_VERIFY_PARITY, AX_GDN_RECURRENT_VERIFY and AX_TREE_SAMPLING")
+            if self.ssm_positions and (self.btree_native or not self.fused):
+                # SGLang's native GDN tree verify keeps a state per node; the fused kernels commit the
+                # accepted state directly, as the one-request tree does.
+                raise ValueError("AX_SSM_POSITIONS with AX_BTREE needs the fused kernels (FC1_FUSED=1, "
+                                 "not AX_BTREE_NATIVE)")
+            if self.tree_nodes > self.draft_block:
+                raise ValueError("AX_BTREE needs FC1_TREE_N at most FC1_DRAFT_BLOCK (the draft KV keeps one row per depth)")
+            if self.fused and not self.btree_native and self.tree_nodes not in (16, 32, 64):
+                raise ValueError("AX_BTREE with FC1_FUSED=1 runs the fused tree kernels: FC1_TREE_N 16, 32 or 64")
+        shaped = (self.tree_temp != 1.0 or self.tree_branch_penalty != 0.0 or not self.tree_tail
+                  or self.tree_lmax != 99)
+        if shaped and not self.lattice:
+            raise ValueError("AX_TREE_TEMP, AX_TREE_BRANCH_PENALTY, AX_TREE_TAIL and AX_TREE_LMAX shape the "
+                             "DFlash2 lattice tree: they need AX_LATTICE=1")
+        if not (math.isfinite(self.tree_temp) and self.tree_temp > 0):
+            raise ValueError("AX_TREE_TEMP must be a positive number")
+        if not (math.isfinite(self.tree_branch_penalty) and self.tree_branch_penalty >= 0):
+            raise ValueError("AX_TREE_BRANCH_PENALTY must be a number at least 0")
+        if self.tree_lmax < 1:
+            raise ValueError("AX_TREE_LMAX (branches off the greedy child along a path) must be at least 1")
+        if self.btree_native and not self.btree:
+            raise ValueError("AX_BTREE_NATIVE selects the GDN kernels of AX_BTREE rounds: set AX_BTREE")
         if self.dflash_kv_graph and not self.gdn_chain_replay:
             raise ValueError("AX_DFLASH_KV_GRAPH requires AX_GDN_CHAIN_REPLAY=1")
         if self.dflash_kv_direct and not self.gdn_chain_replay:

@@ -26,7 +26,8 @@ logprob stride, hidden-state view, the result's `speculative_num_draft_tokens`) 
 `record_accept` (after the stock accept) keeps the token before the next anchor when the n-gram
 tree builder needs it (`pre1_for`) and appends one line
 per round to `AX_ROUND_DUMP` (if set) for the offline accept oracle: request id, kind, width, the
-verified tokens and the accepted length.
+verified tokens and the accepted length. `AX_LATTICE_TRACE` (with `AX_LATTICE=1`) writes the same
+round with the drafter's lattice, for `benchmarks/sglang/simulate_lattice_tree.py`.
 
 Two attention backends (docs/decisions/2026-11-16-dual-attention-backend.md): with
 `AX_CHAIN_ATTN=<backend>` (for example trtllm_mha) the private chain runners are built with that
@@ -53,7 +54,7 @@ import time
 import torch
 
 from ax_engine_sglang.config import get_config
-from ax_engine_sglang.policy import RoundFeatures, WidthController, batch_bucket, chain_width, use_tree
+from ax_engine_sglang.policy import RoundFeatures, WidthController, batch_bucket, chain_width, use_btree, use_tree
 from ax_engine_sglang.runtime import activate_worker, current_runtime, runtime_statistics
 from ax_engine_sglang.compat import patch_attribute
 
@@ -62,18 +63,23 @@ _TREE = _CONFIG.tree
 _PINNED = _CONFIG.chain_width
 _SCHED = _CONFIG.chain_schedule
 _DUMP = _CONFIG.round_dump
+_TRACE = _CONFIG.lattice_trace
 _GRAPH_WIDTHS = _CONFIG.graph_widths
 _DRAFT_WIDTHS = _CONFIG.draft_widths
 _CHECK = _CONFIG.chain_check
 _CHAIN_ATTN = _CONFIG.chain_attention
 _ADAPTIVE = _CONFIG.policy_mode == "adaptive"
 _ACCEPT_READBACK = 16   # rounds between host reads of the accept-length counts
+# Batch sizes of the main target graph runner: the tree graph (1) and, with AX_BTREE=K, the batched
+# tree graphs (2..K: the fused batched GDN kernels, or SGLang's native GDN tree verify with
+# AX_BTREE_NATIVE=1).
+_MAIN_BS = max(1, _CONFIG.btree) if _TREE else 1
 
 
 def is_tree():
     state = current_runtime()
     if state.kind is not None:
-        state.stats["hook_tree" if state.kind == "tree" else "hook_chain"] += 1
+        state.stats[f"hook_{state.kind}"] += 1
     return state.kind == "tree"
 
 
@@ -157,11 +163,15 @@ def _configured_widths(block):
 
 
 def tree_round(batch):
-    """Translate SGLang sampling capabilities into the pure round policy."""
-    if not _CONFIG.tree or len(batch.reqs) != 1 or batch.has_grammar or batch.return_logprob:
+    """Translate SGLang sampling capabilities into the pure round policy: a tree for one request,
+    or with AX_BTREE=K one tree per request for 2..K requests."""
+    requests = len(batch.reqs)
+    if (not _CONFIG.tree or not (requests == 1 or 2 <= requests <= _CONFIG.btree)
+            or batch.has_grammar or batch.return_logprob):
         return False
     info = batch.sampling_info
-    return use_tree(_CONFIG, RoundFeatures(
+    rule = use_tree if requests == 1 else use_btree
+    return rule(_CONFIG, RoundFeatures(
         requests=len(batch.reqs), grammar=batch.has_grammar, logprobs=batch.return_logprob,
         custom_processor=bool(info is not None and info.has_custom_logit_processor),
         greedy=info is None or info.is_all_greedy,
@@ -191,7 +201,7 @@ def begin_round(w, batch=None):
     w._ax_tree_round = None
     state.kind = None
     state.host_kv_len = None
-    state.round_info.update(backend=None, graph=None, width=None)
+    state.round_info.update(backend=None, graph=None, width=None, draft_graph=None)
     sets = getattr(w, "_ax_draft_sets", None)
     if not sets:
         return
@@ -279,8 +289,9 @@ def _install_main_only():
         main = not self.model_runner.is_draft_worker
         if main and _TREE:
             current_runtime().kind = "tree"
-            self.capture_bs = [b for b in self.capture_bs if b == 1]
-            self.compile_bs = [b for b in (self.compile_bs or []) if b == 1]
+            self._ax_main_tree = True
+            self.capture_bs = [b for b in self.capture_bs if b <= _MAIN_BS]
+            self.compile_bs = [b for b in (self.compile_bs or []) if b <= _MAIN_BS]
         else:
             current_runtime().kind = "chain"           # stock capture input (plugin.tree_capture_info)
         try:
@@ -288,7 +299,7 @@ def _install_main_only():
         finally:
             current_runtime().kind = previous_kind
             if main and _TREE:
-                self.max_bs = 1
+                self.max_bs = max(self.capture_bs)
 
     can_run = R.can_run_graph
 
@@ -301,7 +312,33 @@ def _install_main_only():
 
     patch_attribute(R, 'capture', capture)
     patch_attribute(R, 'can_run_graph', can_run_graph)
+    _install_shape_kind(R)
     patch_attribute(R, '_ax_main_only', True)
+
+
+def _install_shape_kind(R):
+    """The main tree runner captures batch 1 as a tree round (the fused hooks) and batches 2..K as
+    batched tree rounds (native GDN tree verify)."""
+    if _MAIN_BS == 1 or getattr(R, "_ax_shape_kind", False):
+        return     # without AX_BTREE every main-runner shape is a tree round (the capture sets it)
+    original = getattr(R, "capture_one_shape", None)
+    if original is None:
+        raise RuntimeError("ax-engine: AX_BTREE needs DecodeCudaGraphRunner.capture_one_shape (SGLang 0.5.23); "
+                           "this SGLang version needs a port")
+
+    def capture_one_shape(self, size, *args, **kwargs):
+        if not getattr(self, "_ax_main_tree", False):
+            return original(self, size, *args, **kwargs)
+        state = current_runtime()
+        previous = state.kind
+        state.kind = "tree" if size == 1 else "btree"
+        try:
+            return original(self, size, *args, **kwargs)
+        finally:
+            state.kind = previous
+
+    patch_attribute(R, 'capture_one_shape', capture_one_shape)
+    patch_attribute(R, '_ax_shape_kind', True)
 
 
 def _install_graphs(W):
@@ -334,19 +371,21 @@ def _install_graphs(W):
         width = getattr(self, "_ax_chain_width", None)
         main = target and width is None
         if main:
-            # one request only: the tree graph (tree on) or an unused batch-1 chain graph (tree off;
-            # every chain round runs on a private runner)
-            self.capture_bs = [b for b in self.capture_bs if b == 1]
-            self.compile_bs = [b for b in (self.compile_bs or []) if b == 1]
+            # the tree graphs (tree on: batch 1, and 2..AX_BTREE) or an unused batch-1 chain graph
+            # (tree off; every chain round runs on a private runner)
+            self.capture_bs = [b for b in self.capture_bs if b <= _MAIN_BS]
+            self.compile_bs = [b for b in (self.compile_bs or []) if b <= _MAIN_BS]
+            self._ax_main_tree = _TREE
         current_runtime().kind = "tree" if main and _TREE else "chain"
         try:
             return original_capture(self)
         finally:
             current_runtime().kind = previous_kind
             if main:
-                self.max_bs = 1
+                self.max_bs = max(self.capture_bs)
 
     patch_attribute(R, 'capture', capture)
+    _install_shape_kind(R)
     patch_attribute(R, '_ax_chain_graphs', True)
 
     cls = W.DFlashTreeWorkerV2
@@ -595,11 +634,14 @@ def choose(w, batch, *, draft_features_ready):
     wants_tree = decided[1] if decided is not None and decided[0] == id(batch) else tree_round(batch)
     # The builder reads this round's logits or lattice from the folded sampler.
     is_tree = wants_tree and draft_features_ready
+    current_runtime().round_info["draft_graph"] = bool(draft_features_ready)
     if is_tree and getattr(w, "_ax_draft_width", None) is not None:
         raise RuntimeError("ax-engine: tree round after drafting at a chain width")   # begin_round disagreed
     if is_tree:
-        current_runtime().kind = "tree"
-        current_runtime().stats["tree"] += 1
+        # "btree": one tree per request, on SGLang's native GDN tree verify (the fused tree
+        # hooks serve one request and decline it)
+        current_runtime().kind = "tree" if len(batch.reqs) == 1 else "btree"
+        current_runtime().stats[current_runtime().kind] += 1
     else:
         current_runtime().kind = "chain"
         current_runtime().stats["chain"] += 1
@@ -679,17 +721,26 @@ def record_accept(w, batch, candidates, accept_len):
             req._ax_pre1 = before[i:i + 1]
     if _DUMP:
         _dump(batch, "chain", candidates, accept_len)
+    if _TRACE:
+        _trace(w, batch, "chain", candidates, accept_len)
 
 
-def record_tree(batch, pre1, tree_tokens, accept_index, accept_lens):
+def record_tree(batch, pre1, tree_tokens, accept_index, accept_lens, worker=None):
     """After a tree round: same bookkeeping as record_accept."""
     if pre1 is not None:
         batch.reqs[0]._ax_pre1 = pre1
     if current_runtime().round_info["backend"] is None:
         current_runtime().round_info["backend"] = current_runtime().main_backend
+    if _DUMP or _TRACE:
+        # accept_index holds flat node indices over the batch (request b's nodes start at b * N)
+        n = tree_tokens.shape[1]
+        base = torch.arange(tree_tokens.shape[0], device=accept_index.device)[:, None] * n
+        local = torch.where(accept_index >= 0, accept_index.long() - base, 0)
+        path = tree_tokens.gather(1, local)
     if _DUMP:
-        path = tree_tokens.gather(1, accept_index.clamp(min=0).long())
         _dump(batch, "tree", path, accept_lens.to(torch.int64) - 1, nodes=tree_tokens)
+    if _TRACE and worker is not None:
+        _trace(worker, batch, "tree", path, accept_lens.to(torch.int64) - 1, width=int(tree_tokens.shape[1]))
 
 
 def pre1_for(req):
@@ -708,6 +759,34 @@ def _dump(batch, kind, tokens, accept_len, nodes=None):
                    "backend": current_runtime().round_info["backend"], "graph": current_runtime().round_info["graph"]}
             if nodes is not None:
                 row["nodes"] = nodes.tolist()[i]
+            f.write(json.dumps(row) + "\n")
+
+
+def _trace(w, batch, kind, tokens, accept_len, width=None):
+    """AX_LATTICE_TRACE: one line per request of this decode round with the lattice it was drafted from.
+
+    `tokens` starts with the anchor and holds the round's verified chain (chain round) or accepted path
+    (tree round); `accept` drafts after the anchor were accepted. Concatenating `tokens[:accept + 1]`
+    over a request's rounds gives its output after the first token, so every round is written. `width`
+    is the verified row count (a tree round's nodes; a chain round's width otherwise). A round
+    whose draft ran eager (it leaves the previous lattice in place) or whose sampler keeps no lattice (a
+    narrower drafting width) is written without the lattice fields and counted."""
+    stats = current_runtime().stats
+    import ax_lattice
+    rows = None
+    if current_runtime().round_info.get("draft_graph") is True:
+        rows = ax_lattice.trace_rows(getattr(w, "_draft_sampler", None), len(batch.reqs))
+    stats["trace_lattice" if rows is not None else "trace_without_lattice"] = (
+        stats.get("trace_lattice" if rows is not None else "trace_without_lattice", 0) + 1)
+    toks = tokens.tolist()
+    acc = accept_len.tolist()
+    with open(_TRACE, "a") as f:
+        for i, req in enumerate(batch.reqs):
+            row = {"round": current_runtime().round_index, "rid": req.rid, "kind": kind, "bs": len(batch.reqs),
+                   "width": width or current_runtime().round_info.get("width"), "anchor": int(toks[i][0]),
+                   "tokens": toks[i], "accept": int(acc[i])}
+            if rows is not None:
+                row.update(rows[i])
             f.write(json.dumps(row) + "\n")
 
 

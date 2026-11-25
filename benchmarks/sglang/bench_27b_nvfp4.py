@@ -23,12 +23,13 @@ KV_DIRECT_LANE = "replay8-kv-direct"
 PLAN_REUSE_LANE = "replay8-plan-reuse"
 HOTPATHS = {
     "replay8": ("gdn_replay", None),
+    "replay16": ("gdn_replay", None),     # experimental: replay with a 16-token draft block
     KV_GRAPH_LANE: ("kv_graph", "AX_DFLASH_KV_GRAPH"),
     KV_DIRECT_LANE: ("kv_direct", "AX_DFLASH_KV_DIRECT"),
     PLAN_REUSE_LANE: ("plan_reuse", "AX_DFLASH_PLAN_REUSE"),
 }
 REPLAY_LANES = tuple(HOTPATHS)
-LANES = (*DEFAULT_LANES, *REPLAY_LANES, "tree16", "chain8")
+LANES = (*DEFAULT_LANES, *REPLAY_LANES, "stock16", "tree16", "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 
 
@@ -80,7 +81,7 @@ def launch_config(args, lane):
     tree = lane in ("tree16", "tree32")
     custom_dflash = tree or lane == "chain8"
     algorithm = "FC1_DFLASH_TREE" if custom_dflash else "DFLASH"
-    draft_block = "16" if tree else "8"
+    draft_block = "16" if tree or lane in ("stock16", "replay16") else "8"
     command += ["--speculative-algorithm", algorithm, "--speculative-draft-model-path",
                 str(args.draft.resolve()), "--speculative-num-draft-tokens", draft_block]
     if not custom_dflash:
@@ -324,7 +325,8 @@ def main():
         parser.error(f"--kv-tokens must be at least {needed} for {widest} concurrent requests "
                      f"of {args.output_tokens} output tokens")
     runs = {lane: run_lane(args, lane, prompts) for lane in args.lanes}
-    comparisons = (("stock8", "replay8"), *(("replay8", lane) for lane in REPLAY_LANES[1:]))
+    comparisons = (("stock8", "replay8"), ("stock16", "replay16"),
+                   *(("replay8", lane) for lane in REPLAY_LANES if lane not in ("replay8", "replay16")))
     for control, candidate in comparisons:
         if control not in runs or candidate not in runs:
             continue

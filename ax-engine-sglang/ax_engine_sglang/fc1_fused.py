@@ -10,6 +10,9 @@ BS = int(os.environ.get('FC1_DRAFT_BLOCK', '24'))
 GL = int(os.environ.get('AX_GDN_LAYERS', '24'))   # ax-engine-sglang: GDN layers of the target
 GH = int(os.environ.get('AX_GDN_HEADS', '32'))    # ax-engine-sglang: GDN value heads
 AX_DBG = os.environ.get('AX_GDN_DEBUG') == '1'     # ax-engine-sglang: diagnostics, see patch_dforktree.py
+# ax-engine-sglang AX_BTREE: batched tree rounds of up to KMAX requests run ax_btree_kernels unless
+# AX_BTREE_NATIVE=1 leaves them to SGLang's native GDN tree verify
+KMAX = get_config().btree if get_config().fused and not get_config().btree_native else 0
 'Our-only GDN adapter. Native baselines never import this module.'
 import torch
 import triton
@@ -32,6 +35,16 @@ class Context:
             self.ax_kv_done = False
         self.layers = {}
         self.inter_indices = None
+        if KMAX > 1:   # batched tree rounds: aux arrays (layer, request, head, node, ...), trees per request
+            self.bkeys = torch.empty(GL, KMAX, GH, NN, 128, device='cuda')
+            self.bvalues = torch.empty_like(self.bkeys)
+            self.bgains = torch.empty(GL, KMAX, GH, NN, device='cuda')
+            self.banc = torch.eye(NN, device='cuda', dtype=torch.float32).repeat(KMAX, 1, 1)
+            self.bcidx = torch.zeros(KMAX, NN, 4, device='cuda', dtype=torch.int32)
+            # SGLang's positional scratch-row table (request row i -> row i, gdn_backend
+            # verify_intermediate_state_indices; one tensor for every batch size, so a graph padded to a
+            # larger captured size reads the same rows); a commit takes its first bs entries
+            self.binter = None
 def context():
     return current_runtime().fused_context
 
@@ -49,6 +62,15 @@ def _tree_round():
     # round kind, not the shape, decides (ax_chain.py)
     import ax_chain
     return ax_chain.is_tree()
+
+
+def _batched_round():
+    """A batched tree round (AX_BTREE) served by ax_btree_kernels (counted as a btree hook call)."""
+    state = current_runtime()
+    if KMAX > 1 and state.kind == 'btree':
+        state.stats['hook_btree'] += 1
+        return True
+    return False
 
 COLLECT_LAYER = False
 LAYER_STATS = []
@@ -88,6 +110,8 @@ def install():
 
     def fused(self, A_log, dt_bias, q, k, v, a, b, **kw):
 
+        if kw['cache_steps'] == NN and _batched_round():
+            return fused_batched(A_log, dt_bias, q, v, a, b, kw)
         if kw['cache_steps'] != NN or not _tree_round():   # ax-engine-sglang: tree rounds only
             return original(self, A_log, dt_bias, q, k, v, a, b, **kw)
         ensure_context()
@@ -112,7 +136,56 @@ def install():
             context().ax_amax[li, 2] = (y.float() * y.float()).reshape(NN, -1)[:, :q.shape[2] * q.shape[3] * 2].sum(-1).min()
         return out.unsqueeze(0)
 
+    def fused_batched(A_log, dt_bias, q, v, a, b, kw):
+        import ax_btree_kernels as TKB
+        ctx = ensure_context()
+        key = A_log.data_ptr()
+        if key not in ctx.layers:
+            ctx.layers[key] = (len(ctx.layers), -A_log.float().exp())
+        li, neg = ctx.layers[key]
+        bs = q.shape[1] // NN
+        assert li < GL and q.shape[0] == 1 and q.shape[1] == bs * NN and 1 <= bs <= KMAX
+        ctx.binter = kw['intermediate_state_indices']
+        pool = kw['ssm_states']
+        aux = (ctx.bkeys[li, :bs].view(bs * GH, NN, 128), ctx.bvalues[li, :bs].view(bs * GH, NN, 128),
+               ctx.bgains[li, :bs].view(bs * GH, NN))
+        out = TKB.tree_gdn(ctx.current_mixed, a.reshape(bs * NN, -1), b.reshape(bs * NN, -1), A_log, dt_bias,
+                           pool[0].transpose(-1, -2), ctx.banc[:bs], bs, q.shape[2], v.shape[2], q.shape[3], v.shape[3],
+                           aux=aux, neg_exp_A=neg, state_indices=kw['cache_indices'], state_slot_stride=pool.stride(0))
+        return out.unsqueeze(0)
+
     def fused_commit(target_worker, batch, accept_lens, accept_index, draft_token_num, prepared_step_indices=None):
+        if context() is not None and draft_token_num == NN and accept_index.numel() and _batched_round():
+            import ax_btree_kernels as TKB
+            last, track = _verify_commit_step_indices(batch=batch, accept_index=accept_index, accept_lens=accept_lens, draft_token_num=draft_token_num)
+            if track is None and __import__('os').environ.get('AX_FAST') == '1':
+                ends = last.contiguous()
+            else:
+                ends = torch.cat((last, track if track is not None else torch.full_like(last, -1))).contiguous()
+            bs = accept_index.shape[0]
+            pool = target_worker.model_runner.req_to_token_pool
+            state = pool.get_speculative_mamba2_params_all_layers()
+            slots = pool.get_mamba_indices(batch.req_pool_indices)
+            import ax_state_cap
+            if ax_state_cap.POS:
+                # The intermediate SSM cache has fewer positions than a tree has nodes (ax_state_cap.py),
+                # as in the one-request branch below: each request's accepted state goes straight into its
+                # slot's persistent state (an out view with node stride 0), then only the conv windows,
+                # which keep one position per node, are rolled back from SGLang's positional scratch rows.
+                if track is not None:
+                    raise RuntimeError("ax-engine: AX_SSM_POSITIONS needs the radix cache off (no mamba track)")
+                t = state.temporal
+                TKB.snapshots(t, context().bkeys, context().bvalues, context().bgains, context().banc, accept_index,
+                              last.contiguous(), slots, slots, t.unsqueeze(2).expand(t.shape[0], t.shape[1], NN,
+                                                                                    *t.shape[2:]), GH, NN)
+                from sglang.kernels.ops.mamba.mamba_state_scatter_triton import fused_conv_window_scatter_with_mask
+                for conv, window in zip(state.conv, state.intermediate_conv_window):
+                    if conv.numel() > 0:
+                        fused_conv_window_scatter_with_mask(conv, window, slots, last, None)
+                return None
+            TKB.snapshots(state.temporal, context().bkeys, context().bvalues, context().bgains, context().banc,
+                          accept_index, ends, slots, context().binter[:bs], state.intermediate_ssm, GH, NN)
+            return commit(target_worker, batch, accept_lens, accept_index, draft_token_num, prepared_step_indices)
         if context() is not None and draft_token_num == NN and accept_index.numel() and _tree_round():
             last, track = _verify_commit_step_indices(batch=batch, accept_index=accept_index, accept_lens=accept_lens, draft_token_num=draft_token_num)
             import ax_state_cap
@@ -178,7 +251,7 @@ def install():
     routing = GDNAttnBackend._target_verify_supports_strided_qkv
 
     def direct_routing(self, **kwargs):
-        if not NATIVE_REFERENCE and kwargs['draft_token_num'] == NN and _tree_round():
+        if not NATIVE_REFERENCE and kwargs['draft_token_num'] == NN and (_tree_round() or _batched_round()):
             return True
         return routing(self, **kwargs)
     patch_attribute(GDNAttnBackend, '_target_verify_supports_strided_qkv', direct_routing)

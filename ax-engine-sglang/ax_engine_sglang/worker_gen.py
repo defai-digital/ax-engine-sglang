@@ -42,7 +42,7 @@ EDITS = [
      "        if __import__('os').environ.get('FC1_BRANCH_PILOT') == '1':\n"
      "            import ax_chain\n"
      "            draft_features_ready = self._draft_sampler is not None and draft_out.can_run_graph\n"
-     "            if ax_chain.choose(self, batch, draft_features_ready=draft_features_ready) == 'tree':\n"
+     "            if ax_chain.choose(self, batch, draft_features_ready=draft_features_ready) in ('tree', 'btree'):\n"
      "                from fc1_branch64 import verify_branch\n"
      "                return verify_branch(self, batch, draft_tokens, prefix_lens, positions, kv_loc_plan, "
      "verify_out_cache_loc_2d, on_publish)\n"

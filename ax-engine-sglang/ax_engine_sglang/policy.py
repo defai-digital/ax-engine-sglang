@@ -21,6 +21,12 @@ def use_tree(config: PluginConfig, features: RoundFeatures) -> bool:
     return features.greedy or (config.tree_sampling and not features.min_p)
 
 
+def use_btree(config: PluginConfig, features: RoundFeatures) -> bool:
+    """AX_BTREE: one lattice tree per request for a greedy batch of 2..AX_BTREE requests."""
+    return (config.tree and 2 <= features.requests <= config.btree and not features.grammar
+            and not features.logprobs and not features.custom_processor and features.greedy)
+
+
 def chain_width(config: PluginConfig, block: int, round_index: int, requests: int = 1) -> int:
     if config.chain_width_table:
         # AX_CHAIN_WIDTH_BY_BATCH: the last entry whose first batch size is not above this round's.

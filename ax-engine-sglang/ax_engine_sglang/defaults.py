@@ -162,14 +162,20 @@ def _int_env(environ, name):
         raise LaunchConfigError(f"{name} must be an integer, got {value!r}") from error
 
 
+REPLAY_WIDTHS = (8, 16)
+
+
 def _plan_gdn_chain_replay(result, args, environ, target, drafter, capability):
     feature = "AX_GDN_CHAIN_REPLAY=1"
     if (getattr(args, "speculative_algorithm", None) or "").upper() != "DFLASH":
         raise LaunchConfigError(f"{feature} requires --speculative-algorithm DFLASH")
-    if (getattr(args, "speculative_num_draft_tokens", None) != 8
+    # Width eight is the validated route. Width sixteen is experimental: the KV graph, direct
+    # writer and plan reuse options check for eight themselves and leave a wider block to SGLang.
+    if (getattr(args, "speculative_num_draft_tokens", None) not in REPLAY_WIDTHS
             or getattr(args, "speculative_eagle_topk", None) not in (None, 1)
             or drafter_kind(drafter) != "dflash2"):
-        raise LaunchConfigError(f"{feature} requires a DFlash2 drafter with --speculative-num-draft-tokens 8")
+        raise LaunchConfigError(f"{feature} requires a DFlash2 drafter with --speculative-num-draft-tokens 8 "
+                                "(or 16, experimental)")
     if (gdn_shape(target or {}) != (48, 48)
             or "Qwen3_5ForConditionalGeneration" not in (target or {}).get("architectures", ())):
         raise LaunchConfigError(f"{feature} requires the dense Qwen3.8-27B GDN target")

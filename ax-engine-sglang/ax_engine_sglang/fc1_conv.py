@@ -32,6 +32,15 @@ def install():
     original = backend.causal_conv1d_update
 
     def call(x, conv_state, weight, bias=None, activation=None, **kw):
+        if not F.NATIVE_REFERENCE and x.ndim == 3 and x.shape[-1] == F.NN and F._batched_round():
+            # ax-engine-sglang AX_BTREE: one tree per request, ax_btree.BatchedLatticeBuilder's cidx
+            import ax_btree_kernels as TKB
+            assert weight.shape[-1] == 4 and activation in ['silu', 'swish', True]
+            bs = x.shape[0]
+            out = TKB.tree_conv(x, conv_state, weight, bias, F.ensure_context().bcidx[:bs], kw['conv_state_indices'],
+                                kw['intermediate_state_indices'], kw['intermediate_conv_window'])
+            F.context().current_mixed = out.view(bs * F.NN, -1)
+            return out.transpose(1, 2)
         if F.NATIVE_REFERENCE or x.ndim != 3 or x.shape[0] != 1 or (x.shape[-1] != F.NN) or not F._tree_round():
             return original(x, conv_state, weight, bias, activation, **kw)
         assert weight.shape[-1] == 4 and activation in ['silu', 'swish', True]

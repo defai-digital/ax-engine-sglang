@@ -27,6 +27,7 @@ except ModuleNotFoundError as error:
         raise
     patch_attribute = setattr  # Legacy DForkTree overlays copy this file without the package.
 
+import base64
 import os
 
 import torch
@@ -84,9 +85,10 @@ def install():
         # transform is the identity, which the public DFlash2 checkpoints use)
         lse_top = torch.logsumexp(vals.float(), -1)
         tail = lse.float() + torch.log1p(-torch.exp(lse_top - lse.float()).clamp(max=1.0 - 1e-6))
-        self.fc1_cand = cand
-        self.fc1_lat = lat.float()
-        self.fc1_tail = tail.view(bs, -1)
+        # One sampler serves the draft graph of every captured batch size, so the lattice goes into
+        # persistent max-batch buffers like candidate_out: rebinding the attributes would leave them
+        # on the tensors of whichever graph was captured last, stale or too short for the others.
+        _store_lattice(self, cand, lat.float(), tail.view(bs, -1))
         tokens, q_rows = self.selector.sample_path(candidate_ids=cand, scores=lat, uniforms=self.uniforms[:bs].uniform_(),
                                                    temperatures=self.temperatures[:bs], greedy_mask=self.greedy_mask[:bs])
         self.out[:tokens.numel()].copy_(tokens.reshape(-1))
@@ -98,11 +100,84 @@ def install():
     patch_attribute(__import__("sys").modules[__name__], "_installed", True)
 
 
-def lattice_logc(lat, tail):
-    """(gamma, K, K) lattice + (gamma,) tail -> c0 (K,) and logc (gamma-1, K, K) log-probabilities."""
-    g, K, _ = lat.shape
-    full = torch.cat((lat, tail[:, None, None].expand(g, K, 1)), dim=-1)
-    lp = lat - torch.logsumexp(full, -1, keepdim=True)
+def _store_lattice(sampler, cand, lat, tail):
+    """Copy this call's rows into the sampler's max-batch lattice buffers (allocated on first use)."""
+    bs = cand.shape[0]
+    buffers = getattr(sampler, "_ax_lattice_buffers", None)
+    if buffers is None or buffers[0].shape[1:] != cand.shape[1:] or buffers[0].shape[0] < bs:
+        if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+            # A buffer made inside one batch size's capture would be invisible to the graphs captured
+            # before it. SGLang warms each size up eagerly (largest first) before capturing it.
+            raise RuntimeError("ax_lattice: lattice buffers must be allocated before draft CUDA graph capture")
+        rows = max(bs, sampler.candidate_out.shape[0])
+        buffers = tuple(torch.zeros((rows, *t.shape[1:]), dtype=t.dtype, device=t.device) for t in (cand, lat, tail))
+        sampler._ax_lattice_buffers = buffers
+        sampler.fc1_cand, sampler.fc1_lat, sampler.fc1_tail = buffers
+    for buffer, value in zip(buffers, (cand, lat, tail)):
+        buffer[:bs].copy_(value)
+
+
+def trace_rows(sampler, count):
+    """AX_LATTICE_TRACE: this round's lattice per request, for benchmarks/sglang/simulate_lattice_tree.py.
+
+    Rows of the selector sampler's last call: `cand` (positions x top_k token ids, int32), `lat`
+    (positions x top_k x top_k scores, float32: row 0 of position 0 scores the anchor's candidates,
+    row p of position s the candidates after candidate p of position s - 1) and `tail` (positions,
+    float32: the target-head mass outside the top-k, on the same scale), each little-endian and
+    base64-encoded. None when this sampler keeps no lattice (a narrower chain width's sampler) or
+    holds fewer rows than the batch. The caller checks that the draft graph ran this round: a graph
+    replay at the batch's (padded) size writes the first rows of these buffers without running this
+    Python code, while an eager draft leaves the previous round's lattice in place. Reads back to the host: diagnostics only."""
+    cand = getattr(sampler, "fc1_cand", None)
+    lat = getattr(sampler, "fc1_lat", None)
+    tail = getattr(sampler, "fc1_tail", None)
+    if cand is None or lat is None or tail is None or cand.shape[0] < count:
+        return None
+
+    def encode(tensor):
+        array = tensor.contiguous().numpy()
+        return base64.b64encode(array.astype(array.dtype.newbyteorder("<"), copy=False).tobytes()).decode()
+
+    cand = cand[:count].to(torch.int32).cpu()
+    lat = lat[:count].float().cpu()
+    tail = tail[:count].float().cpu()
+    positions, top_k = int(cand.shape[1]), int(cand.shape[2])
+    return [{"positions": positions, "top_k": top_k, "cand": encode(cand[i]), "lat": encode(lat[i]),
+             "tail": encode(tail[i])} for i in range(count)]
+
+
+def tree_scores(lat, tail, temp=1.0, penalty=0.0, use_tail=True):
+    """Child log-scores of the lattice tree search, (..., gamma, K, K) lattice + (..., gamma) tail.
+
+    Each row is a log-softmax over its K candidates at temperature `temp`, with the mass outside the
+    top-k (`tail`, scaled the same way) as one more entry unless `use_tail` is off; a child that is
+    not its row's argmax loses `penalty` (a per-branch cost that favours the greedy spine). The
+    defaults are the plain lattice log-probabilities. `benchmarks/sglang/simulate_lattice_tree.py`
+    implements the same rule; its tests check that both select the same tree."""
+    if temp != 1.0:
+        lat, tail = lat / temp, tail / temp
+    if use_tail:
+        lat_full = torch.cat((lat, tail[..., None, None].expand(*lat.shape[:-1], 1)), dim=-1)
+    else:
+        lat_full = lat
+    lp = lat - torch.logsumexp(lat_full, -1, keepdim=True)
+    if penalty:
+        top = lp.argmax(-1, keepdim=True)
+        branch = torch.arange(lp.shape[-1], device=lp.device) != top
+        lp = lp - penalty * branch.to(lp.dtype)
+    return lp
+
+
+def tree_shape():
+    """(temp, penalty, use_tail, lmax) of the lattice tree search from the plugin configuration."""
+    from ax_engine_sglang.config import get_config
+    config = get_config()
+    return config.tree_temp, config.tree_branch_penalty, config.tree_tail, config.tree_lmax
+
+
+def lattice_logc(lat, tail, temp=1.0, penalty=0.0, use_tail=True):
+    """(gamma, K, K) lattice + (gamma,) tail -> c0 (K,) and logc (gamma-1, K, K) tree scores."""
+    lp = tree_scores(lat, tail, temp, penalty, use_tail)
     return lp[0, 0], lp[1:]
 
 
@@ -117,6 +192,7 @@ class LatticeBuilder:
 
         self.n = get_config().tree_nodes
         self.chain_first = os.environ.get("FC1_CHAIN_FIRST", "0") == "1"
+        self.shape = tree_shape()
         cand, lat, tail = sampler.fc1_cand[0], sampler.fc1_lat[0], sampler.fc1_tail[0]
         self.slots = cand.shape[0]
         self.cand = torch.zeros_like(cand)
@@ -135,8 +211,9 @@ class LatticeBuilder:
 
     def run(self):
         TO = self.TO
-        c0, logc = lattice_logc(self.lat, self.tail)
-        ss, cand, parent, _ = TO.beam_tree(c0, logc, self.n, 99, self.chain_first, None, S=self.slots)
+        temp, penalty, use_tail, lmax = self.shape
+        c0, logc = lattice_logc(self.lat, self.tail, temp, penalty, use_tail)
+        ss, cand, parent, _ = TO.beam_tree(c0, logc, self.n, lmax, self.chain_first, None, S=self.slots)
         self.parent = torch.cat((torch.full_like(self.root, -1), parent + 1))
         self.anc, self.depth, self.cidx = TO.tree_struct(self.parent, 4)
         self.tokens = torch.cat((self.root, self.cand[ss, cand]))

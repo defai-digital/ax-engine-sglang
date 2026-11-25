@@ -130,10 +130,15 @@ class StockRouteDefaultsTests(unittest.TestCase):
         )
         self.assertEqual(plan(launch, {}, QWEN38_27B, DFLASH2, capability=(12, 0)).args, {})
 
+    def test_gdn_chain_replay_accepts_the_experimental_width_sixteen(self):
+        launch = args("DFLASH", speculative_num_draft_tokens=16, disable_radix_cache=True)
+        result = plan(launch, {"AX_GDN_CHAIN_REPLAY": "1"}, QWEN38_27B, DFLASH2, capability=(12, 0))
+        self.assertEqual(result.args["enable_linear_replayssm_spec"][0], True)
+
     def test_gdn_chain_replay_rejects_unqualified_launches(self):
         cases = (
             ({"speculative_algorithm": "FC1_DFLASH_TREE"}, "algorithm DFLASH"),
-            ({"speculative_num_draft_tokens": 16}, "tokens 8"),
+            ({"speculative_num_draft_tokens": 12}, "tokens 8"),
             ({"pp_size": 2}, "TP1, PP1 and DP1"),
             ({"disable_radix_cache": False}, "disable-radix-cache"),
             ({"mamba_ssm_dtype": "bfloat16"}, "mamba-ssm-dtype float32"),
