@@ -191,6 +191,19 @@ def main():
     )
 
     bar_chart(
+        OUT / "rtx-pro-6000-27b-batched-trees.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · batched lattice trees",
+        subtitle="200 prompts · 256 greedy output tokens · 8 slots · 16-node trees · fused GDN kernels",
+        series=[("AX tree 16, chain rounds above one request", AX_LIGHT), ("AX batched trees (AX_BTREE=4)", AX),
+                ("AX batched trees + AX_TREE_TEMP=1.55", AX_DEEP)],
+        panels=[{"categories": ["C1", "C2", "C4"],
+                 "values": [[235.1, 336.6, 536.8], [235.3, 395.1, 678.8], [244.1, 407.7, 689.0]]}],
+        xlabel="Output tokens per second", legend_columns=2,
+        description="Batched trees gain 17% at two requests and 26% at four over chain rounds; the tree temperature "
+                    "adds about 3%.",
+    )
+
+    bar_chart(
         OUT / "rtx-pro-6000-flash-next-nvfp4-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",

@@ -320,6 +320,26 @@ match. The parity iterations that produced the profile, including the
 faster value-tile timings, are in the performance notes.
 [Verified profile gate](docs/reports/2026-11-21-verified-profile-gate.md) · [Parity history](docs/performance.md#rtx-speed-and-parity-profiles) · [Launch settings](ax-engine-sglang/README.md#launch-check-quality-profile-and-adaptive-chain-width)
 
+##### Batched lattice trees and tree-shape tuning
+
+One DFlash2 lattice tree per request for two to four greedy requests
+(`AX_BTREE=4`, fused GDN kernels), with the tree temperature found by
+offline Optuna tuning (`AX_TREE_TEMP=1.55`). 200 prompts, 256 output tokens,
+NVFP4, output tok/s:
+
+![RTX PRO 6000 batched lattice trees at one, two and four requests. Batched trees gain 17% at C2 and 26% at C4 over chain rounds, and the tree temperature adds about 3%.](docs/figures/rtx-pro-6000-27b-batched-trees.svg)
+
+| Route | C1 | C2 | C4 |
+|---|---:|---:|---:|
+| Tree 16, chain rounds above one request | 235.1 | 336.6 | 536.8 |
+| Batched trees (`AX_BTREE=4`) | 235.3 | 395.1 | 678.8 |
+| Batched trees + `AX_TREE_TEMP=1.55` | **244.1** | **407.7** | **689.0** |
+
+Experimental and off by default. With SGLang's native GDN kernels the
+batched trees gained 0-2%.
+
+[Benchmark report](results/rtx_pro_6000_tree_width/REPORT.md)
+
 #### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
 
 One GPU served Flash Next with pinned-host FP8 PLE and 128 greedy output
