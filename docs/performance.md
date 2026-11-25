@@ -51,9 +51,10 @@ check matched all **64 of 64** stock greedy sequences.
 
 ### B200 DFlash2 serving retest
 
-The 128-token retest pooled two streamed passes per route and used the
-same greedy prompts for all lanes. Values are code / math / chat output
-tok/s.
+Each route ran two streamed passes with the same inputs and exactly 128
+greedy output tokens per request. Each pass used eight prompts per
+workload at C1 and 24 at C8. Values are code / math / chat output tok/s
+pooled over both passes.
 
 ![B200 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](figures/b200-27b-nvfp4-serving-retest.svg)
 
@@ -358,8 +359,10 @@ stock MTP3 as the speculative baseline.
 
 ### RTX PRO 6000 Flash Next serving retest
 
-Both passes used the same 128-token greedy workloads and pinned-host FP8
-PLE. Values are code / math / chat output tok/s.
+Both passes used the same prompts, 128 greedy output tokens per request,
+and pinned-host FP8 PLE. Each pass used eight prompts per workload at C1
+and 24 at C8. Values are code / math / chat output tok/s pooled over both
+passes.
 
 ![RTX PRO 6000 Flash Next NVFP4 throughput by serving route and workload at one and eight clients.](figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
 
@@ -375,8 +378,9 @@ chat pass.
 
 ### B200 Flash Next serving retest
 
-The 128-token retest used two streamed passes per lane. Values are
-code / math / chat output tok/s.
+The B200 used the same prompts and 128-token output budget as the RTX
+PRO 6000 retest. Values are code / math / chat output tok/s pooled over two
+streamed passes.
 
 ![B200 Flash Next NVFP4 throughput for AR, MTP3, AX MTP3, and AX MTP7 at one and eight clients.](figures/b200-flash-next-nvfp4-serving-retest.svg)
 

@@ -136,10 +136,21 @@ Replay raised aggregate throughput by **10.1%**. A separate 256-token
 check matched all **64 of 64** stock greedy sequences.
 [Benchmark data and reproduction](docs/decisions/2026-11-16-dual-attention-backend.md#recurrent-verification-with-accepted-prefix-replay-2026-11-20)
 
-In a separate 128-token B200 retest at eight concurrent clients, AX GDN
-replay reached **1,599.5 / 1,428.3 / 949.6** output tok/s for code / math /
-chat. This was **11.2% / 21.8% / 5.1%** above stock DFlash2.
-[B200 retest table and chart](docs/performance.md#b200-dflash2-serving-retest)
+##### B200 DFlash2 serving retest
+
+Each route ran two streamed passes with exactly 128 greedy output tokens
+per request. Values are code / math / chat output tok/s.
+
+![B200 Qwen3.8-27B NVFP4 serving retest at one and eight clients, with stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](docs/figures/b200-27b-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 136.0 / 136.0 / 136.4 | 448.5 / 408.1 / 281.3 | **632.5** / **516.5** / **333.8** | 456.6 / 415.3 / 286.6 |
+| 8 | 870.4 / 851.6 / 833.6 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5** / **1,428.3** / **949.6** |
+
+At eight clients, AX GDN replay improved on stock DFlash2 by
+**11.2% / 21.8% / 5.1%**. A separate warmed AR check reached 953.0 tok/s
+on chat. [B200 setup and per-pass results](docs/performance.md#b200-dflash2-serving-retest)
 
 #### RTX PRO 6000 · Qwen3.8-27B BF16 and NVFP4
 
@@ -178,9 +189,10 @@ Replay's greedy outputs varied with batching. [Parity, cancellation, and profili
 
 ##### RTX PRO 6000 · FP8 verification tactics
 
-At eight concurrent clients, the candidate cuBLAS tactics improved
-throughput by **1.95–2.61%**. They matched **57 of 64** complete greedy
-outputs in each launch order. The tactics remain experimental.
+At eight concurrent clients, both launch orders used 64 chat prompts
+with exactly 512 greedy output tokens per request. The candidate cuBLAS
+tactics improved throughput by **1.95–2.61%** and matched **57 of 64**
+complete outputs in each order. The tactics remain experimental.
 
 ![RTX PRO 6000 throughput at eight clients with default and candidate FP8 tactics in both launch orders.](docs/figures/rtx-pro-6000-27b-fp8-verify-throughput.svg)
 
@@ -343,8 +355,9 @@ test timed individual projections on synthetic CUDA inputs.
 
 #### RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4
 
-One GPU served Flash Next with pinned-host FP8 PLE. Rates pool two
-passes in code / math / chat order and use output tok/s.
+One GPU served Flash Next with pinned-host FP8 PLE and 128 greedy output
+tokens per request. Values pool two passes and show code / math / chat
+output tok/s.
 
 ![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3, AX MTP3, and AX MTP7 at one and eight clients.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
 
@@ -358,8 +371,20 @@ led chat at **455.4 tok/s**. The first AX MTP3 chat pass was slower than
 its repeat (363.7 vs. 458.2 tok/s).
 [RTX PRO 6000 Flash Next retest](results/blackwell_nvfp4_serving_retest/REPORT.md#rtx-pro-6000-qwen38-flash-next-nvfp4)
 
-On one B200 at C8, AX MTP7 led code at **1,126.9 tok/s** and AX MTP3
-led chat at **715.4 tok/s**. [B200 table and chart](docs/performance.md#b200-flash-next-serving-retest)
+#### B200 · Qwen3.8-Flash-Next NVFP4
+
+The B200 served the same prompts with the same 128-token output budget.
+Values are code / math / chat output tok/s pooled over two passes.
+
+![B200 Qwen3.8-Flash-Next NVFP4 serving retest at one and eight clients, with stock AR, stock MTP3, AX MTP3, and AX MTP7.](docs/figures/b200-flash-next-nvfp4-serving-retest.svg)
+
+| Clients | Stock AR | Stock MTP3 | AX MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 136.9 / 136.4 / 130.6 | 304.9 / 273.3 / **223.4** | 302.8 / 270.9 / 213.3 | **389.7** / **297.1** / 208.9 |
+| 8 | 614.7 / 717.4 / 594.2 | 720.7 / 947.0 / 684.5 | 745.1 / 976.8 / **715.4** | **1,126.9** / **978.8** / 607.5 |
+
+At eight clients, AX MTP7 led code and AX MTP3 led chat.
+[B200 setup and per-pass results](docs/performance.md#b200-flash-next-serving-retest)
 
 #### Two B300 GPUs · Qwen3.8-Flash-Next BF16
 

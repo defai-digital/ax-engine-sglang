@@ -456,10 +456,13 @@ z
    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14243b" x="45.36" y="31.68" transform="rotate(-0 45.36 31.68)">B200 · Qwen3.8-Flash-Next NVFP4</text>
   </g>
   <g id="text_42">
-   <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #485971" x="45.36" y="51.48" transform="rotate(-0 45.36 51.48)">Two passes per route · Same prompts and 128 greedy output tokens per request</text>
+   <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #485971" x="45.36" y="51.48" transform="rotate(-0 45.36 51.48)">128 greedy output tokens per request · Two passes per route · 8 prompts at C1, 24 at C8 per workload</text>
   </g>
   <g id="text_43">
-   <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #485971" x="378" y="371.817656" transform="rotate(-0 378 371.817656)">End-to-end output tokens per second</text>
+   <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #485971" x="378" y="366.669656" transform="rotate(-0 378 366.669656)">End-to-end output tokens per second</text>
+  </g>
+  <g id="text_44">
+   <text style="font-size: 8.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #485971" x="45.36" y="386.1" transform="rotate(-0 45.36 386.1)">All routes used pinned-host FP8 PLE.</text>
   </g>
   <g id="legend_1">
    <g id="patch_28">
@@ -470,7 +473,7 @@ L 44.082 72.478516
 z
 " style="fill: #8191a3"/>
    </g>
-   <g id="text_44">
+   <g id="text_45">
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14243b" x="70.682" y="79.128516" transform="rotate(-0 70.682 79.128516)">Stock AR</text>
    </g>
    <g id="patch_29">
@@ -481,7 +484,7 @@ L 132.093563 72.478516
 z
 " style="fill: #49709e"/>
    </g>
-   <g id="text_45">
+   <g id="text_46">
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14243b" x="158.693563" y="79.128516" transform="rotate(-0 158.693563 79.128516)">Stock MTP3</text>
    </g>
    <g id="patch_30">
@@ -492,7 +495,7 @@ L 232.777234 72.478516
 z
 " style="fill: #225dbc"/>
    </g>
-   <g id="text_46">
+   <g id="text_47">
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14243b" x="259.377234" y="79.128516" transform="rotate(-0 259.377234 79.128516)">AX MTP3</text>
    </g>
    <g id="patch_31">
@@ -503,7 +506,7 @@ L 320.174266 72.478516
 z
 " style="fill: #16826e"/>
    </g>
-   <g id="text_47">
+   <g id="text_48">
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #14243b" x="346.774266" y="79.128516" transform="rotate(-0 346.774266 79.128516)">AX MTP7</text>
    </g>
   </g>
