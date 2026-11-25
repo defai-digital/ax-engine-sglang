@@ -53,13 +53,18 @@ The plugin also accepts 0.5.22 when its source anchors match. On 0.5.22,
 supply the launch settings explicitly. `AX_AUTO_DEFAULTS` fills them on
 0.5.23.
 
-| Architecture | Recorded deployment | Evidence |
-|---|---|---|
-| Linux amd64 | NVIDIA H200 (SM90, Hopper). H100 is the same SM90 target | [Qwen3.8-27B BF16 on one H200, SGLang 0.5.22](../results/track_a_stage0_h200/REPORT.md) |
-| Linux amd64 | NVIDIA B200 (SM100) | [27B and Flash Next serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) |
-| Linux amd64 | NVIDIA RTX PRO 6000 Blackwell Server Edition (SM120) | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
-| Linux amd64 | NVIDIA GeForce RTX 5090 (SM120) | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |
-| Linux arm64 | NVIDIA Jetson Thor (SM110) | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) · [Single-host Flash Next](reports/2026-11-21-flash-next-single-thor.md) · [TensorRT Edge-LLM comparison](../results/edgellm_thor/REPORT.md) |
+Support follows the CUDA compute capability. The measured board is the
+run recorded here. H100 is the same Hopper SM90 target as H200; the
+checked-in Hopper run is the H200 report, which measured stock SGLang
+0.5.22 without the add-on. The Jetson row is SM110.
+
+| Host | Platform | Capability | Measured board | Evidence |
+|---|---|---|---|---|
+| Linux amd64 | NVIDIA Hopper (H100, H200) | SM90 | H200 | [Qwen3.8-27B BF16, SGLang 0.5.22](../results/track_a_stage0_h200/REPORT.md) |
+| Linux amd64 | NVIDIA Blackwell | SM100 | B200 | [27B and Flash Next serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) |
+| Linux amd64 | NVIDIA Blackwell | SM120 | RTX PRO 6000 Blackwell Server Edition | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
+| Linux amd64 | NVIDIA Blackwell | SM120 | GeForce RTX 5090 | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |
+| Linux arm64 | NVIDIA Jetson | SM110 | Jetson Thor | [Container, aarch64 kernel checks and model measurements](reports/2026-11-19-jetson-thor.md) · [Single-host Flash Next](reports/2026-11-21-flash-next-single-thor.md) · [TensorRT Edge-LLM comparison](../results/edgellm_thor/REPORT.md) |
 
 Each report records its exact model, precision, CUDA stack and workload.
 The Flash Next arm64 reports cover one Thor with the PLE table on NVMe

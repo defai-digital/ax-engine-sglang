@@ -74,24 +74,24 @@ than drafting and verification add.
 
 ## Supported platforms
 
-On Linux amd64 the supported platforms are NVIDIA Hopper and NVIDIA
-Blackwell. On Linux arm64 it is the NVIDIA Jetson series. A row is a board
-with a recorded run. The platform name does not extend that record to
-every other board in the family. Compute capability is the kernel
-boundary: H100 and H200 are SM90, B200 is SM100, the RTX boards are SM120,
-and Jetson Thor is SM110.
+Support follows the CUDA compute capability. The measured board is the
+run recorded in this repository. Another product on the same capability
+uses the same kernels; it is not a second report. On Linux amd64 that is
+NVIDIA Hopper and NVIDIA Blackwell. On Linux arm64 it is NVIDIA Jetson at
+SM110, which is Jetson Thor.
 
-SGLang 0.5.22 served Qwen3.8-27B BF16 on one H200. H100 is the same SM90
-target. The throughput tables below are the Blackwell and Jetson runs.
+SGLang 0.5.22 served Qwen3.8-27B BF16 on one H200 without the add-on.
+The add-on's current routes have no SM90 measurement yet. The throughput
+tables below are the Blackwell and Jetson runs.
 [H200 baselines](results/track_a_stage0_h200/REPORT.md)
 
-| Host | Platform | Recorded board |
-|---|---|---|
-| Linux amd64 (x86_64) | NVIDIA Hopper | H200 (SM90). H100 is the same SM90 target |
-| Linux amd64 (x86_64) | NVIDIA Blackwell | B200 (SM100) |
-| Linux amd64 (x86_64) | NVIDIA Blackwell | RTX PRO 6000 Blackwell Server Edition (SM120) |
-| Linux amd64 (x86_64) | NVIDIA Blackwell | GeForce RTX 5090 (SM120) |
-| Linux arm64 (aarch64) | NVIDIA Jetson series | Jetson Thor (SM110) |
+| Platform | Host | Capability | Measured board |
+|---|---|---|---|
+| NVIDIA Hopper | Linux amd64 (x86_64) | SM90 | H200 |
+| NVIDIA Blackwell | Linux amd64 (x86_64) | SM100 | B200 |
+| | | SM120 | RTX PRO 6000 Blackwell Server Edition |
+| | | SM120 | GeForce RTX 5090 |
+| NVIDIA Jetson | Linux arm64 (aarch64) | SM110 | Jetson Thor |
 
 The plugin also accepts SGLang 0.5.22 when its source anchors match. On
 0.5.22, supply the launch settings yourself. `AX_AUTO_DEFAULTS` fills them
