@@ -158,8 +158,9 @@ against 333.7 for stock DFlash2.
 
 On a 32 GB RTX 5090 the same checkpoints used two slots and a pooled
 ten-prompt mix. Tree 32 reached 135.18 tok/s at one request (2.35× stock
-AR, 8.1% above stock DFlash2). At two requests the speculative routes
-finished within 0.6%.
+AR, 8.1% above stock DFlash2). At two requests the SGLang speculative
+routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
+inputs, reached 168.5 and 279.6 tok/s.
 [RTX 5090](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
 
 On one Jetson Thor, tree 32 led Edge-LLM DDTree 32 on code and math and
@@ -186,8 +187,8 @@ BF16 weights are about 360 GB, so this checkpoint does not fit one B200.
 Two B200s served it with tensor parallelism of 2 and the PLE table in
 pinned host memory. The greedy limit was 256 tokens at concurrency 1, 4,
 and 16. AX MTP7 led code and math at one client. Stock vLLM MTP3 led chat
-there, and led every workload at 4 and 16 clients. TensorRT-LLM was still
-pending.
+there, and led every workload at 4 and 16 clients. TensorRT-LLM 1.4.0rc3
+failed in its first decode step.
 [Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
 
 ### Exact outputs

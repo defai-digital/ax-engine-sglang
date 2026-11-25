@@ -10,7 +10,11 @@ Stock vLLM is `0.34.0rc1.dev1105+g2f170a0fe` from the commit wheel index,
 with `VLLM_PLUGINS` empty. TensorRT-LLM is `1.4.0rc3` (PyTorch backend,
 `trtllm-serve`). SGLang is 0.5.23 with ax-engine-sglang 0.5.1.
 
-Lanes still running when this report was written are marked *pending*.
+TensorRT-LLM needed three launch fixes on every pod: plain `mpirun` with
+the virtual environment first on `PATH`, serial weight loading, and the
+system NVRTC 13.2 (`LD_PRELOAD=/usr/local/cuda/lib64/libnvrtc.so.13`). The
+pip `nvidia-cuda-nvrtc 13.0.88` that PyTorch pins fails TensorRT-LLM's
+kernel JIT with `NVRTC Internal Error`.
 
 ## Two B200 GPUs · Qwen3.8-Flash-Next BF16
 
@@ -42,7 +46,7 @@ Cells give code / math / chat output tok/s.
 | Stock SGLang MTP3 | 406.7 / 430.3 / 336.9 | 877.1 / 979.5 / 754.3 | 1,042.3 / 2,117.8 / 1,599.7 |
 | Stock vLLM MTP3 | 508.9 / 483.5 / **369.5** | **1,260.3 / 1,270.7 / 945.0** | **2,589.4 / 2,671.9 / 1,943.0** |
 | AX MTP7 | **535.9 / 506.6** / 303.8 | 943.2 / 1,029.8 / 654.3 | 2,078.6 / 2,230.6 / 1,443.4 |
-| TensorRT-LLM AR, MTP3, MTP7 | *pending* | *pending* | *pending* |
+| TensorRT-LLM AR, MTP3, MTP7 | failed | failed | failed |
 
 Stock vLLM MTP3 led every cell at C4 and C16 and chat at C1; AX MTP7 led
 code and math at C1. Against AX MTP7, vLLM MTP3 ran 1.34 / 1.23 / 1.44
@@ -75,7 +79,22 @@ The table uses the 0.93 rerun. TensorRT-LLM's first lanes failed before
 loading: `trtllm-llmapi-launch` started `/usr/bin/python3` because Debian's
 OpenMPI prepends `/usr/bin` to `PATH` when called as `/usr/bin/mpirun`.
 With plain `mpirun`, the parallel weight loader was killed by the 647 GB
-container memory limit (exit 137); a serial-load retry is queued.
+container memory limit (exit 137).
+
+**TensorRT-LLM did not serve Flash Next on B200.** With serial loading and
+NVRTC 13.2, every lane (AR, MTP3, MTP7) loaded both ranks and then failed in
+the first decode step. Flash Next's attention backend,
+`QSATrtllmAttention`, JIT-compiles the trtllm-gen kernel
+`fmhaSm100aKernel_QkvBfloat16OBfloat16H256PagedKvDenseP32VarSeqQ16Kv256StaticSwapsAbForGen`,
+and NVRTC stops with `could not open source file "cuda.h" (no directories in
+search list)`. The wheel ships the header under
+`tensorrt_llm/include/trtllm_gen_kernels/fmha/cuda/`, but the compile call
+passes no include path. Setting `CUDA_HOME`, swapping NVRTC 13.2 for 13.4,
+and an `LD_PRELOAD` shim that appends `--include-path` to
+`nvrtcCompileProgram` did not change the error. The shim compiled a
+`#include <cuda.h>` test kernel standalone, so the failing call does not go
+through the exported NVRTC symbol. This is a TensorRT-LLM 1.4.0rc3 defect,
+not a memory limit; more GPUs would not change it.
 
 ## RTX PRO 6000 · Qwen3.8-27B and Flash Next DFlash2
 
@@ -112,20 +131,76 @@ vLLM's DFlash2 proposer reached 5.8–6.5 on code and math.
 MTP checkpoint and linear n-gram proposers`. The drafter's model card
 documents serving only through a patched SGLang.
 
-TensorRT-LLM DFlash2 lanes (27B NVFP4, 27B BF16, Flash Next) and stock vLLM
-Flash Next MTP3 are *pending*. The first TensorRT-LLM attempts hit the same
-`/usr/bin/mpirun` path problem as the B200.
+**Autoregressive baselines.** Stock vLLM and TensorRT-LLM ran AR with the
+same client. TensorRT-LLM used `trtllm-serve` with 8 sequences, a
+4,096-token context, 8,192 batched tokens, KV fraction 0.85, block reuse
+off and padded CUDA graphs.
+
+| Model | Clients | Stock vLLM AR | TensorRT-LLM AR |
+|---|---:|---:|---:|
+| 27B NVFP4 | 1 | 65.6 / 65.7 / 66.0 | 65.0 / 65.0 / 65.1 |
+| 27B NVFP4 | 8 | **461.3 / 462.9 / 455.3** | 396.9 / 392.8 / 396.0 |
+| 27B BF16 | 1 | 26.8 / 26.8 / 26.8 | 27.1 / 27.2 / 27.2 |
+| 27B BF16 | 8 | 198.8 / 200.2 / 201.3 | **203.8 / 203.7 / 207.0** |
+
+At one client the engines were within 1.5%. At eight clients vLLM led
+NVFP4 by 15–18% and TensorRT-LLM led BF16 by 2–3%.
+
+**Flash Next NVFP4 with MTP3.** Stock vLLM ran the checkpoint's native MTP
+head with three speculative tokens.
+
+| Clients | Stock vLLM AR | Stock vLLM MTP3 | Tokens per verify |
+|---:|---:|---:|---:|
+| 1 | 87.8 / 88.5 / 87.5 | 199.3 / 178.7 / 150.6 | 3.85 / 3.35 / 2.66 |
+| 8 | 438.1 / 444.3 / 425.5 | 691.7 / 632.9 / 481.9 | 3.82 / 3.44 / 2.58 |
+
+Against the README's SGLang rows from the same workload, vLLM MTP3 led
+stock SGLang MTP3 on every cell, by 5–12%. AX MTP7 led code at both
+concurrencies (218.9 and 728.0 tok/s); vLLM MTP3 led math and chat.
+
+**TensorRT-LLM speculative lanes failed.** DFlash on SM120 cannot use the
+`TRTLLM` drafter attention backend (`requires SM100 or SM103, got SM120`).
+The `VANILLA` backend imports `flash_attn_with_kvcache` from FlashAttention
+2, which the TensorRT-LLM environment does not ship. A FlashAttention 2.8.3
+wheel built for SM120 (C++20, required by PyTorch 2.14 headers) installed,
+but the import still failed because the FA4 package already owns the
+`flash_attn` namespace. Flash Next NVFP4 MTP3 ran out of GPU memory while
+loading experts (94.2 of 95.0 GiB in use), so the checkpoint does not fit
+one RTX PRO 6000 under TensorRT-LLM.
 
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4 DFlash2
 
-*Pending.* The harness reproduces `results/rtx_5090_27b_nvfp4`: the ten
-frozen inputs of `parity-expanded-ids.json`
-(SHA-256 `e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0`),
-128 greedy tokens with EOS ignored, two request slots, FP8 KV cache, and
-passes C1, C2, C2, C1. The first attempt stalled for 25 minutes in
-FlashInfer's SM120 JIT build: parallel `nvcc` jobs filled the pod's 62 GB
-memory limit and were OOM-killed. The pod now reuses the RTX PRO 6000's
-SM120 JIT cache with `MAX_JOBS=4`.
+One 32 GB RTX 5090 (driver 595.112.07). The harness reproduces
+`results/rtx_5090_27b_nvfp4`: the ten frozen inputs of
+`parity-expanded-ids.json`
+(SHA-256 `e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0`,
+23–2,266 input tokens), 128 greedy tokens with EOS ignored, two request
+slots, and passes C1, C2, C2, C1. Each C1 pass sent 10 requests and each C2
+pass 40. vLLM used an FP8 KV cache, FP32 Mamba state, 2,048 batched tokens
+and `--gpu-memory-utilization 0.92`. TensorRT-LLM used `max_num_tokens`
+4,096; at 2,048 it rejected the 2,266-token prompt with HTTP 400.
+
+Pooled output tok/s; the SGLang rows are from the README study.
+
+| Route | C1 | C2 |
+|---|---:|---:|
+| Stock SGLang AR | 57.64 | 101.77 |
+| Stock vLLM AR | 73.7 | 129.2 |
+| TensorRT-LLM AR | 70.2 | 120.4 |
+| Stock SGLang DFlash2, block 8 | 125.01 | 182.38 |
+| AX Engine tree 32 (chain 8 at C2) | 135.18 | 181.36 |
+| Stock vLLM DFlash2, 7 tokens | **168.5** | **279.6** |
+
+Stock vLLM DFlash2 ran 1.25 times as fast as the AX tree at one request
+and 1.53 times stock SGLang DFlash2 at two, with 3.29 and 3.25 tokens per
+verify on this pooled mix. The four passes of each lane agreed within
+0.5%. TensorRT-LLM DFlash2 failed for the same FlashAttention reason as on
+the RTX PRO 6000.
+
+The first vLLM attempt stalled for 25 minutes in FlashInfer's SM120 JIT
+build: parallel `nvcc` jobs filled the pod's 62 GB memory limit and were
+OOM-killed. The measured lanes reused the RTX PRO 6000's SM120 JIT cache
+with `MAX_JOBS=4`.
 
 ## Jetson Thor · Qwen3.8-27B DFlash2
 

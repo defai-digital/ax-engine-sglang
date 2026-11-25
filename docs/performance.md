@@ -123,7 +123,9 @@ and chat at one client on NVFP4. Its proposer accepted 5.8–6.5 tokens per
 verify on code and math, and about 3.1–3.3 on chat. Stock vLLM refuses
 Flash Next with DFlash2: "Qwen4Exp speculative decoding supports only its
 native MTP checkpoint and linear n-gram proposers". TensorRT-LLM 1.4.0rc3
-lanes are still running.
+AR ran within 1.5% of stock AR at one client; at eight clients it was
+14% slower on NVFP4 and 2% faster on BF16. Its DFlash2 lanes failed on
+SM120, where the drafter needs FlashAttention 2.
 [Latency, checkpoints, and output agreement](../results/rtx_pro_6000_retest/REPORT.md) · [Stock vLLM setup](../results/cross_engine_2026-11-25/REPORT.md#rtx-pro-6000-qwen38-27b-and-flash-next-dflash2)
 
 ### Earlier pooled speed sweep
@@ -344,6 +346,12 @@ pool two passes and include prefill and loopback HTTP.
 | 1, 10 requests | 57.64 | 125.01 | **135.18** (tree 32) |
 | 2, 40 requests | 101.77 | **182.38** | 181.36 (tree 32, chain width 8) |
 
+Stock vLLM ran later on the same pod with the same inputs and pass order.
+Its DFlash2 reached **168.5** tok/s at one request and **279.6** at two,
+1.25 times the AX tree and 1.53 times stock SGLang DFlash2. Stock vLLM AR
+reached 73.7 / 129.2 and TensorRT-LLM AR 70.2 / 120.4.
+[Stock vLLM and TensorRT-LLM lanes](../results/cross_engine_2026-11-25/REPORT.md#geforce-rtx-5090-qwen38-27b-nvfp4-dflash2)
+
 Tree 32 delivered **2.35×** stock AR and **1.08×** stock DFlash2 at
 concurrency one. AX Engine delivered **1.78×** stock AR at concurrency
 two and finished within **0.6%** of stock DFlash2. Verification parity
@@ -556,8 +564,9 @@ not the 128-token single-GPU retest.
 Mean acceptance length was 3.93 / 3.50 / 2.64 for stock SGLang MTP3,
 3.92 / 3.52 / 2.62 for stock vLLM MTP3, and 7.40 / 5.56 / 3.12 for AX
 MTP7. The two MTP3 lanes accepted the same number of tokens per verify.
-Stock autoregressive rows and the still-pending TensorRT-LLM lanes are in
-the report.
+Stock autoregressive rows are in the report. TensorRT-LLM 1.4.0rc3 loaded
+the checkpoint but failed in the first decode step: its Flash Next
+attention kernel JIT could not find `cuda.h`.
 [Two-B200 report](../results/cross_engine_2026-11-25/REPORT.md#two-b200-gpus-qwen38-flash-next-bf16)
 
 An earlier two-B300 TP2 run used package 0.2.0, the same prompt file, and
