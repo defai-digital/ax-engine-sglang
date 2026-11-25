@@ -94,6 +94,15 @@ subset replays. Check `matches_against_first_order` for output
 repeatability within each lane. The default `refill` mode launches
 independent requests and refills as they finish.
 
+The harness warms each timed concurrency before measuring. Add
+`--graph-timing` to set `AX_DFLASH_BENCH_GRAPH_TIMING=1` in both
+lanes. Each `c<N>.json` then records `graph_us`, the mean CUDA time of
+each draft and verify graph call keyed by phase, live requests and
+graph variant, and `host_us` for the subset eligibility check. Compare
+the `native` and `ax-dflash-draft-vocab` draft rows inside the subset
+lane, because they share one server. The timing adds overhead, so
+take throughput from a separate run without the flag.
+
 ## DFlash2 FP8 verification tactics
 
 `ab_fp8_verify.py` runs on one RTX PRO 6000 or RTX 5090 with SGLang 0.5.23,

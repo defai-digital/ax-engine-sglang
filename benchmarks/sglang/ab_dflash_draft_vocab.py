@@ -25,6 +25,8 @@ def server(args, dest, lane):
     env_flags["SGLANG_UNIFIED_RADIX_TREE_CORE_BACKEND"] = "python"
     if lane == "subset":
         env_flags[FEATURE] = "1"
+    if args.graph_timing:
+        env_flags["AX_DFLASH_BENCH_GRAPH_TIMING"] = "1"
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("AX_", "FC1_", "SGLANG_"))}
     env.update(env_flags, HF_HUB_OFFLINE="1")
@@ -99,10 +101,22 @@ def decode_profile(graphs, concurrency):
     }
 
 
+def timing_delta(before, after, key):
+    rows = {}
+    for name, (count, total) in after.get(key, {}).items():
+        earlier = before.get(key, {}).get(name, (0, 0.0))
+        if count > earlier[0]:
+            rows[name] = {"count": count - earlier[0], "mean_us": (total - earlier[1]) / (count - earlier[0])}
+    return rows
+
+
 def measure(url, prompts, concurrency, length, run_pass=bench.run_pass):
     before = bench.hotpath_snapshot(url)
     result = run_pass(url, prompts, concurrency, length, True)
     after = bench.hotpath_snapshot(url)
+    if "graph_us" in after:
+        result["graph_us"] = timing_delta(before, after, "graph_us")
+        result["host_us"] = timing_delta(before, after, "host_us")
     result["draft_graphs"] = tally(before, after)
     result["replay_shapes"] = replay_shapes(before, after)
     result["decode_profile"] = decode_profile(result["draft_graphs"], concurrency)
@@ -136,7 +150,9 @@ def compare(args, prompts, fallback_prompts):
             dest = args.out / label / lane
             results[lane] = {}
             with server(args, dest, lane) as url:
-                run_pass(url, prompts[:args.slots], args.slots, 32, True)
+                # Warm every timed live-batch shape, not only the largest.
+                for clients in sorted(set(args.concurrency)):
+                    run_pass(url, prompts[:clients], clients, 32, True)
                 for clients in args.concurrency:
                     result = measure(url, timed_prompts, clients, args.output_tokens, run_pass)
                     graphs = result["draft_graphs"]
@@ -192,6 +208,8 @@ def main():
     parser.add_argument("--arrival-mode", choices=("refill", "batch"), default="refill",
                         help="Send independent requests or submit each wave in one API call")
     parser.add_argument("--repeats", type=int, default=1, help="Repeat the frozen cohort in each timed pass")
+    parser.add_argument("--graph-timing", action="store_true",
+                        help="Record CUDA event time for each draft and verify graph replay")
     parser.add_argument("--output-tokens", type=int, default=128)
     parser.add_argument("--context-length", type=int, default=4096)
     parser.add_argument("--kv-tokens", type=int, default=8192)

@@ -3,6 +3,7 @@
 from contextvars import ContextVar
 from functools import wraps
 import logging
+import time
 from types import SimpleNamespace
 
 from .ax_dflash_activity import activity
@@ -18,20 +19,59 @@ LEADING_ROWS = 148_352
 TAIL_START = 247_936
 SUBSET_SIZE = LEADING_ROWS + VOCAB_SIZE - TAIL_START
 HISTORY = 64
+RECHECK = 8
 
 logger = logging.getLogger(__name__)
 _capture_subset = ContextVar("ax_dflash_vocab_capture", default=None)
 _replay_subset = ContextVar("ax_dflash_vocab_replay", default=None)
 
 
+def in_subset(token):
+    return 0 <= token < LEADING_ROWS or TAIL_START <= token < VOCAB_SIZE
+
+
 def history_in_subset(prompt_ids, output_ids):
     remaining = max(0, HISTORY - len(output_ids))
     recent_prompt = prompt_ids[-remaining:] if remaining else ()
     return bool(recent_prompt or output_ids) and all(
-        0 <= token < LEADING_ROWS or TAIL_START <= token < VOCAB_SIZE
-        for part in (recent_prompt, output_ids[-HISTORY:])
-        for token in part
+        in_subset(token) for part in (recent_prompt, output_ids[-HISTORY:]) for token in part
     )
+
+
+class History:
+    """Position of a request's latest excluded token, updated from new outputs only."""
+
+    __slots__ = ("prompt", "outputs", "scanned", "last_excluded")
+
+    def __init__(self, prompt_ids, output_ids):
+        self.prompt, self.outputs, self.scanned = prompt_ids, output_ids, 0
+        self.last_excluded = -HISTORY - 1
+        start = max(0, len(prompt_ids) - HISTORY)
+        for index in range(len(prompt_ids) - 1, start - 1, -1):
+            if not in_subset(prompt_ids[index]):
+                self.last_excluded = index
+                break
+
+    def eligible(self, prompt_ids, output_ids):
+        count = len(output_ids)
+        if prompt_ids is not self.prompt or output_ids is not self.outputs or count < self.scanned:
+            self.__init__(prompt_ids, output_ids)
+        # Recheck the latest committed slots in case a pop was refilled between
+        # checks. Tokens older than the window cannot change the result.
+        for index in range(max(min(self.scanned, count) - RECHECK, count - HISTORY, 0), count):
+            if not in_subset(output_ids[index]):
+                self.last_excluded = len(prompt_ids) + index
+        self.scanned = count
+        total = len(prompt_ids) + count
+        return total > 0 and self.last_excluded < total - HISTORY
+
+
+def request_in_subset(req):
+    history = getattr(req, "_ax_dflash_vocab_history", None)
+    if history is None:
+        history = History(req.origin_input_ids, req.output_ids)
+        req._ax_dflash_vocab_history = history
+    return history.eligible(req.origin_input_ids, req.output_ids)
 
 
 def use_subset(batch):
@@ -40,9 +80,7 @@ def use_subset(batch):
     if (mode.is_idle() or mode.is_extend() or batch.is_extend_in_batch or batch.has_grammar
             or (sampling is not None and not sampling.is_all_greedy)):
         return False
-    return bool(batch.reqs) and all(
-        history_in_subset(req.origin_input_ids, req.output_ids) for req in batch.reqs
-    )
+    return bool(batch.reqs) and all(request_in_subset(req) for req in batch.reqs)
 
 
 def pack_weight(weight):
@@ -189,7 +227,15 @@ def install():
     @wraps(forward_batch)
     def forward(worker, batch, *args, **kwargs):
         model = worker.draft_model
-        if not getattr(model, "_ax_dflash_vocab_captured", False) or not use_subset(batch):
+        if not getattr(model, "_ax_dflash_vocab_captured", False):
+            return forward_batch(worker, batch, *args, **kwargs)
+        if activity is not None and activity.timing:
+            started = time.perf_counter()
+            selected = use_subset(batch)
+            activity.add_host("draft_vocab_check", time.perf_counter() - started)
+        else:
+            selected = use_subset(batch)
+        if not selected:
             return forward_batch(worker, batch, *args, **kwargs)
         token = _replay_subset.set(model)
         try:

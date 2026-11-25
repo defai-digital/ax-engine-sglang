@@ -132,7 +132,9 @@ All three GPUs completed the sampled fallback and the three
 multilingual checks in both orders. The multilingual outputs
 matched the full-head controls. The flag remains experimental
 and off by default. The throughput gain was consistent only
-at C1 in this workload.
+at C1 in this workload. The
+[fixed-code retest](#fixed-code-retest-with-graph-timing) found
+no consistent C1 gain once every concurrency was warmed.
 
 ## B200 retest with fixed request groups
 
@@ -159,3 +161,88 @@ uses the full head whenever any request has a recent excluded token.
 Increasing coverage would require changing that batch-wide rule and
 measuring the cost of splitting the projection.
 [Reproduction flags](../../benchmarks/sglang/README.md#dflash2-draft-vocabulary-subset)
+
+## Fixed-code retest with graph timing
+
+The retest on 2026-11-25 changed three things. The eligibility check
+now keeps each request's latest excluded position and scans only new
+outputs. The harness warms every timed concurrency, not only the
+largest. The opt-in `AX_DFLASH_BENCH_GRAPH_TIMING=1` records CUDA
+events around each draft and verify graph call by live batch and
+graph variant. Each timing covers the whole graph call, including
+input staging and attention metadata refresh.
+
+A new B200 pod (Xeon 6972P host) ran fixed groups at C1 and C8, five
+repetitions per lane. It ran once with graph timing and once without.
+Thor-01 ran fixed groups at C1 and C2, three repetitions per lane,
+with graph timing. Software versions, checkpoints, prompts and launch
+flags matched the earlier runs. All outputs matched in every pair
+and across orders: 80/80 per pass on B200 and 48/48 on Thor-01.
+
+### Draft graph time in the same server
+
+The subset lane replays both draft variants, so these pairs share a
+server and its warm state.
+
+| GPU | Live requests | Native draft (µs) | Subset draft (µs) | Saving (µs) |
+|---|---:|---:|---:|---:|
+| B200 | 1 | 1,865.4 / 1,860.9 | 1,809.8 / 1,802.1 | 56 / 59 |
+| B200 | 8 | 2,006.8 / 1,994.9 | 1,961.1 / 1,904.8 | 46 / 90 |
+| Thor-01 | 1 | 18,719.1 / 19,034.8 | 17,907.5 / 18,174.9 | 812 / 860 |
+| Thor-01 | 2 | 18,353.2 / 18,636.9 | 17,758.5 / 18,053.9 | 595 / 583 |
+
+Values are full-first / subset-first. The subset graph is faster at
+every live batch size, including two and eight requests, so the
+multi-request path behaves as designed. The saving is 0.3–0.7% of a
+13.7 ms B200 C8 round and about 0.6% of a 103 ms Thor-01 C2 round.
+The draft graph takes about 2.0 ms of the B200 round and 18.4 ms of
+the Thor-01 round. Projection and top-k are a small part of it.
+
+### End-to-end throughput
+
+| GPU | Clients | First lane | Full tok/s | Subset tok/s | Change | Tokens per verify full → subset |
+|---|---:|---|---:|---:|---:|---|
+| B200, untimed | 1 | Full | 234.03 | 231.53 | −1.07% | 3.1077 → 3.0890 |
+| B200, untimed | 1 | Subset | 231.15 | 225.44 | −2.47% | 3.1077 → 3.0890 |
+| B200, untimed | 8 | Full | 1,170.07 | 1,166.09 | −0.34% | 2.9299 → 2.9299 |
+| B200, untimed | 8 | Subset | 1,167.78 | 1,150.61 | −1.47% | 2.9299 → 2.9299 |
+| Thor-01, timed | 1 | Full | 28.49 | 29.11 | +2.19% | 2.9811 → 2.9724 |
+| Thor-01, timed | 1 | Subset | 29.13 | 29.04 | −0.29% | 2.9811 → 2.9724 |
+| Thor-01, timed | 2 | Full | 48.17 | 49.29 | +2.33% | 2.9638 → 2.9553 |
+| Thor-01, timed | 2 | Subset | 49.12 | 49.14 | +0.05% | 2.9638 → 2.9553 |
+
+The Thor-01 full-first gains come from a slow first server. Its
+verify graph, which is identical in both lanes, averaged 78,610 µs at
+two requests against 77,445–77,605 µs in the three later servers. The
+first B200 server of the timed run showed the same pattern: its
+eight-request native draft graph took 2,074 µs against 1,993–2,007 µs
+later. That pass measured +2.22% at C1 and +3.83% at C8. The other
+timed B200 order measured −0.46% at C1 and +0.26% at C8. The untimed
+B200 lanes differed by up to 2.6% between servers. This variation is
+larger than the graph saving.
+
+### Why the subset does not raise throughput
+
+- **Small share of the round.** Even with full coverage, the draft graph
+  saving is below 1% of round time on both GPUs.
+- **Lower acceptance.** The subset head cannot propose an excluded
+  token. The history rule switches to the full head only after one
+  has been committed. Tokens per verify fell 0.60% at B200 C1 and
+  0.29% at Thor-01 C1 and C2, which offsets most of the graph saving.
+  Seven of the 16 cohort outputs contain an excluded token.
+- **Coverage at higher concurrency.** The excluded range holds 35,568
+  IDs that decode to ASCII, including Markdown tokens such as `**.`,
+  `):**` and ` **"`. One such token in any request switches the whole
+  batch to the full head for 64 tokens. B200 used the subset in 70 of
+  315 eight-request rounds and Thor-01 in 642 of 906 two-request
+  rounds. Of the 778 excluded 128-row scale groups, 749 hold at least
+  one ASCII token. Keeping these tokens would need row-level packing
+  with re-swizzled block scales and would reduce the projection saving.
+- **Host check.** The incremental check took 5.7–8.1 µs per round on
+  B200 and 20–24 µs on Thor-01, including the timer. A local CPU test
+  of eight requests measured 17.7 µs for the previous rescan and
+  4.9 µs for the incremental check, including the output appends.
+
+The retest found no multi-request defect. The expected net change is
+within ±0.5%, below the variation of up to 2.6% between server launches. The
+flag stays off by default.

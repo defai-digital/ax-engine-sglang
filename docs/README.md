@@ -99,7 +99,7 @@ admits the measured AR and chain settings. [Speed and parity results](performanc
   rules to a planned launch without loading weights and reports whether it is
   supported, the settings it would derive and its exact-output qualification.
 - [Serving performance](performance.md) compares stock AR, stock speculation and the add-on under the recorded conditions.
-- [DFlash2 draft vocabulary comparison](../results/dflash_draft_vocab/REPORT.md) records throughput, output agreement, and fallback checks on Thor-01, RTX PRO 6000, and B200.
+- [DFlash2 draft vocabulary comparison](../results/dflash_draft_vocab/REPORT.md) records throughput, output agreement, fallback checks, and in-server draft graph timing on Thor-01, RTX PRO 6000, and B200.
 - [SGLang benchmark guide](../benchmarks/sglang/) covers baseline launches,
   mixed requests, cancellation, greedy token identity and sampled distributions.
 - [Regression runner](../scripts/check_model_regression.py) compares

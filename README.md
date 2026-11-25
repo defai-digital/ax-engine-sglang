@@ -336,25 +336,31 @@ BF16 used a 384-token limit.
 
 ##### DFlash2 draft vocabulary on Thor and Blackwell
 
-The experimental draft vocabulary subset reduced Thor-01 projection and
-top-k time by **39.8–40.5%** in the isolated CUDA graph probe. With the
-same width-eight GDN replay configuration, end-to-end throughput improved
-in both launch orders at C1. At higher concurrency the effect varied.
+The experimental draft vocabulary subset (`AX_DFLASH_DRAFT_VOCAB=1`,
+148,736 of 248,320 rows) cut isolated projection and top-k time by
+**39.8–40.5%** on Thor-01. Inside the server, it saved 46–90 µs per
+B200 draft graph and 583–860 µs per Thor-01 draft graph, at every live
+batch size tested. That saving is below 1% of a decode round, and
+end-to-end throughput did not improve.
 
-![DFlash2 draft vocabulary throughput change on Thor-01, RTX PRO 6000 and B200, including the B200 retest with fixed groups of eight requests.](docs/figures/dflash-draft-vocab-serving.svg)
+| GPU | Live requests | Draft graph saving | Share of round | Throughput change, warm servers |
+|---|---:|---:|---:|---:|
+| Thor-01 | 1 | 812–860 µs | 0.8–0.9% | −0.29% |
+| Thor-01 | 2 | 583–595 µs | 0.6% | +0.05% |
+| B200 | 1 | 56–59 µs | 0.4% | −2.47% to −0.46% |
+| B200 | 8 | 46–90 µs | 0.3–0.7% | −1.47% to +0.26% |
 
-| GPU | Request arrival | C1 throughput change | Multi-client change |
-|---|---|---:|---:|
-| Thor-01 | Slot refill | +0.14% to +0.86% | C2 · −0.10% to −0.02% |
-| RTX PRO 6000 | Slot refill | +0.43% to +1.75% | C8 · −0.71% to +0.99% |
-| B200 | Slot refill | +0.47% to +6.52% | C8 · −14.03% to +2.46% |
-| B200 | Fixed groups of eight | — | **C8 · −0.38% to −0.09%** |
+The subset head cannot propose an excluded token, so tokens per verify
+fell 0.29–0.60% at one and two requests. At eight requests, one
+excluded token in any request sends the batch to the full head; B200
+used the subset in 70 of 315 such rounds. The excluded range contains
+35,568 ASCII tokens, including Markdown tokens such as `**.` and `):**`.
+All outputs matched the full head. Throughput varied by up to 2.6%
+between server launches, and the first server on each host ran slower.
+The earlier +6.52% B200 C1 result came from a first full-head server.
+The flag stays off by default.
 
-B200's original C8 full-head runs had 26 and 56 rounds with eight
-requests active. In the fixed-group retest, every lane ran 315 such
-rounds and all 80 generated outputs matched in each order.
-
-[B200 retest and launch settings](results/dflash_draft_vocab/REPORT.md#b200-retest-with-fixed-request-groups) · [Full serving and projection results](results/dflash_draft_vocab/REPORT.md)
+[Graph timing, launch orders and analysis](results/dflash_draft_vocab/REPORT.md#fixed-code-retest-with-graph-timing) · [Earlier slot-refill and fixed-group results](results/dflash_draft_vocab/REPORT.md#serving-validation)
 
 ##### Thor-01 · FP8 verification projections
 

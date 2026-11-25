@@ -337,7 +337,39 @@ Thor-01 measured an experimental 148,736-row draft head with the
 Qwen3.8-27B NVFP4 checkpoint. The CUDA graph probe timed the projection
 and top-k on synthetic activations. The serving benchmark compares it
 with the full 248,320-row draft head using width-eight DFlash2 and
-GDN replay. Thor-01 gained 0.14–0.86% at C1 and was within 0.11%
+GDN replay. The flag is off by default, and the retest found no
+throughput gain.
+
+#### Graph timing retest
+
+The 2026-11-25 retest timed every draft and verify graph call with
+CUDA events. It used fixed request groups, warmed every concurrency,
+and ran an incremental eligibility check. The subset draft graph was
+faster than the native graph in the same server at every live batch
+size. All outputs matched the full head: 80/80 per pass on B200 and
+48/48 on Thor-01.
+
+| GPU | Live requests | Draft graph saving | Share of round | Throughput change, warm servers | Tokens per verify full → subset |
+|---|---:|---:|---:|---:|---|
+| Thor-01 | 1 | 812–860 µs | 0.8–0.9% | −0.29% | 2.9811 → 2.9724 |
+| Thor-01 | 2 | 583–595 µs | 0.6% | +0.05% | 2.9638 → 2.9553 |
+| B200 | 1 | 56–59 µs | 0.4% | −2.47% to −0.46% | 3.1077 → 3.0890 |
+| B200 | 8 | 46–90 µs | 0.3–0.7% | −1.47% to +0.26% | 2.9299 → 2.9299 |
+
+The saving is below 1% of each decode round. The subset head cannot
+propose an excluded token, so acceptance fell at one and two requests.
+At eight requests one excluded token in any request sends the batch
+to the full head; B200 used the subset in 70 of 315 such rounds. The
+excluded range holds 35,568 ASCII tokens, including Markdown tokens
+such as `**.` and `):**`. Throughput varied by up to 2.6% between
+server launches. The first server on each host ran slower, and the
+earlier +6.52% B200 C1 result came from a first full-head server.
+
+[Graph timing, launch orders and analysis](../results/dflash_draft_vocab/REPORT.md#fixed-code-retest-with-graph-timing)
+
+#### Earlier slot-refill runs
+
+Thor-01 first measured +0.14–0.86% at C1 and stayed within 0.11%
 of the full-head throughput at C2. All 16 greedy outputs matched
 at both concurrencies in both launch orders.
 
