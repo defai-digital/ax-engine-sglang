@@ -32,7 +32,7 @@ specific to each runtime.
 - [Quick start](#quick-start)
 - [What it accelerates](#what-it-accelerates)
 - [Supported platforms](#supported-platforms)
-- [Measured throughput](#measured-throughput): [Qwen3.8-27B NVFP4](#qwen38-27b-nvfp4) · [Flash Next NVFP4](#qwen38-flash-next-nvfp4) · [Flash Next BF16](#qwen38-flash-next-bf16) · [Exact outputs](#exact-outputs)
+- [Measured throughput](#measured-throughput): [B200](#b200) · [H200](#h200) · [RTX PRO 6000](#rtx-pro-6000) · [RTX 5090](#rtx-5090) · [Jetson Thor](#jetson-thor) · [Exact outputs](#exact-outputs)
 - [Repository](#repository)
 - [Contributing](#contributing)
 - [License](#license)
@@ -112,7 +112,7 @@ Hopper at SM90 covers H100 and H200. Package 0.5.1 ran the 27B tree
 and chain routes on one H200 for BF16, FP8 and NVFP4 (through Marlin
 W4A16). The NVFP4 verify and GDN recurrent kernels are SM12-only and stay
 off there.
-[H200 retest](#qwen38-27b-on-h200) · [Earlier H200 baselines](results/track_a_stage0_h200/REPORT.md)
+[H200 retest](#h200) · [Earlier H200 baselines](results/track_a_stage0_h200/REPORT.md)
 
 | Platform | Host | Capability | Measured board |
 |---|---|---|---|
@@ -134,55 +134,60 @@ the serving retest: SGLang 0.5.23, 128 greedy output tokens, eight request
 slots, two streamed passes, and the same prompt corpus. Cells are code /
 math / chat output tokens per second. Studies with 256, 512, or 1,024
 tokens, a different slot count, or a pooled prompt mix do not substitute
-for these rates. Full tables, the TensorRT-LLM comparison, and the kernel
-ablations are in [Serving performance](docs/performance.md).
+for these rates. Sections run by GPU, then model (Flash Next before 27B),
+then precision (BF16 before NVFP4). Full tables, the TensorRT-LLM
+comparison, and the kernel ablations are in
+[Serving performance](docs/performance.md).
 
-### Qwen3.8-27B NVFP4
+### B200
+
+#### Qwen3.8-Flash-Next BF16
+
+BF16 weights are about 360 GB, so this checkpoint does not fit one B200.
+Two B200s served it with tensor parallelism of 2 and the PLE table in
+pinned host memory. The greedy limit was 256 tokens at concurrency 1, 4,
+and 16. AX MTP7 led code and math at one client. Stock vLLM MTP3 led chat
+there, and led every workload at 4 and 16 clients. TensorRT-LLM 1.4.0rc3
+failed in its first decode step.
+
+![Qwen3.8-Flash-Next BF16 throughput on two B200s with tensor parallelism of 2.](docs/figures/b200x2-flash-next-bf16-throughput.svg)
+
+[Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
+
+#### Qwen3.8-Flash-Next NVFP4
+
+The 128-token retest on one B200. AX MTP7 led code at both concurrencies.
+Chat stayed with a three-step MTP window.
+
+![B200 Qwen3.8-Flash-Next NVFP4 serving retest at one and eight clients, with stock AR, stock MTP3, AX MTP3, and AX MTP7.](docs/figures/b200-flash-next-nvfp4-serving-retest.svg)
+
+| Clients | Stock MTP3 | AX MTP7 | Chat leader |
+|---:|---:|---:|---|
+| 1 | 304.9 / 273.3 / 223.4 | 389.7 / 297.1 / 208.9 | stock MTP3, 223.4 |
+| 8 | 720.7 / 947.0 / 684.5 | 1,126.9 / 978.8 / 607.5 | AX MTP3, 715.4 |
+
+[B200 Flash Next tables](docs/performance.md#b200-flash-next-serving-retest)
+
+#### Qwen3.8-27B NVFP4
 
 The add-on used a 32-node tree at one client and a width-eight chain when
 requests were grouped. GDN replay is the experimental accepted-prefix path
-on that chain. These are speed-profile runs. The B200 rows are package
-0.5.1. The RTX PRO 6000 rows are package 0.4.0 on the same prompt corpus.
+on that chain. These are speed-profile runs with package 0.5.1.
 
 ![B200 Qwen3.8-27B NVFP4 serving retest at one and eight clients, with stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](docs/figures/b200-27b-nvfp4-serving-retest.svg)
 
-| GPU | Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
-|---|---:|---:|---:|---:|
-| B200 | 1 | 448.5 / 408.1 / 281.3 | **632.5 / 516.5 / 333.8** | 456.6 / 415.3 / 286.6 |
-| B200 | 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5 / 1,428.3 / 949.6** |
-| RTX PRO 6000 | 1 | 229.3 / 188.5 / 125.2 | **324.7 / 270.9 / 152.2** | 235.8 / 195.2 / 128.9 |
-| RTX PRO 6000 | 8 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8 / 898.1 / 580.8** |
+| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | 448.5 / 408.1 / 281.3 | **632.5 / 516.5 / 333.8** | 456.6 / 415.3 / 286.6 |
+| 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5 / 1,428.3 / 949.6** |
 
-![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree or chain, and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
+At one client the tree led. At eight clients, GDN replay led stock
+DFlash2 by 11.2% / 21.8% / 5.1%.
+[B200 per-pass results](docs/performance.md#b200-qwen38-27b)
 
-At one client the tree led on both GPUs. At eight clients, GDN replay led
-stock DFlash2 by 11.2% / 21.8% / 5.1% on B200. On RTX PRO 6000 it raised
-chat from 505.3 to 580.8 tok/s. BF16 on that GPU is in the same retest:
-the tree led at one client, and at eight clients chat was 335.1 tok/s
-against 333.7 for stock DFlash2.
+### H200
 
-![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, and the AX tree or chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
-
-[B200 per-pass results](docs/performance.md#b200-qwen38-27b) · [RTX PRO 6000](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
-
-On a 32 GB RTX 5090 the same checkpoints used two slots and a pooled
-ten-prompt mix. Tree 32 reached 135.18 tok/s at one request (2.35× stock
-AR, 8.1% above stock DFlash2). At two requests the SGLang speculative
-routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
-inputs, reached 168.5 and 279.6 tok/s.
-
-![GeForce RTX 5090 Qwen3.8-27B NVFP4 output throughput. The AX tree leads at one request. Stock DFlash2 and the add-on finish within 0.6% at two requests.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
-
-[RTX 5090](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
-
-On one Jetson Thor, tree 32 led Edge-LLM DDTree 32 on code and math and
-tied it on chat, for both BF16 and NVFP4.
-
-![Jetson Thor throughput for stock SGLang, TensorRT Edge-LLM, and the add-on, grouped by BF16 or NVFP4 and prompt family.](docs/figures/jetson-thor-27b-throughput.svg)
-
-[Jetson Thor](docs/performance.md#jetson-thor-qwen38-27b)
-
-### Qwen3.8-27B on H200
+#### Qwen3.8-27B BF16, FP8 and NVFP4
 
 The same 128-token retest on one H200 (SM90, 141 GB): BF16, the official
 `Qwen/Qwen3.8-27B-FP8` checkpoint, and NVFP4 through Marlin W4A16, since
@@ -208,36 +213,68 @@ more tokens per verify at one client (10.3–11.4 on code against vLLM's
 6.5–7.1), so the FP8 and NVFP4 gap is per-step cost, not draft quality.
 [H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
 
-### Qwen3.8-Flash-Next NVFP4
+### RTX PRO 6000
 
-The same 128-token retest. AX MTP7 led code on every row below. Chat
-stayed with a three-step MTP window.
+#### Qwen3.8-Flash-Next NVFP4
 
-![B200 Qwen3.8-Flash-Next NVFP4 serving retest at one and eight clients, with stock AR, stock MTP3, AX MTP3, and AX MTP7.](docs/figures/b200-flash-next-nvfp4-serving-retest.svg)
-
-| GPU | Clients | Stock MTP3 | AX MTP7 | Chat leader |
-|---|---:|---:|---:|---|
-| B200 | 1 | 304.9 / 273.3 / 223.4 | 389.7 / 297.1 / 208.9 | stock MTP3, 223.4 |
-| B200 | 8 | 720.7 / 947.0 / 684.5 | 1,126.9 / 978.8 / 607.5 | AX MTP3, 715.4 |
-| RTX PRO 6000 | 1 | 183.5 / 164.1 / 134.0 | 218.9 / 174.0 / 114.7 | AX MTP3, 135.0 |
-| RTX PRO 6000 | 8 | 679.0 / 582.6 / 455.4 | 728.0 / 542.7 / 356.5 | stock MTP3, 455.4 |
+The 128-token retest on one RTX PRO 6000. AX MTP7 led code at both
+concurrencies.
 
 ![RTX PRO 6000 Flash Next NVFP4 throughput for stock AR, stock MTP3, AX MTP3, and AX MTP7 at one and eight clients.](docs/figures/rtx-pro-6000-flash-next-nvfp4-throughput.svg)
 
-[Flash Next NVFP4 tables](docs/performance.md#qwen38-flash-next-nvfp4-mtp)
+| Clients | Stock MTP3 | AX MTP7 | Chat leader |
+|---:|---:|---:|---|
+| 1 | 183.5 / 164.1 / 134.0 | 218.9 / 174.0 / 114.7 | AX MTP3, 135.0 |
+| 8 | 679.0 / 582.6 / 455.4 | 728.0 / 542.7 / 356.5 | stock MTP3, 455.4 |
 
-### Qwen3.8-Flash-Next BF16
+[RTX PRO 6000 Flash Next tables](docs/performance.md#rtx-pro-6000-flash-next-serving-retest)
 
-BF16 weights are about 360 GB, so this checkpoint does not fit one B200.
-Two B200s served it with tensor parallelism of 2 and the PLE table in
-pinned host memory. The greedy limit was 256 tokens at concurrency 1, 4,
-and 16. AX MTP7 led code and math at one client. Stock vLLM MTP3 led chat
-there, and led every workload at 4 and 16 clients. TensorRT-LLM 1.4.0rc3
-failed in its first decode step.
+#### Qwen3.8-27B BF16
 
-![Qwen3.8-Flash-Next BF16 throughput on two B200s with tensor parallelism of 2.](docs/figures/b200x2-flash-next-bf16-throughput.svg)
+The same retest with package 0.4.0. The tree led at one client. At eight
+clients chat was 335.1 tok/s against 333.7 for stock DFlash2.
 
-[Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
+![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, and the AX tree or chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
+
+#### Qwen3.8-27B NVFP4
+
+Package 0.4.0 on the same prompt corpus.
+
+![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree or chain, and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
+
+| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | 229.3 / 188.5 / 125.2 | **324.7 / 270.9 / 152.2** | 235.8 / 195.2 / 128.9 |
+| 8 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8 / 898.1 / 580.8** |
+
+At one client the tree led. At eight clients GDN replay raised chat from
+505.3 to 580.8 tok/s.
+[RTX PRO 6000 per-pass results](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
+
+### RTX 5090
+
+#### Qwen3.8-27B NVFP4
+
+On a 32 GB RTX 5090 the checkpoint used two slots and a pooled
+ten-prompt mix. Tree 32 reached 135.18 tok/s at one request (2.35× stock
+AR, 8.1% above stock DFlash2). At two requests the SGLang speculative
+routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
+inputs, reached 168.5 and 279.6 tok/s.
+
+![GeForce RTX 5090 Qwen3.8-27B NVFP4 output throughput. The AX tree leads at one request. Stock DFlash2 and the add-on finish within 0.6% at two requests.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
+
+[RTX 5090](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
+
+### Jetson Thor
+
+#### Qwen3.8-27B BF16 and NVFP4
+
+On one Jetson Thor, tree 32 led Edge-LLM DDTree 32 on code and math and
+tied it on chat, for both BF16 and NVFP4.
+
+![Jetson Thor throughput for stock SGLang, TensorRT Edge-LLM, and the add-on, grouped by BF16 or NVFP4 and prompt family.](docs/figures/jetson-thor-27b-throughput.svg)
+
+[Jetson Thor](docs/performance.md#jetson-thor-qwen38-27b)
 
 ### Exact outputs
 
