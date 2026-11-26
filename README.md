@@ -229,6 +229,16 @@ more tokens per verify at one client (10.3–11.4 on code against vLLM's
 6.5–7.1), so the FP8 and NVFP4 gap is per-step cost, not draft quality.
 [H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
 
+A second H200 pod swept the AX routes with package 0.5.1, which sets
+`AX_TREE_TEMP=1.55` by default (stock ran 5–10% faster on that pod). At one
+client tree 32 reached 443.3 / 388.1 / 246.6 tok/s on FP8 against 332.1 /
+307.2 / 197.9 for stock DFlash2, and 448.5 / 379.9 / 248.8 on NVFP4
+against 368.5 / 324.9 / 214.7. Tree 16 finished within 2% of tree 32, so
+the 32-node default stays. GEMMs are about 80% of a verify round; Marlin
+W4A16 alone is 44–50% on NVFP4, and no faster bit-identical Marlin tile
+exists for these shapes.
+[H200 tree sweep](results/h200_tree_sweep/REPORT.md)
+
 ### RTX PRO 6000
 
 #### Qwen3.8-Flash-Next NVFP4

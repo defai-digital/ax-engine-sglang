@@ -64,6 +64,7 @@ class TreeDefaultsTests(unittest.TestCase):
                              "1.55")
         self.assertNotIn("AX_TREE_TEMP", env_of(plan(args(), {"AX_TREE_TEMP": "1"}, QWEN38_27B, DFLASH2)))
         self.assertNotIn("AX_TREE_TEMP", env_of(plan(args(algorithm="DFLASH"), {}, QWEN38_27B, DFLASH2)))
+        self.assertNotIn("AX_TREE_TEMP", env_of(plan(args(), {"AX_TREE": "0"}, QWEN38_27B, DFLASH2)))  # chain only
         with tempfile.NamedTemporaryFile(suffix=".npz") as table:   # DFlash (v1): n-gram trees, no lattice
             env = env_of(plan(args(), {"FC1_NGRAM_PATH": table.name}, QWEN35_9B, DFLASH))
         self.assertNotIn("AX_TREE_TEMP", env)

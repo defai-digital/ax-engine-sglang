@@ -461,6 +461,26 @@ failed with `'tuple' object has no attribute 'dtype'`. TensorRT-LLM's NVFP4
 kernels need Blackwell (SM100 or SM120).
 [H200 setup, failed lanes and pass spread](../results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
 
+### H200 tree size, GDN replay and Marlin
+
+A second H200 pod (package 0.5.1 with the `AX_TREE_TEMP=1.55` default) swept the AX routes. Stock
+DFlash2 ran 5-10% faster on this pod, so compare within it.
+
+| Precision | Clients | Stock DFlash2 width 8 | AX tree 16 | AX tree 32 | AX GDN replay 8 |
+|---|---:|---:|---:|---:|---:|
+| FP8 | 1 | 332.1 / 307.2 / 197.9 | **458.0** / 366.7 / 238.5 | 443.3 / **388.1 / 246.6** | 317.5 / 293.9 / 188.7 |
+| FP8 | 8 | 1,182.2 / 995.8 / 709.4 | 1,247.0 / **1,045.7** / 742.2 | **1,261.1** / 1,025.5 / 739.7 | 1,248.3 / 959.8 / **753.7** |
+| NVFP4 | 1 | 368.5 / 324.9 / 214.7 | **473.6** / 375.8 / 245.8 | 448.5 / **379.9 / 248.8** | 335.3 / 309.6 / 197.3 |
+| NVFP4 | 8 | 1,166.4 / **988.6** / 609.2 | 1,208.1 / 924.8 / **667.7** | **1,212.6** / 971.0 / 666.6 | 1,193.6 / 955.7 / 658.4 |
+
+Tree 16 and tree 32 finish within 2% of each other over the three workloads, so the 32-node default
+stays on SM90. A tree-32 round costs 1.3 ms more than a stock round on FP8 and 2.7 ms more on NVFP4.
+GEMMs are about 80% of a verify round; on NVFP4, Marlin W4A16 (the MLP) is 44-50%. Forcing other Marlin
+tiles found no faster bit-identical configuration: the kernel reaches about 40% of the H200's memory
+bandwidth at eight rows. GDN replay showed no reliable gain at eight clients on SM90. Skipping the
+lattice on chain-only servers (`AX_TREE=0`) gained 1.2-1.3% at one client with identical outputs.
+[H200 tree sweep](../results/h200_tree_sweep/REPORT.md)
+
 ## Jetson Thor · Qwen3.8-27B
 
 All rows are single-request runs on a Linux arm64 Jetson Thor. SGLang

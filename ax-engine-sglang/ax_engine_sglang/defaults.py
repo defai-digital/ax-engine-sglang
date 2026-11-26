@@ -381,7 +381,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                   else "measured tree configuration")
         if name not in PARITY_ENV and name not in result.env:
             result.default_env(environ, name, value, reason)
-    if lattice == "1" and not parity:
+    if lattice == "1" and not parity and route_of(algorithm, environ) == "tree":   # AX_TREE=0 builds no tree
         result.default_env(environ, "AX_TREE_TEMP", LATTICE_TREE_TEMP,
                            "measured lattice tree shape (+3-4% accepted length at one request)")
 

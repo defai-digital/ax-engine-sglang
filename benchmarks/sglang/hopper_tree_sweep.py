@@ -10,7 +10,8 @@ stage.log with a "ready <model>" line per staged model; results go to <work dir>
 Lanes come from benchmarks/sglang/bench_27b_nvfp4.py (stock8, tree16 / tree32 / tree64, chain8,
 replay8). A `prof-<lane>` lane launches <lane>, warms it up, and records a torch-profiler trace of C1 code
 requests (compare two with benchmarks/sglang/trace_kernels.py); it reports no throughput.
-NVFP4 has no SM90 tensor-core path, so NVFP4 targets use SGLang's Marlin W4A16 fallback, which needs
+AX_SWEEP_FP4_BACKEND picks the NVFP4 GEMM backend (default marlin; on Blackwell e.g. flashinfer_cutlass or
+flashinfer_cutedsl). NVFP4 has no SM90 tensor-core path, so on Hopper NVFP4 targets use SGLang's Marlin W4A16 fallback, which needs
 SGLANG_DISABLE_SILU_FP4_QUANT_FUSION=1 (SGLang 0.5.23 otherwise hands Marlin an (fp4, scale) tuple)."""
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
@@ -103,9 +104,11 @@ def launch(model, lane, target):
     index = command.index("--fp4-gemm-backend")
     del command[index:index + 2]
     if "nvfp4" in model:
-        command += ["--fp4-gemm-backend", "marlin"]
-        # Marlin W4A16 cannot take the fused SiLU+FP4-quant (fp4, scale) tuple.
-        flags = dict(flags, SGLANG_DISABLE_SILU_FP4_QUANT_FUSION="1")
+        backend = os.environ.get("AX_SWEEP_FP4_BACKEND", "marlin")
+        command += ["--fp4-gemm-backend", backend]
+        if backend == "marlin":
+            # Marlin W4A16 cannot take the fused SiLU+FP4-quant (fp4, scale) tuple.
+            flags = dict(flags, SGLANG_DISABLE_SILU_FP4_QUANT_FUSION="1")
     return command, flags, algorithm
 
 
