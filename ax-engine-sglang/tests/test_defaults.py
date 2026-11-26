@@ -75,6 +75,33 @@ class TreeDefaultsTests(unittest.TestCase):
                       environ, QWEN38_27B_NVFP4, DFLASH2)
         self.assertNotIn("AX_TREE_TEMP", env_of(result))
 
+    def test_dense_nvfp4_on_sm12_gets_the_cutedsl_fp4_gemms(self):
+        for algorithm in ("FC1_DFLASH_TREE", "DFLASH", None):
+            with self.subTest(algorithm=algorithm):
+                result = plan(args(algorithm), {"AX_TREE": "0"} if algorithm else {}, QWEN38_27B_NVFP4, DFLASH2,
+                              capability=(12, 0))
+                self.assertEqual(result.args["fp4_gemm_runner_backend"][0], "flashinfer_cutedsl")
+        self.assertEqual(plan(args(fp4_gemm_runner_backend="auto"), {}, QWEN38_27B_NVFP4, DFLASH2,
+                              capability=(12, 0)).args["fp4_gemm_runner_backend"][0], "flashinfer_cutedsl")
+        unchanged = (
+            (args(fp4_gemm_runner_backend="flashinfer_cutlass"), {}, QWEN38_27B_NVFP4, (12, 0)),   # explicit
+            (args(), {}, QWEN38_27B_NVFP4, (10, 0)),     # SM100: auto already picks cute-dsl
+            (args(), {}, QWEN38_27B_NVFP4, (9, 0)),      # SM90: Marlin
+            (args(), {}, QWEN38_27B_NVFP4, (11, 0)),     # Jetson Thor: not measured
+            (args(), {}, QWEN38_27B, (12, 0)),           # BF16 target
+            (args("EAGLE", speculative_num_draft_tokens=None), {}, FLASH_NEXT, (12, 0)),   # MoE: not measured
+        )
+        for launch, environ, target, capability in unchanged:
+            with self.subTest(capability=capability, target=target is FLASH_NEXT):
+                drafter = None if target is FLASH_NEXT else DFLASH2
+                result = plan(launch, environ, target, drafter, capability=capability)
+                self.assertNotIn("fp4_gemm_runner_backend", result.args)
+
+    def test_parity_keeps_cutlass_on_sm12(self):
+        result = plan(args(attention_backend=None, fp4_gemm_runner_backend="auto", linear_attn_verify_backend=None),
+                      {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, DFLASH2, capability=(12, 0))
+        self.assertEqual(result.args["fp4_gemm_runner_backend"][0], "flashinfer_cutlass")
+
     def test_explicit_settings_win_and_are_not_reported_as_auto(self):
         environ = {"FC1_TREE_N": "64", "AX_FAST": "0", "AX_GDN_LAYERS": "48"}
         result = plan(args(max_running_requests=16), environ, QWEN38_27B, DFLASH2)

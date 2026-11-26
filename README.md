@@ -284,6 +284,16 @@ code and chat, TensorRT-LLM led math, and GDN replay raised SGLang chat
 from 505.3 to 580.8 tok/s.
 [RTX PRO 6000 per-pass results](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
 
+SGLang 0.5.23 runs the NVFP4 GEMMs on SM120 with FlashInfer CUTLASS. On
+the 27B MLP shapes, FlashInfer cute-dsl was 23–37% faster at 8–64 rows. On
+another RTX PRO 6000 pod, with the two backends alternating route by route,
+cute-dsl raised one-client throughput by 6.2–6.9% for the tree, 15–18% for
+GDN replay and 17–19% for stock DFlash2, with identical greedy outputs
+(24/24 per route). At eight clients the second sweep moved by −3% to +12%.
+The plugin now selects cute-dsl for dense NVFP4 targets on SM12x unless the
+backend is set explicitly or parity is requested.
+[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md)
+
 ### RTX 5090
 
 #### Qwen3.8-27B NVFP4

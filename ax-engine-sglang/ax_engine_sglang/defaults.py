@@ -21,6 +21,7 @@ from typing import Callable, Mapping
 
 TREE_ALGORITHM = "FC1_DFLASH_TREE"
 CUTLASS = "flashinfer_cutlass"
+CUTEDSL = "flashinfer_cutedsl"
 SOURCE = "ax-engine-sglang defaults"
 
 # The tree configuration measured on Qwen3.5-9B and Qwen3.8-27B (B200, RTX PRO 6000, Jetson Thor).
@@ -238,6 +239,17 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
             result.args["moe_runner_backend"] = (CUTLASS, why)
         if algorithm and getattr(args, "speculative_moe_runner_backend", None) in (None, "auto"):
             result.args["speculative_moe_runner_backend"] = (CUTLASS, why)
+
+    # Dense NVFP4 on SM12x: SGLang 0.5.23 `auto` picks FlashInfer CUTLASS for the FP4 GEMMs. On the
+    # RTX PRO 6000 FlashInfer cute-dsl ran the 27B MLP GEMMs 23-37% faster at 8-64 rows (1% slower at 128)
+    # and served stock, tree and replay routes 6-19% faster at one client with identical greedy
+    # outputs (results/rtx_pro_6000_fp4_backend). The parity path keeps the CUTLASS kernels it was
+    # matched on; MoE targets were not measured.
+    if (capability and capability[0] == 12 and is_nvfp4(target, target_quant)
+            and not has_nvfp4_moe(target, target_quant) and not parity_requested(environ)
+            and getattr(args, "fp4_gemm_runner_backend", None) in (None, "auto")):
+        result.args["fp4_gemm_runner_backend"] = (
+            CUTEDSL, "dense NVFP4 on SM12x: FlashInfer cute-dsl GEMMs measured faster than auto's CUTLASS")
 
     if algorithm and algorithm != TREE_ALGORITHM and is_qwen4_exp(target):
         # Stock SGLang 0.5.23 compresses QSA index keys from overwritten ring members whenever a

@@ -335,6 +335,27 @@ Output tok/s:
 With SGLang's native GDN kernels the batched trees gained 0–2%.
 [Benchmark report](../results/rtx_pro_6000_tree_width/REPORT.md)
 
+### RTX PRO 6000 NVFP4 GEMM backend
+
+SGLang 0.5.23 resolves `--fp4-gemm-backend auto` to FlashInfer CUTLASS on SM120. FlashInfer cute-dsl
+ran the 27B MLP GEMMs 23-37% faster at 8-64 rows and 1% slower at 128. Served on another RTX PRO 6000
+pod with the backends alternating route by route (128 tokens, code / math / chat):
+
+| Route | Clients | CUTLASS | cute-dsl |
+|---|---:|---:|---:|
+| AX tree 32 | 1 | 292.0 / 250.8 / 154.0 | **310.1 / 267.3 / 164.6** |
+| AX tree 32 | 8 | 789.1 / 665.5 / 443.3 | **822.1 / 745.1 / 455.5** |
+| AX GDN replay 8 | 1 | 216.4 / 180.0 / 121.8 | **249.8 / 208.9 / 143.6** |
+| AX GDN replay 8 | 8 | 862.7 / **772.6** / 520.2 | **896.8** / 748.3 / **546.0** |
+| Stock DFlash2 width 8 | 1 | 203.0 / 167.6 / 114.2 | **238.0 / 199.3 / 135.7** |
+| Stock DFlash2 width 8 | 8 | 738.0 / 659.2 / 441.0 | **819.3 / 722.5 / 482.0** |
+
+Eight-client cells are the second sweep: cute-dsl compiles kernels the first time it meets a shape,
+and the first server's first eight-client pass ran with a 3.85 s worst first-token time. Greedy
+outputs matched across the backends on 24/24 one-client requests per route. The plugin now selects
+cute-dsl for dense NVFP4 targets on SM12x unless the backend is set or parity is requested.
+[FP4 backend report](../results/rtx_pro_6000_fp4_backend/REPORT.md)
+
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with
