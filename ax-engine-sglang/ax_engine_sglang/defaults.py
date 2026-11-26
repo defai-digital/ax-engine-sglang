@@ -28,6 +28,12 @@ TREE_ENV = {
     "FC1_TREE64": "1", "FC1_BRANCH_PILOT": "1", "FC1_OURS": "1", "FC1_FUSED": "1",
     "FC1_COMPILE_BUILD": "1", "AX_FAST": "1", "FC1_TREE_N": "32",
 }
+# Lattice tree shape (DFlash2 drafter): a flatter lattice distribution picks better nodes for the same
+# FC1_TREE_N, so the verify round costs the same on any GPU. Optuna on lattice traces put the
+# temperature at 1.53-1.63; 1.55 measured +3.9% (RTX PRO 6000, tree 16), +3.0% (RTX 5090, tree 16)
+# and +2.7% (RTX 5090, tree 32) at one request (results/rtx_pro_6000_tree_width). Greedy outputs do
+# not change, only the accepted length. The parity and verified lanes were measured without it.
+LATTICE_TREE_TEMP = "1.55"
 # AX_NVFP4_VERIFY_PARITY=1: the settings of the measured RTX PRO 6000 parity lanes. The tree
 # values replace their TREE_ENV counterparts; the fused verifier has its own GDN arithmetic.
 PARITY_ENV = {"AX_GDN_UNPACKED_DECODE": "1"}
@@ -375,6 +381,9 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                   else "measured tree configuration")
         if name not in PARITY_ENV and name not in result.env:
             result.default_env(environ, name, value, reason)
+    if lattice == "1" and not parity:
+        result.default_env(environ, "AX_TREE_TEMP", LATTICE_TREE_TEMP,
+                           "measured lattice tree shape (+3-4% accepted length at one request)")
 
     if getattr(args, "max_running_requests", None) is None:
         reason = ("tree rounds serve one request; the tree's GDN state cache is sized per slot. "

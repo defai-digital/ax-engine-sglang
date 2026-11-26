@@ -53,6 +53,27 @@ class TreeDefaultsTests(unittest.TestCase):
         self.assertEqual(result.args["cuda_graph_max_bs_decode"][0], 1)
         self.assertNotIn("moe_runner_backend", result.args)   # dense target
 
+    def test_lattice_tree_gets_the_measured_tree_temperature(self):
+        result = plan(args(), {}, QWEN38_27B, DFLASH2)
+        env = env_of(result)
+        self.assertEqual(env["AX_TREE_TEMP"], "1.55")
+        from ax_engine_sglang.config import PluginConfig
+        self.assertEqual(PluginConfig.from_env(env).tree_temp, 1.55)   # the defaults pass validation
+        for capability in ((9, 0), (10, 0), (12, 0)):   # a drafter property: the same on every GPU
+            self.assertEqual(env_of(plan(args(), {}, QWEN38_27B, DFLASH2, capability=capability))["AX_TREE_TEMP"],
+                             "1.55")
+        self.assertNotIn("AX_TREE_TEMP", env_of(plan(args(), {"AX_TREE_TEMP": "1"}, QWEN38_27B, DFLASH2)))
+        self.assertNotIn("AX_TREE_TEMP", env_of(plan(args(algorithm="DFLASH"), {}, QWEN38_27B, DFLASH2)))
+        with tempfile.NamedTemporaryFile(suffix=".npz") as table:   # DFlash (v1): n-gram trees, no lattice
+            env = env_of(plan(args(), {"FC1_NGRAM_PATH": table.name}, QWEN35_9B, DFLASH))
+        self.assertNotIn("AX_TREE_TEMP", env)
+
+    def test_parity_tree_keeps_the_unshaped_lattice(self):
+        environ = {"AX_NVFP4_VERIFY_PARITY": "1"}
+        result = plan(args(attention_backend=None, fp4_gemm_runner_backend="auto", linear_attn_verify_backend=None),
+                      environ, QWEN38_27B_NVFP4, DFLASH2)
+        self.assertNotIn("AX_TREE_TEMP", env_of(result))
+
     def test_explicit_settings_win_and_are_not_reported_as_auto(self):
         environ = {"FC1_TREE_N": "64", "AX_FAST": "0", "AX_GDN_LAYERS": "48"}
         result = plan(args(max_running_requests=16), environ, QWEN38_27B, DFLASH2)
