@@ -187,6 +187,22 @@ DFlash2 by 11.2% / 21.8% / 5.1%.
 
 ### H200
 
+#### Qwen3.8-Flash-Next NVFP4
+
+Only stock vLLM served it on one H200, through its FP4 Marlin fallback
+with MTP3. SGLang 0.5.23 ran out of memory while repacking the 512
+experts for Marlin (138 GB allocated, PLE table already on the host), so
+the SGLang and AX lanes did not run.
+
+| Clients | Stock vLLM MTP3 | Tokens per verify |
+|---:|---:|---:|
+| 1 | 259.9 / 247.1 / 246.1 | 3.84 / 3.42 / 2.68 |
+| 8 | 846.4 / 727.1 / 710.0 | 3.83 / 3.42 / 2.61 |
+
+The second sweep ran slower than the first by up to 30%; the cells pool
+both.
+[H200 Flash Next](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-flash-next-nvfp4)
+
 #### Qwen3.8-27B BF16, FP8 and NVFP4
 
 The same 128-token retest on one H200 (SM90, 141 GB): BF16, the official

@@ -618,6 +618,16 @@ the second pass only. B300 is not a recorded board on the platform list.
 Flash Next uses SGLang MTP with the add-on's QSA fix. Its comparison uses
 stock MTP3 as the speculative baseline.
 
+### H200 Flash Next
+
+On one H200 only stock vLLM loaded the NVFP4 checkpoint, through its FP4
+Marlin fallback. MTP3 reached 259.9 / 247.1 / 246.1 tok/s at one client
+and 846.4 / 727.1 / 710.0 at eight, with 3.8 / 3.4 / 2.6–2.7 tokens per
+verify. SGLang 0.5.23 ran out of memory while repacking the 512 experts
+for Marlin (138 GB allocated with the PLE table on the host), so the
+SGLang and AX lanes did not run.
+[H200 Flash Next](../results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-flash-next-nvfp4)
+
 ### RTX PRO 6000 Flash Next serving retest
 
 Both passes used the same prompts, 128 greedy output tokens per request,

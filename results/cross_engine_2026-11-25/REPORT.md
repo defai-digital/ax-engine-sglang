@@ -265,6 +265,37 @@ spread 11.5% while FlashInfer JIT-compiled.
 - TensorRT-LLM NVFP4 kernels need SM100 or SM120, so that lane was not
   run.
 
+## H200 · Qwen3.8-Flash-Next NVFP4
+
+The same pod and client as the 27B section above, after the 27B
+checkpoints were removed. The NVFP4 checkpoint (132.6 GB, 51.3 GB of it
+the PLE table) was staged to `/dev/shm` and the root disk.
+
+**SGLang did not load.** With `--fp4-gemm-backend marlin`,
+`--moe-runner-backend marlin`, the PLE table in pinned host memory (FP8)
+and static memory fraction 0.94, SGLang 0.5.23 ran out of GPU memory in
+`prepare_moe_nvfp4_layer_for_marlin`: 138.0 GiB allocated of 139.8 GiB
+when the repack asked for 800 MiB. The PLE embedding is built on the meta
+device, so the table was not on the GPU. A retry with
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` failed the same way
+(138.2 GiB allocated), so the limit is the repack's peak, not
+fragmentation. The stock MTP3 and AX MTP7 lanes would load the same way
+and were stopped.
+
+**Stock vLLM MTP3** (8 sequences, 8,192 batched tokens, utilization 0.90,
+prefix caching off, `{"method":"mtp","num_speculative_tokens":3}`) loaded
+in 210 s through vLLM's FP4 Marlin fallback.
+
+| Clients | Stock vLLM MTP3 | Tokens per verify |
+|---:|---:|---:|
+| 1 | 259.9 / 247.1 / 246.1 | 3.84 / 3.42 / 2.68 |
+| 8 | 846.4 / 727.1 / 710.0 | 3.83 / 3.42 / 2.61 |
+
+The second sweep was slower than the first: C1 code 278.7 → 243.6, C1
+math 261.5 → 234.2, C8 math 882.4 → 618.2 and C8 chat 767.2 → 660.8
+tok/s, with unchanged tokens per verify. The cells pool both sweeps; the
+pod was stopped before a rerun.
+
 ## Jetson Thor · Qwen3.8-27B DFlash2
 
 One Jetson Thor (SM110, 120 W mode) ran the vLLM build in the
