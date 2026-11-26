@@ -442,6 +442,26 @@ by about 0.1% in paired timings. During serving, the candidate generated
 3.17 tokens per verification versus 3.09 for the default lane.
 [Full projection audit and serving results](../results/fp8_verify_tactics/REPORT.md#rtx-5090-live-qwen38-27b-nvfp4)
 
+### RTX 5090 NVFP4 GEMM backend
+
+The RTX PRO 6000 backend A/B on a later 5090 pod: two slots, 4,096 KV tokens, the 128-token retest
+workload (8 prompts per workload at one request, 24 at two), two rounds of servers alternating
+CUTLASS / cute-dsl per route. Output tok/s, code / math / chat. Cells pool every sweep except the
+first one, where the first cute-dsl server compiled its kernels. These rates use shorter outputs than
+the ten-prompt mix above and are not comparable with it.
+
+| Route | Requests | CUTLASS | cute-dsl | Change |
+|---|---:|---:|---:|---:|
+| AX tree 32 | 1 | 321.2 / 269.9 / 169.7 | **333.3 / 281.0 / 177.9** | +3.8 / +4.1 / +4.9% |
+| AX tree 32 | 2 | 349.1 / 334.6 / 208.5 | **377.1 / 361.9 / 230.2** | +8.0 / +8.2 / +10.4% |
+| Stock DFlash2 width 8 | 1 | 242.4 / 202.9 / 130.9 | **271.7 / 229.5 / 149.3** | +12.1 / +13.1 / +14.0% |
+| Stock DFlash2 width 8 | 2 | 323.3 / 325.0 / 202.4 | **351.7 / 354.3 / 224.4** | +8.8 / +9.0 / +10.9% |
+
+Greedy outputs matched across the backends on 96/96 one-request requests of both routes, 288/288
+two-request tree requests and 272/288 two-request stock requests. Both backends fit the 32 GB budget;
+pass-to-pass spread was at most 3.6% per cell.
+[FP4 backend report](../results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090)
+
 ## H200 · Qwen3.8-27B
 
 One H200 (SM90, 141 GB, driver 595.112.07) ran the 128-token serving
