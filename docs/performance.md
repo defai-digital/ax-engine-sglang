@@ -418,6 +418,46 @@ by about 0.1% in paired timings. During serving, the candidate generated
 3.17 tokens per verification versus 3.09 for the default lane.
 [Full projection audit and serving results](../results/fp8_verify_tactics/REPORT.md#rtx-5090-live-qwen38-27b-nvfp4)
 
+## H200 · Qwen3.8-27B
+
+One H200 (SM90, 141 GB, driver 595.112.07) ran the 128-token serving
+retest: the first 8 (C1) and 24 (C8) prompts per workload, exactly 128
+greedy tokens, two sweeps. SGLang 0.5.23 with package 0.5.1 served BF16,
+the official `Qwen/Qwen3.8-27B-FP8` checkpoint (`c3a462cc`, 128×128 block
+scales) and NVFP4 through `--fp4-gemm-backend marlin`. Stock vLLM
+`0.34.0rc1.dev1105` and TensorRT-LLM 1.4.0rc3 served the same token IDs
+with `incoai/Qwen3.8-27B-DFlash2`. The AX lane is tree 32 at one client
+and a width-eight chain at eight. Cells are code / math / chat output
+tok/s.
+
+![H200 Qwen3.8-27B at one client for BF16, FP8 and NVFP4.](figures/h200-27b-c1-throughput.svg)
+
+![H200 Qwen3.8-27B at eight clients for BF16, FP8 and NVFP4.](figures/h200-27b-c8-throughput.svg)
+
+| Precision | Clients | Stock SGLang AR | Stock SGLang DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---|---:|---:|---:|---:|---:|---:|
+| BF16 | 1 | 67.4 / 67.3 / 67.3 | 268.9 / 244.4 / 153.0 | 286.2 / 259.8 / 164.7 | 309.1 / 285.5 / 175.9 | **366.2 / 325.4 / 193.3** |
+| BF16 | 8 | 457.4 / 463.7 / 451.0 | 1,029.1 / 946.3 / 619.4 | 931.7 / 1,011.1 / 702.6 | **1,084.5 / 1,313.6 / 830.1** | 1,061.0 / 955.4 / 626.7 |
+| FP8 | 1 | 93.8 / 93.9 / 94.0 | 311.3 / 289.6 / 189.1 | 350.1 / 316.4 / 198.9 | 402.2 / **373.7 / 236.9** | **410.5** / 352.4 / 226.1 |
+| FP8 | 8 | 611.8 / 612.2 / 637.4 | 1,122.1 / 895.0 / 690.7 | 1,083.0 / 1,115.2 / 721.7 | **1,160.3 / 1,359.2 / 1,018.3** | 1,132.4 / 938.0 / 705.0 |
+| NVFP4 | 1 | 102.4 / 102.4 / 102.4 | 342.7 / 304.5 / 204.2 | needs Blackwell | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
+| NVFP4 | 8 | 642.5 / 643.9 / 672.3 | 1,063.8 / 873.5 / 609.4 | needs Blackwell | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
+
+At one client the tree led BF16 on every workload and FP8 on code; stock
+vLLM led FP8 math and chat and every NVFP4 workload. At eight clients
+stock vLLM led every cell. Tokens per verify at one client were
+10.3–11.4 / 8.3–8.8 / 4.4–4.6 for the tree, 6.4–6.8 / 5.7 / 3.3 for
+stock SGLang DFlash2 and 6.5–7.1 / 5.7–5.8 / 3.3–3.5 for vLLM. The tree
+accepted the most tokens, so the FP8 and NVFP4 gap to vLLM is per-step
+cost. At eight clients all three DFlash2 implementations accepted about
+5.8–6.2 / 5.8–6.0 / 3.0–3.2.
+
+NVFP4 on SGLang needed `SGLANG_DISABLE_SILU_FP4_QUANT_FUSION=1`: SGLang
+0.5.23 kept its fused SiLU+FP4-quant path with the Marlin backend and
+failed with `'tuple' object has no attribute 'dtype'`. TensorRT-LLM's NVFP4
+kernels need Blackwell (SM100 or SM120).
+[H200 setup, failed lanes and pass spread](../results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
+
 ## Jetson Thor · Qwen3.8-27B
 
 All rows are single-request runs on a Linux arm64 Jetson Thor. SGLang

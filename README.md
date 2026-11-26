@@ -108,11 +108,11 @@ uses the same kernels; it is not a second report. On Linux amd64 that is
 NVIDIA Hopper and NVIDIA Blackwell. On Linux arm64 it is NVIDIA Jetson at
 SM110, which is Jetson Thor.
 
-Hopper at SM90 covers H100 and H200. SGLang 0.5.22 served Qwen3.8-27B
-BF16 on one H200 without the add-on. The add-on's current routes have no
-SM90 measurement yet. The throughput tables below are the Blackwell and
-Jetson runs.
-[H200 baselines](results/track_a_stage0_h200/REPORT.md)
+Hopper at SM90 covers H100 and H200. Package 0.5.1 ran the 27B tree
+and chain routes on one H200 for BF16, FP8 and NVFP4 (through Marlin
+W4A16). The NVFP4 verify and GDN recurrent kernels are SM12-only and stay
+off there.
+[H200 retest](#qwen38-27b-on-h200) · [Earlier H200 baselines](results/track_a_stage0_h200/REPORT.md)
 
 | Platform | Host | Capability | Measured board |
 |---|---|---|---|
@@ -181,6 +181,32 @@ tied it on chat, for both BF16 and NVFP4.
 ![Jetson Thor throughput for stock SGLang, TensorRT Edge-LLM, and the add-on, grouped by BF16 or NVFP4 and prompt family.](docs/figures/jetson-thor-27b-throughput.svg)
 
 [Jetson Thor](docs/performance.md#jetson-thor-qwen38-27b)
+
+### Qwen3.8-27B on H200
+
+The same 128-token retest on one H200 (SM90, 141 GB): BF16, the official
+`Qwen/Qwen3.8-27B-FP8` checkpoint, and NVFP4 through Marlin W4A16, since
+Hopper has no FP4 tensor cores. Stock vLLM and TensorRT-LLM 1.4.0rc3
+served the same token IDs with the same DFlash2 drafter.
+
+![H200 Qwen3.8-27B at one client for BF16, FP8 and NVFP4: stock SGLang AR and DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2 and the AX tree.](docs/figures/h200-27b-c1-throughput.svg)
+
+![H200 Qwen3.8-27B at eight clients. Stock vLLM DFlash2 leads every workload.](docs/figures/h200-27b-c8-throughput.svg)
+
+| Precision | Clients | Stock SGLang DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---|---:|---:|---:|---:|---:|
+| BF16 | 1 | 268.9 / 244.4 / 153.0 | 286.2 / 259.8 / 164.7 | 309.1 / 285.5 / 175.9 | **366.2 / 325.4 / 193.3** |
+| BF16 | 8 | 1,029.1 / 946.3 / 619.4 | 931.7 / 1,011.1 / 702.6 | **1,084.5 / 1,313.6 / 830.1** | 1,061.0 / 955.4 / 626.7 |
+| FP8 | 1 | 311.3 / 289.6 / 189.1 | 350.1 / 316.4 / 198.9 | 402.2 / **373.7 / 236.9** | **410.5** / 352.4 / 226.1 |
+| FP8 | 8 | 1,122.1 / 895.0 / 690.7 | 1,083.0 / 1,115.2 / 721.7 | **1,160.3 / 1,359.2 / 1,018.3** | 1,132.4 / 938.0 / 705.0 |
+| NVFP4 | 1 | 342.7 / 304.5 / 204.2 | needs Blackwell | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
+| NVFP4 | 8 | 1,063.8 / 873.5 / 609.4 | needs Blackwell | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
+
+At one client the tree led BF16 on every workload and FP8 on code. Stock
+vLLM led the rest, and every workload at eight clients. The tree accepted
+more tokens per verify at one client (10.3–11.4 on code against vLLM's
+6.5–7.1), so the FP8 and NVFP4 gap is per-step cost, not draft quality.
+[H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
 
 ### Qwen3.8-Flash-Next NVFP4
 

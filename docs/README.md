@@ -55,12 +55,12 @@ supply the launch settings explicitly. `AX_AUTO_DEFAULTS` fills them on
 
 Support follows the CUDA compute capability. The measured board is the
 run recorded here. H100 is the same Hopper SM90 target as H200; the
-checked-in Hopper run is the H200 report, which measured stock SGLang
-0.5.22 without the add-on. The Jetson row is SM110.
+H200 retest ran package 0.5.1 on Qwen3.8-27B BF16, FP8 and NVFP4 (Marlin
+W4A16). The Jetson row is SM110.
 
 | Platform | Host | Capability | Measured board | Evidence |
 |---|---|---|---|---|
-| NVIDIA Hopper | Linux amd64 | SM90 | H200 | [Qwen3.8-27B BF16, SGLang 0.5.22](../results/track_a_stage0_h200/REPORT.md) |
+| NVIDIA Hopper | Linux amd64 | SM90 | H200 | [27B BF16, FP8 and NVFP4 retest](../results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4) · [SGLang 0.5.22 baselines](../results/track_a_stage0_h200/REPORT.md) |
 | NVIDIA Blackwell | Linux amd64 | SM100 | B200 | [27B and Flash Next serving retest](../results/blackwell_nvfp4_serving_retest/REPORT.md) · [Dense NVFP4 verification](reports/2026-11-18-b200-27b-nvfp4.md) |
 | | | SM120 | RTX PRO 6000 Blackwell Server Edition | [27B NVFP4 serving](reports/2026-11-19-rtx-27b-nvfp4.md) · [Speed sweep and launch commands](../results/rtx_27b_nvfp4_speed/REPORT.md) |
 | | | SM120 | GeForce RTX 5090 | [27B NVFP4 throughput and launch settings](../results/rtx_5090_27b_nvfp4/REPORT.md) |

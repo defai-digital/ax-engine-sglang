@@ -202,6 +202,39 @@ def main():
         description="End-to-end output token throughput with eight concurrent clients.",
     )
 
+    # H200 (SM90): BF16, FP8 and NVFP4 through Marlin W4A16; TensorRT-LLM NVFP4 needs Blackwell (SM100/SM120).
+    h200 = [("Stock SGLang AR", SGLANG_LIGHT,
+             ("67.4 / 67.3 / 67.3", "93.8 / 93.9 / 94.0", "102.4 / 102.4 / 102.4"),
+             ("457.4 / 463.7 / 451.0", "611.8 / 612.2 / 637.4", "642.5 / 643.9 / 672.3")),
+            ("Stock SGLang DFlash2", SGLANG,
+             ("268.9 / 244.4 / 153.0", "311.3 / 289.6 / 189.1", "342.7 / 304.5 / 204.2"),
+             ("1,029.1 / 946.3 / 619.4", "1,122.1 / 895.0 / 690.7", "1,063.8 / 873.5 / 609.4")),
+            ("TensorRT-LLM DFlash2", EDGE,
+             ("286.2 / 259.8 / 164.7", "350.1 / 316.4 / 198.9", None),
+             ("931.7 / 1,011.1 / 702.6", "1,083.0 / 1,115.2 / 721.7", None)),
+            ("Stock vLLM DFlash2", VLLM,
+             ("309.1 / 285.5 / 175.9", "402.2 / 373.7 / 236.9", "465.7 / 429.9 / 282.2"),
+             ("1,084.5 / 1,313.6 / 830.1", "1,160.3 / 1,359.2 / 1,018.3", "1,357.3 / 1,382.4 / 971.8")),
+            ("AX tree 32 / chain 8", AX_DARK,
+             ("366.2 / 325.4 / 193.3", "410.5 / 352.4 / 226.1", "409.5 / 336.3 / 221.3"),
+             ("1,061.0 / 955.4 / 626.7", "1,132.4 / 938.0 / 705.0", "1,071.7 / 913.2 / 619.9"))]
+    for slug, clients, col in (("c1", "1 concurrent client", 2), ("c8", "8 concurrent clients", 3)):
+        bar_chart(
+            OUT / f"h200-27b-{slug}-throughput.svg",
+            title=f"H200 · Qwen3.8-27B · {clients}",
+            subtitle="128 greedy output tokens per request · two passes per route · "
+                     + ("8 prompts" if col == 2 else "24 prompts") + " per workload",
+            series=[(name, color) for name, color, *_ in h200],
+            panels=[{"title": precision, "categories": WORKLOADS,
+                     "values": split(*[row[col][i] for row in h200]),
+                     "missing": "TensorRT-LLM NVFP4 needs Blackwell"}
+                    for i, precision in enumerate(("BF16", "FP8", "NVFP4 · Marlin W4A16"))],
+            xlabel="End-to-end output tokens per second · same scale in all panels",
+            legend_columns=3,
+            description=f"Stock SGLang, TensorRT-LLM, stock vLLM and the AX tree/chain on one H200 at {clients}, "
+                        "for BF16, FP8 and NVFP4.",
+        )
+
     bar_chart(
         OUT / "rtx-pro-6000-27b-fp8-verify-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",

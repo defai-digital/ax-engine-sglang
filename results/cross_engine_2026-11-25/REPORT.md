@@ -202,6 +202,69 @@ build: parallel `nvcc` jobs filled the pod's 62 GB memory limit and were
 OOM-killed. The measured lanes reused the RTX PRO 6000's SM120 JIT cache
 with `MAX_JOBS=4`.
 
+## H200 · Qwen3.8-27B BF16, FP8 and NVFP4
+
+One H200 SXM (143,771 MiB, driver 595.112.07, SM90). The SGLang lanes
+reuse `results/rtx_pro_6000_retest/run.py`; the vLLM and TensorRT-LLM
+lanes use the RTX PRO 6000 client above. Both send the same chat-templated
+token IDs: the first 8 (C1) and 24 (C8) prompts per workload, exactly 128
+greedy tokens with EOS ignored, one- and eight-request warm-ups, then two
+sweeps (C8 then C1, C1 then C8).
+
+- SGLang 0.5.23 with ax-engine-sglang 0.5.1, FlashInfer attention, 8
+  slots, a 16,384-token KV pool, static memory fraction 0.90, chunked
+  prefill 512. Stock DFlash2 used 8 draft tokens with FP32 Mamba state and
+  Triton verify. The AX lane is tree 32 at one client and a width-eight
+  chain at eight (`AX_CHAIN_WIDTH=8`, `AX_SSM_POSITIONS=8`). The
+  SM12-only NVFP4 verify and GDN recurrent kernels stayed off.
+- Checkpoints: BF16 `Qwen/Qwen3.8-27B`, FP8 `Qwen/Qwen3.8-27B-FP8` at
+  `c3a462cc3d38cf351f3b26cbd763469eeb74ef81` (128×128 block scales), and
+  the NVFP4 checkpoint of the other tables through
+  `--fp4-gemm-backend marlin` (W4A16) on SGLang and vLLM's FP4 Marlin
+  fallback.
+- vLLM: 8 sequences, 8,192 batched tokens, utilization 0.90, prefix
+  caching off, `{"method":"dflash","num_speculative_tokens":7}`.
+- TensorRT-LLM: `trtllm-serve`, 8 sequences, 8,192 batched tokens, KV
+  fraction 0.85, block reuse off, padded CUDA graphs, DFlash with
+  `max_draft_len: 7` and `attention_backend: FA4`.
+
+| Precision | Clients | Stock SGLang AR | Stock SGLang DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---|---:|---:|---:|---:|---:|---:|
+| BF16 | 1 | 67.4 / 67.3 / 67.3 | 268.9 / 244.4 / 153.0 | 286.2 / 259.8 / 164.7 | 309.1 / 285.5 / 175.9 | **366.2 / 325.4 / 193.3** |
+| BF16 | 8 | 457.4 / 463.7 / 451.0 | 1,029.1 / 946.3 / 619.4 | 931.7 / 1,011.1 / 702.6 | **1,084.5 / 1,313.6 / 830.1** | 1,061.0 / 955.4 / 626.7 |
+| FP8 | 1 | 93.8 / 93.9 / 94.0 | 311.3 / 289.6 / 189.1 | 350.1 / 316.4 / 198.9 | 402.2 / **373.7 / 236.9** | **410.5** / 352.4 / 226.1 |
+| FP8 | 8 | 611.8 / 612.2 / 637.4 | 1,122.1 / 895.0 / 690.7 | 1,083.0 / 1,115.2 / 721.7 | **1,160.3 / 1,359.2 / 1,018.3** | 1,132.4 / 938.0 / 705.0 |
+| NVFP4 | 1 | 102.4 / 102.4 / 102.4 | 342.7 / 304.5 / 204.2 | needs Blackwell | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
+| NVFP4 | 8 | 642.5 / 643.9 / 672.3 | 1,063.8 / 873.5 / 609.4 | needs Blackwell | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
+
+Within a lane, the two sweeps agreed within 7.6% for SGLang and 14.1% for
+vLLM. TensorRT-LLM's first C8 sweep ran slower than its second
+(BF16 chat 650.4 → 763.8, FP8 chat 654.4 → 804.5 tok/s), a 17–23% spread;
+the table pools both. The BF16 SGLang AR lane, which ran first on the pod,
+spread 11.5% while FlashInfer JIT-compiled.
+
+**Setup fixes.**
+
+- SGLang NVFP4 with Marlin failed at the first decode with
+  `AttributeError: 'tuple' object has no attribute 'dtype'`: Qwen3.5's
+  dense MLP enables the fused SiLU+FP4-quant kernel whenever both
+  projections are W4A4 ModelOpt layers, and hands Marlin an
+  `(fp4, scale)` tuple. SGLang's kill switch
+  `SGLANG_DISABLE_SILU_FP4_QUANT_FUSION=1` fixed it. The harness strips
+  `SGLANG_*` from the server environment, so the switch is set in the
+  lane flags and recorded in `launch.json`.
+- TensorRT-LLM DFlash on SM90 uses `attention_backend: FA4`, which needed
+  `quack-kernels` 0.6.5 (0.5.0 fails to import against
+  `nvidia-cutlass-dsl` 4.8.0). `VANILLA` needs FlashAttention 2.
+- TensorRT-LLM FP8 failed in warm-up when DeepGEMM's NVRTC JIT could not
+  compile its FP8 block-scaled GEMM. `TRTLLM_DG_JIT_USE_NVCC=1` switches
+  DeepGEMM to nvcc, which then missed `deep_gemm/nvrtc_cutlass.cuh`;
+  `TRTLLM_DG_NVCC_COMPILER` pointing at a wrapper that adds
+  `-I <wheel>/tensorrt_llm/include` fixed the lane. No TensorRT-LLM code
+  was changed.
+- TensorRT-LLM NVFP4 kernels need SM100 or SM120, so that lane was not
+  run.
+
 ## Jetson Thor · Qwen3.8-27B DFlash2
 
 One Jetson Thor (SM110, 120 W mode) ran the vLLM build in the
