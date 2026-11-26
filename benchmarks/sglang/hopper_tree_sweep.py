@@ -7,7 +7,7 @@ results/rtx_pro_6000_retest/run.py: the first 8 (C1) and 24 (C8) prompts per wor
 The work directory holds prompts.json (the B300 prompt file), models/<model> and models/27b-dflash2, and a
 stage.log with a "ready <model>" line per staged model; results go to <work dir>/results/<model>/<lane>.
 
-Lanes come from benchmarks/sglang/bench_27b_nvfp4.py (stock8, tree8 / tree16 / tree24 / tree32, chain8,
+Lanes come from benchmarks/sglang/bench_27b_nvfp4.py (stock8, tree16 / tree32 / tree64, chain8,
 replay8). A `prof-<lane>` lane launches <lane>, warms it up, and records a torch-profiler trace of C1 code
 requests (compare two with benchmarks/sglang/trace_kernels.py); it reports no throughput.
 NVFP4 has no SM90 tensor-core path, so NVFP4 targets use SGLang's Marlin W4A16 fallback, which needs
@@ -35,9 +35,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_27b_nvfp4 import LANES, launch_config, wait_for_server, stop_server, write_json
 from argparse import Namespace
 
-SWEEP = ("stock8", "tree32", "tree16", "tree8", "chain8", "replay8")
+SWEEP = ("stock8", "tree32", "tree16", "chain8", "replay8")
 MODELS = {"27b-fp8": SWEEP, "27b-nvfp4": SWEEP}
-PROFILE_STEPS = 48
+PROFILE_REQUESTS = 2
 FAMILIES = ("chat", "code", "math")
 LENGTH = 128
 PROMPTS = {"1": 8, "8": 24}
@@ -109,21 +109,26 @@ def launch(model, lane, target):
     return command, flags, algorithm
 
 
+def post(path, body=None):
+    req = urllib.request.Request(BASE + path, data=json.dumps(body or {}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    return urllib.request.urlopen(req, timeout=300).read()
+
+
 def profile(out, ids, speculative):
-    """Torch-profiler trace of PROFILE_STEPS scheduler steps over C1 code requests."""
+    """Torch-profiler trace of PROFILE_REQUESTS C1 code requests, stopped explicitly afterwards (a
+    step count would outlast short speculative requests and never flush the trace)."""
     trace = out / "torch_profile"
     trace.mkdir(exist_ok=True)
-    body = {"output_dir": str(trace), "num_steps": PROFILE_STEPS, "activities": ["CPU", "GPU"]}
-    req = urllib.request.Request(BASE + "/start_profile", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(req, timeout=60).read()
-    rows = [run_pass(ids["code"][i:i + 1], 1, LENGTH, speculative) for i in range(2)]
-    deadline = time.monotonic() + 120
+    post("/start_profile", {"output_dir": str(trace), "activities": ["CPU", "GPU"]})
+    rows = [run_pass(ids["code"][i:i + 1], 1, LENGTH, speculative) for i in range(PROFILE_REQUESTS)]
+    post("/stop_profile")
+    deadline = time.monotonic() + 300
     while not list(trace.rglob("*.json.gz")) + list(trace.rglob("*.trace.json")):
         if time.monotonic() > deadline:
             raise RuntimeError("no torch-profiler trace written")
         time.sleep(2)
-    write_json(out / "profile.json", {"steps": PROFILE_STEPS, "requests": rows,
+    write_json(out / "profile.json", {"requests": rows,
                                       "note": "profiled run; not a throughput result"})
 
 

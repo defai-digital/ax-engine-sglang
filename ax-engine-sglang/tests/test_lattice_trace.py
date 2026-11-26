@@ -268,6 +268,28 @@ class TraceWriterTests(unittest.TestCase):
         self.assertEqual(row["tokens"][:1], [5])
 
 
+class ChainOnlyTests(unittest.TestCase):
+    def test_chain_only_servers_do_not_read_the_lattice(self):
+        cases = (({"AX_LATTICE": "1", "AX_TREE": "0"}, False),
+                 ({"AX_LATTICE": "1"}, True),                                    # tree rounds read it
+                 ({"AX_LATTICE": "1", "AX_TREE": "0", "AX_LATTICE_TRACE": "/tmp/x"}, True),  # the trace too
+                 ({"AX_TREE": "1"}, False))                                      # no lattice at all
+        for env, expected in cases:
+            with self.subTest(env=env):
+                self.assertIs(PluginConfig.from_env(env).lattice_read, expected)
+
+    @unittest.skipIf(torch is None, "needs torch")
+    def test_install_leaves_the_sampler_alone_on_a_chain_only_server(self):
+        with patch.object(sys, "path", [str(PACKAGE / "ax_engine_sglang"), *sys.path]):
+            ax_lattice = __import__("ax_lattice")
+        config = PluginConfig.from_env({"AX_LATTICE": "1", "AX_TREE": "0"})
+        with patch.dict(os.environ, {"AX_LATTICE": "1"}), patch.object(ax_lattice, "_installed", False), \
+                patch("ax_engine_sglang.config.get_config", return_value=config), \
+                patch.dict(sys.modules, {"fc1_dflash_worker": None}):   # importing it would raise
+            ax_lattice.install()
+            self.assertFalse(ax_lattice._installed)
+
+
 class ConfigTests(unittest.TestCase):
     def test_the_trace_needs_the_lattice(self):
         with self.assertRaisesRegex(ValueError, "AX_LATTICE_TRACE"):

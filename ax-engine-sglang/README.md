@@ -127,7 +127,7 @@ The tree is refused on Qwen4-Exp targets. If the target's or drafter's `config.j
 |---|---|
 | `FC1_TREE_N` | nodes verified per round, root included. The launch default is 32, which is the tree in the serving retests. A 64-node tree was fastest in the earlier pooled RTX sweep. 16, 32 and 64 use the plugin's host-length FlashInfer plan; other sizes use SGLang's own plan |
 | `FC1_DRAFT_BLOCK` | tokens drafted per round (16 on the 9B and the 27B; at most 32 with `FC1_TREE64=1`) |
-| `AX_LATTICE=1` | build the tree from the DFlash2 selector lattice (needs a DFlash2 drafter) |
+| `AX_LATTICE=1` | build the tree from the DFlash2 selector lattice (needs a DFlash2 drafter). With `AX_TREE=0` (chain rounds only) and no `AX_LATTICE_TRACE`, nothing reads the lattice, so the drafter graph is captured without it: the same greedy draft without the full-vocabulary partition (0.31 ms per round on a B200 trace) |
 | `AX_FAST=1` | per-round overhead fixes (no host readback of the prefix length) |
 | `AX_GDN_LAYERS`, `AX_GDN_HEADS` | Gated-DeltaNet shape of the target: 48 / 48 for Qwen3.8-27B, 24 / 32 for Qwen3.5-9B |
 | `FC1_FUSED=1` | fused tree verifier; `0` uses SGLang's own tree verify (slower, a reference) |

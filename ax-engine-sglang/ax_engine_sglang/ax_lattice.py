@@ -51,6 +51,13 @@ def install():
     global _installed
     if _installed or not enabled():
         return
+    from ax_engine_sglang.config import get_config
+    if not get_config().lattice_read:
+        # The full-width chain graph then captures the release sampler, as the narrower chain widths'
+        # samplers do: the same greedy path without the full-vocabulary partition and the lattice
+        # (0.31 ms per round on the 27B, B200 trace). AX_TREE is fixed for the server's lifetime and
+        # this runs before any draft graph capture, so no captured graph can later serve a tree.
+        return
     import fc1_dflash_worker as W
     from sglang.srt.models.dflash import candidate_topk
 

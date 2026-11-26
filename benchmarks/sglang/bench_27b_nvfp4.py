@@ -30,7 +30,8 @@ HOTPATHS = {
 }
 REPLAY_LANES = tuple(HOTPATHS)
 # Tree lanes draft a 16-token block and verify a tree of N nodes (FC1_TREE_N); tree32 is the default route.
-TREE_LANES = ("tree8", "tree16", "tree24", "tree32")
+# The fused tree kernels (FC1_FUSED=1) take 16, 32 or 64 nodes.
+TREE_LANES = ("tree16", "tree32", "tree64")
 LANES = (*DEFAULT_LANES, *REPLAY_LANES, "stock16", *(lane for lane in TREE_LANES if lane != "tree32"), "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 

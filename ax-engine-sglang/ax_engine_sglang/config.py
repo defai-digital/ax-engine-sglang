@@ -66,6 +66,13 @@ class PluginConfig:
                     or self.draft_widths or self.chain_attention or self.ssm_positions)
 
     @property
+    def lattice_read(self) -> bool:
+        """Some round reads the DFlash2 lattice: tree rounds (AX_BTREE needs AX_TREE=1 too) or
+        AX_LATTICE_TRACE, which records chain rounds' lattices. AX_TREE=0 alone serves chain rounds
+        that draft the same greedy path without it."""
+        return self.lattice and (self.tree or bool(self.lattice_trace))
+
+    @property
     def configured_chain_widths(self) -> tuple[int, ...]:
         if self.chain_width_table:
             return tuple(width for _, width in self.chain_width_table)
