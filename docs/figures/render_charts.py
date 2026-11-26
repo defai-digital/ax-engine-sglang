@@ -79,6 +79,31 @@ def main():
     )
 
     bar_chart(
+        OUT / "b200x2-flash-next-bf16-prefill-graph.svg",
+        title="Two B200 GPUs · Qwen3.8-Flash-Next BF16 · one pod",
+        subtitle="TP2 · PLE in pinned host memory · 24 greedy prompts per workload · 256-token limit · "
+                 "passes pooled",
+        series=[("Stock SGLang MTP3, eager prefill", SGLANG_LIGHT), ("Stock SGLang MTP3", SGLANG),
+                ("Stock vLLM MTP3", VLLM), ("AX Engine MTP7", AX_DARK)],
+        panels=[
+            {"title": "Concurrency 1", "categories": WORKLOADS,
+             "values": split("309.0 / 353.0 / 285.5", "418.2 / 409.3 / 319.2", "364.7 / 440.1 / 314.6",
+                             "549.4 / 505.7 / 311.1")},
+            {"title": "Concurrency 4", "categories": WORKLOADS,
+             "values": split("544.3 / 705.5 / 572.6", "969.9 / 948.2 / 781.1", "884.3 / 1,126.1 / 777.3",
+                             "1,073.5 / 1,090.0 / 679.0")},
+            {"title": "Concurrency 16", "categories": WORKLOADS,
+             "values": split("752.0 / 1,567.3 / 1,125.0", "1,932.9 / 2,127.4 / 1,565.9",
+                             "2,096.2 / 2,432.1 / 1,679.6", "1,978.8 / 2,490.2 / 1,442.4")},
+        ],
+        xlabel="End-to-end output tokens per second · same scale in all panels",
+        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. The other SGLang lanes use "
+             "SGLang's default prefill CUDA graphs.",
+        description="On one pod, prefill CUDA graphs raise stock SGLang MTP3 and AX Engine MTP7 to stock vLLM "
+                    "MTP3's level at four and sixteen clients; AX MTP7 leads code at one and four clients.",
+    )
+
+    bar_chart(
         OUT / "b200-27b-nvfp4-serving-retest.svg",
         title="B200 · Qwen3.8-27B NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",

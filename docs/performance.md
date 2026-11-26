@@ -655,6 +655,26 @@ the checkpoint but failed in the first decode step: its Flash Next
 attention kernel JIT could not find `cuda.h`.
 [Two-B200 report](../results/cross_engine_2026-11-25/REPORT.md#two-b200-gpus-qwen38-flash-next-bf16)
 
+### Prefill CUDA graphs on two B200s
+
+The SGLang lanes above ran with `--disable-prefill-cuda-graph`. A second two-B200 pod reran them with
+SGLang's default prefill CUDA graphs, alongside stock vLLM MTP3. Cells pool every pass (four for the
+graphed MTP lanes and vLLM, two otherwise):
+
+| Clients | Stock SGLang MTP3, eager prefill | Stock SGLang MTP3 | Stock vLLM MTP3 | AX MTP7 |
+|---:|---:|---:|---:|---:|
+| 1 | 309.0 / 353.0 / 285.5 | 418.2 / 409.3 / **319.2** | 364.7 / 440.1 / 314.6 | **549.4 / 505.7** / 311.1 |
+| 4 | 544.3 / 705.5 / 572.6 | 969.9 / 948.2 / **781.1** | 884.3 / **1,126.1** / 777.3 | **1,073.5** / 1,090.0 / 679.0 |
+| 16 | 752.0 / 1,567.3 / 1,125.0 | 1,932.9 / 2,127.4 / 1,565.9 | **2,096.2** / 2,432.1 / **1,679.6** | 1,978.8 / **2,490.2** / 1,442.4 |
+
+First-token time at one and four clients fell from 0.20-0.33 s to 0.08-0.11 s. Every prefill stalls
+the running decode batch, so eager prefills cost most at four and sixteen clients. AX MTP7's pooled
+C16 code cell includes a first pass that compiled kernels (1,362.5 tok/s); its other passes ran at
+2,040.7-2,507.5. This pod was slower than the first for both engines, and pass-to-pass spread reached
+25-45% in some cells. The launcher now notes the cost when a speculative Qwen4-Exp launch passes
+`--disable-prefill-cuda-graph`.
+[Prefill-graph report](../results/b200x2_flash_next_prefill_graph/REPORT.md)
+
 An earlier two-B300 TP2 run used package 0.2.0, the same prompt file, and
 the second pass only. B300 is not a recorded board on the platform list.
 [Two-B300 report](../results/b300-flash-next-bf16/REPORT.md)

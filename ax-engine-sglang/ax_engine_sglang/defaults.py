@@ -256,6 +256,12 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         # verify window crosses a 4-token group (MTP 1-3 included) and refuses windows above 4.
         result.default_env(environ, "AX_QSA_RING", QSA_RING,
                            "Qwen4-Exp QSA with speculative decoding: fixes the 4-slot pending ring")
+        if getattr(args, "disable_prefill_cuda_graph", False) and not verified:
+            # Measured on two B200s (TP2, BF16, MTP3 and MTP7): eager prefills took 2-3x as long, and each
+            # one stalls the running decode batch (results/b200x2_flash_next_prefill_graph).
+            result.notes.append("--disable-prefill-cuda-graph: Qwen4-Exp prefills run eagerly and stall the "
+                                "decode batch; on two B200s this cost 26-45% of the 4-client throughput. "
+                                "Drop the flag unless the verified profile needs it")
 
     parity = parity_requested(environ)
     if parity:

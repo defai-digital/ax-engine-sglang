@@ -252,6 +252,15 @@ class StockRouteDefaultsTests(unittest.TestCase):
                                                     FLASH_NEXT, None)))
         self.assertNotIn("AX_QSA_RING", env_of(plan(args(None), {}, FLASH_NEXT, None)))
 
+    def test_eager_prefill_on_flash_next_speculation_is_flagged(self):
+        def notes(launch, environ=None, target=FLASH_NEXT):
+            return [n for n in plan(launch, environ or {}, target, None).notes if "prefill-cuda-graph" in n]
+        mtp = dict(speculative_num_draft_tokens=None)
+        self.assertEqual(len(notes(args("EAGLE", disable_prefill_cuda_graph=True, **mtp))), 1)
+        self.assertEqual(notes(args("EAGLE", **mtp)), [])
+        self.assertEqual(notes(args(None, disable_prefill_cuda_graph=True)), [])          # no speculation
+        self.assertEqual(notes(args("EAGLE", disable_prefill_cuda_graph=True, **mtp), target=QWEN38_27B), [])
+
     def test_nvfp4_moe_uses_cutlass_on_sm110_and_sm120_only(self):
         for capability in ((11, 0), (12, 0)):
             result = plan(args("EAGLE"), {}, FLASH_NEXT, None, capability=capability)

@@ -154,6 +154,19 @@ failed in its first decode step.
 
 [Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
 
+Those SGLang lanes ran with `--disable-prefill-cuda-graph`. Eager prefills
+took two to three times as long as vLLM's, and each one stalled the
+running decode batch. A rerun on one pod used SGLang's default prefill CUDA
+graphs and stock vLLM MTP3 as the reference. Stock SGLang MTP3 rose 34–78%
+at four clients and 36–157% at sixteen, to within 16% of vLLM in every
+cell. AX MTP7 then led code at one and four clients (549.4 and 1,073.5
+tok/s against 364.7 and 884.3), was level on math, and trailed vLLM on
+chat by up to 14%. That pod was slower than the first for both engines.
+
+![Two B200s on one pod: stock SGLang MTP3 with eager and graphed prefill, stock vLLM MTP3 and AX MTP7.](docs/figures/b200x2-flash-next-bf16-prefill-graph.svg)
+
+[Prefill-graph rerun](results/b200x2_flash_next_prefill_graph/REPORT.md)
+
 #### Qwen3.8-Flash-Next NVFP4
 
 The 128-token retest on one B200. AX MTP7 led code at both concurrencies.
