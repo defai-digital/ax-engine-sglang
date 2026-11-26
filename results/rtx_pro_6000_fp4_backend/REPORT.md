@@ -52,6 +52,28 @@ changes GEMM shapes between runs, as with either backend alone).
 first-token time, against 0.5-1.0 s elsewhere; later servers reused the on-disk cache and showed no
 such pass. Warm a new deployment before measuring or serving latency-sensitive traffic.
 
+## RTX 5090
+
+One GeForce RTX 5090 (SM120, 32 GB), same software, the add-on's working tree after 1cd283e.
+`hopper_tree_sweep.py` with the 5090 server shape: two slots, 4,096 KV tokens, static memory fraction
+0.94, `AX_SSM_POSITIONS=8`, `SGLANG_FLASHINFER_WORKSPACE_SIZE=67108864`
+(`AX_SWEEP_SLOTS=2 AX_SWEEP_KV_TOKENS=4096 AX_SWEEP_MEM=0.94 AX_SWEEP_CONCURRENCY=1,2`). Same
+128-token workload with 8 prompts per workload at one request and 24 at two. Two rounds of servers,
+interleaved CUTLASS / cute-dsl per route, two sweeps per server. Cells pool every sweep except the
+first sweep of the first round, where the first cute-dsl server compiled its kernels (tree 32 math at
+one request: 190.3 tok/s in that sweep, 270-282 afterwards).
+
+| Route | Requests | CUTLASS | cute-dsl | Change |
+|---|---:|---:|---:|---:|
+| AX tree 32 | 1 | 321.2 / 269.9 / 169.7 | **333.3 / 281.0 / 177.9** | +3.8 / +4.1 / +4.9% |
+| AX tree 32 | 2 | 349.1 / 334.6 / 208.5 | **377.1 / 361.9 / 230.2** | +8.0 / +8.2 / +10.4% |
+| Stock DFlash2 width 8 | 1 | 242.4 / 202.9 / 130.9 | **271.7 / 229.5 / 149.3** | +12.1 / +13.1 / +14.0% |
+| Stock DFlash2 width 8 | 2 | 323.3 / 325.0 / 202.4 | **351.7 / 354.3 / 224.4** | +8.8 / +9.0 / +10.9% |
+
+Greedy outputs were identical across the backends on 96/96 one-request requests of both routes,
+288/288 two-request tree requests and 272/288 two-request stock requests. Both backends started in the
+32 GB memory budget. Outside the first sweep the pass-to-pass spread was at most 3.6% per cell.
+
 ## Default
 
 ax-engine-sglang now sets `--fp4-gemm-backend flashinfer_cutedsl` on SM12x for dense ModelOpt NVFP4

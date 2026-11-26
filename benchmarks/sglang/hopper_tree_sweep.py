@@ -41,7 +41,11 @@ MODELS = {"27b-fp8": SWEEP, "27b-nvfp4": SWEEP}
 PROFILE_REQUESTS = 2
 FAMILIES = ("chat", "code", "math")
 LENGTH = 128
-PROMPTS = {"1": 8, "8": 24}
+# Smaller GPUs: AX_SWEEP_SLOTS / AX_SWEEP_KV_TOKENS / AX_SWEEP_MEM set the server shape, AX_SWEEP_CONCURRENCY
+# the two client counts ("1,2" on a 32 GB RTX 5090), AX_SWEEP_FLAGS (JSON) extra lane environment.
+SLOTS = int(os.environ.get("AX_SWEEP_SLOTS", "8"))
+LOW, HIGH = (int(c) for c in os.environ.get("AX_SWEEP_CONCURRENCY", "1,8").split(","))
+PROMPTS = {str(LOW): 8, str(HIGH): 24}
 
 
 def request(input_ids, length, speculative):
@@ -97,10 +101,13 @@ def run_pass(ids, concurrency, length, speculative):
 
 
 def launch(model, lane, target):
-    args = Namespace(target=target, draft=ROOT / "models" / "27b-dflash2", port=30517, slots=8,
-                     context_length=4096, kv_tokens=16384, mem_fraction_static=0.90, verify_parity=False,
+    args = Namespace(target=target, draft=ROOT / "models" / "27b-dflash2", port=30517, slots=SLOTS,
+                     context_length=4096, kv_tokens=int(os.environ.get("AX_SWEEP_KV_TOKENS", "16384")),
+                     mem_fraction_static=float(os.environ.get("AX_SWEEP_MEM", "0.90")), verify_parity=False,
                      verified_profile=False)
     command, flags, algorithm = launch_config(args, lane.removeprefix("prof-"))
+    if algorithm and os.environ.get("AX_SWEEP_FLAGS"):
+        flags = dict(flags, **json.loads(os.environ["AX_SWEEP_FLAGS"]))
     index = command.index("--fp4-gemm-backend")
     del command[index:index + 2]
     if "nvfp4" in model:
@@ -176,18 +183,18 @@ def run_lane(model, lane, target, ids):
             write_json(out / "server-info.json", {key: info.get(key) for key in fields})
             capped = re.findall(r"max_running_requests is capped to (\d+)",
                                 (out / "server.log").read_text(errors="replace"))
-            if capped and int(capped[-1]) < 8:
-                raise RuntimeError(f"effective server request capacity {capped[-1]} < 8")
+            if capped and int(capped[-1]) < HIGH:
+                raise RuntimeError(f"effective server request capacity {capped[-1]} < {HIGH}")
             if bool(info.get("enable_linear_replayssm_spec")) != (lane.removeprefix("prof-") == "replay8"):
                 raise RuntimeError(f"unexpected replay state on {model} {lane}")
             run_pass(ids["chat"][:1], 1, 32, algorithm is not None)
-            run_pass(ids["chat"][:8], 8, 32, algorithm is not None)
+            run_pass(ids["chat"][:8], HIGH, 32, algorithm is not None)
             if lane.startswith("prof-"):
                 profile(out, ids, algorithm is not None)
                 (out / "done").touch()
                 return
             passes = []
-            for sweep, concurrencies in enumerate(((8, 1), (1, 8)), 1):
+            for sweep, concurrencies in enumerate(((HIGH, LOW), (LOW, HIGH)), 1):
                 for concurrency in concurrencies:
                     for family in FAMILIES:
                         result = run_pass(ids[family][:PROMPTS[str(concurrency)]], concurrency,

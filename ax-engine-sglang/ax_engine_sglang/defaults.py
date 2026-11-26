@@ -243,8 +243,9 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
     # Dense NVFP4 on SM12x: SGLang 0.5.23 `auto` picks FlashInfer CUTLASS for the FP4 GEMMs. On the
     # RTX PRO 6000 FlashInfer cute-dsl ran the 27B MLP GEMMs 23-37% faster at 8-64 rows (1% slower at 128)
     # and served stock, tree and replay routes 6-19% faster at one client with identical greedy
-    # outputs (results/rtx_pro_6000_fp4_backend). The parity path keeps the CUTLASS kernels it was
-    # matched on; MoE targets were not measured.
+    # outputs; on the RTX 5090 the tree gained 4-10% and stock DFlash2 9-14% at one and two requests
+    # (results/rtx_pro_6000_fp4_backend). The parity path keeps the CUTLASS kernels it was matched on;
+    # MoE targets were not measured.
     if (capability and capability[0] == 12 and is_nvfp4(target, target_quant)
             and not has_nvfp4_moe(target, target_quant) and not parity_requested(environ)
             and getattr(args, "fp4_gemm_runner_backend", None) in (None, "auto")):

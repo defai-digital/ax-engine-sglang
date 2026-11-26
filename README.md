@@ -320,6 +320,14 @@ routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
 inputs, reached 168.5 and 279.6 tok/s. TensorRT-LLM DFlash2 ran out of
 memory creating the target and drafter on the 32 GB card.
 
+With FlashInfer cute-dsl NVFP4 GEMMs (now the add-on's default on SM12x)
+in place of SGLang's CUTLASS choice, a later 5090 pod ran tree 32
+at 333.3 / 281.0 / 177.9 tok/s at one request against 321.2 / 269.9 /
+169.7. That is 4–5% faster at one request and 8–10% at two. Stock DFlash2
+ran 9–14% faster. Greedy outputs matched on all 96 one-request requests
+of each route. These runs used 128-token outputs on the retest prompts.
+[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090)
+
 ![GeForce RTX 5090 Qwen3.8-27B NVFP4 output throughput. The AX tree leads at one request. Stock DFlash2 and the add-on finish within 0.6% at two requests.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
 
 [RTX 5090](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
