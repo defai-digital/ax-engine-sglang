@@ -72,6 +72,24 @@ shares are what to read:
 GEMMs are about 80% of a verify round on SM90. Only the MLP of the NVFP4 checkpoint is FP4 (gate+up
 34816x5120, down 5120x17408, 64 layers); its attention and Gated-DeltaNet projections are FP8.
 
+### Gated-DeltaNet update and commit
+
+The same FP8 traces, Gated-DeltaNet kernels in microseconds per verify round (NVFP4 traces give the
+same GDN times; prefill included):
+
+| Kernel | Stock width 8 | Kernel | AX tree 32 |
+|---|---:|---|---:|
+| `fused_sigmoid_gating_delta_rule_update` | 825 | `_tree_prepare` / `invert32` / `_tree_finish` | 202 / 368 / 367 |
+| `_causal_conv1d_update` | 335 | tree `conv` | 216 |
+| `_fused_mamba_state_scatter_with_mask` (commit) | 79 | `snapshots` (commit) | 218 |
+| `fused_qkvzba_split_reshape_cat` | 166 | `fused_qkvzba_split_reshape_cat` | 185 |
+| Total | 1,405 (8.4%) | Total | 1,556 (8.4%) |
+
+The recurrent update, convolution and state commit cost 1.2-1.4 ms of a 14-15 ms round on either
+route, so halving them would gain at most about 4%; the GEMMs (80%) bound the round. The largest
+non-GEMM kernels outside GDN are cuBLASLt's split-K reduction for the BF16/FP8 projections
+(0.59-0.62 ms, 73-77 calls per round) and per-token FP8 activation quantization (0.40-0.53 ms).
+
 ## Marlin tile tuning
 
 `benchmarks/sglang/marlin_fp4_tune.py` compiles SGLang's Marlin source with the tile (thread_k,
