@@ -500,6 +500,8 @@ GEMMs are about 80% of a verify round; on NVFP4, Marlin W4A16 (the MLP) is 44-50
 tiles found no faster bit-identical configuration: the kernel reaches about 40% of the H200's memory
 bandwidth at eight rows. GDN replay showed no reliable gain at eight clients on SM90. Skipping the
 lattice on chain-only servers (`AX_TREE=0`) gained 1.2-1.3% at one client with identical outputs.
+The Gated-DeltaNet update, convolution and state commit take 1.4-1.6 ms (8.4%) of a round on both
+stock and tree routes.
 [H200 tree sweep](../results/h200_tree_sweep/REPORT.md)
 
 ## Jetson Thor · Qwen3.8-27B

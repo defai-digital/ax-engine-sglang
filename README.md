@@ -236,7 +236,9 @@ client tree 32 reached 443.3 / 388.1 / 246.6 tok/s on FP8 against 332.1 /
 against 368.5 / 324.9 / 214.7. Tree 16 finished within 2% of tree 32, so
 the 32-node default stays. GEMMs are about 80% of a verify round; Marlin
 W4A16 alone is 44–50% on NVFP4, and no faster bit-identical Marlin tile
-exists for these shapes.
+exists for these shapes. The Gated-DeltaNet update, convolution and state
+commit take about 8% of a round, so faster GDN kernels would gain at most
+about 4%.
 [H200 tree sweep](results/h200_tree_sweep/REPORT.md)
 
 ### RTX PRO 6000
