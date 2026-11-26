@@ -6,8 +6,8 @@ the BF16 MTP draft from scripts/prepare_flash_mtp.py at /dev/shm/fn-mtp-bf16, th
 
     python flash_next_tp2_ab.py base-mtp3 pcg-mtp3 pcg-mtp7      (lane names from LANES; <lane>-r2 repeats)
 
- lanes are the cross-engine launch (Triton attention, no FlashInfer autotune, eager prefill);
- lanes keep SGLang's prefill CUDA graphs.
+`base-` lanes are the cross-engine launch (Triton attention, no FlashInfer autotune, eager prefill);
+`pcg-` lanes keep SGLang's prefill CUDA graphs.
 """
 import json
 import os
