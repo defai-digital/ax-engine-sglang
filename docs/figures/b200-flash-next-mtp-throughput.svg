@@ -139,7 +139,7 @@ L 291.591073 120.4776
 L 291.591073 132.2424 
 L 79.2 132.2424 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #a3adb9"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #eea36c"/>
    </g>
    <g id="patch_4">
     <path d="M 79.2 134.1576 
@@ -147,7 +147,7 @@ L 530.310761 134.1576
 L 530.310761 145.9224 
 L 79.2 145.9224 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #6b7a8d"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #e36a12"/>
    </g>
    <g id="patch_5">
     <path d="M 79.2 147.8376 
@@ -163,7 +163,7 @@ L 299.468926 175.9176
 L 299.468926 187.6824 
 L 79.2 187.6824 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #a3adb9"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #eea36c"/>
    </g>
    <g id="patch_7">
     <path d="M 79.2 189.5976 
@@ -171,7 +171,7 @@ L 527.304738 189.5976
 L 527.304738 201.3624 
 L 79.2 201.3624 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #6b7a8d"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #e36a12"/>
    </g>
    <g id="patch_8">
     <path d="M 79.2 203.2776 
@@ -187,7 +187,7 @@ L 298.639679 231.3576
 L 298.639679 243.1224 
 L 79.2 243.1224 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #a3adb9"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #eea36c"/>
    </g>
    <g id="patch_10">
     <path d="M 79.2 245.0376 
@@ -195,7 +195,7 @@ L 425.825548 245.0376
 L 425.825548 256.8024 
 L 79.2 256.8024 
 z
-" clip-path="url(#pd38ddb5440)" style="fill: #6b7a8d"/>
+" clip-path="url(#pd38ddb5440)" style="fill: #e36a12"/>
    </g>
    <g id="patch_11">
     <path d="M 79.2 258.7176 
@@ -244,7 +244,7 @@ L 41.04 74.88
 L 41.04 66.24 
 L 25.2 66.24 
 z
-" style="fill: #a3adb9; stroke: #a3adb9; stroke-linejoin: miter"/>
+" style="fill: #eea36c; stroke: #eea36c; stroke-linejoin: miter"/>
   </g>
   <g id="patch_14">
    <path d="M 201.6 74.88 
@@ -252,7 +252,7 @@ L 217.44 74.88
 L 217.44 66.24 
 L 201.6 66.24 
 z
-" style="fill: #6b7a8d; stroke: #6b7a8d; stroke-linejoin: miter"/>
+" style="fill: #e36a12; stroke: #e36a12; stroke-linejoin: miter"/>
   </g>
   <g id="patch_15">
    <path d="M 378 74.88 

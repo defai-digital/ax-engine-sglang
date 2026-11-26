@@ -3,7 +3,9 @@
     python docs/figures/render_charts.py          # needs matplotlib
 
 Numbers are copied from the README tables (and the reports they link); a chart and its table must
-change together. Stock routes are gray, TensorRT Edge-LLM brown, AX Engine routes green.
+change together. Each engine has a light color, a standard color, and a dark color:
+stock SGLang is orange, TensorRT is grey, vLLM is blue, and AX Engine is green.
+The standard green matches the README banner.
 """
 from pathlib import Path
 
@@ -11,17 +13,22 @@ from chart_style import bar_chart, percent
 
 OUT = Path(__file__).resolve().parent
 
-AR = "#a3adb9"          # stock autoregressive
-STOCK = "#6b7a8d"       # stock speculative route
-STOCK2 = "#3f4d60"      # second stock speculative route
-VLLM = "#8f86b5"        # stock vLLM
-VLLM_DEEP = "#5b4f8c"   # stock vLLM speculative route when its AR is also shown
-EDGE = ["#e0c4a2", "#c99a64", "#a9703a", "#7a4c22"]   # TensorRT Edge-LLM AR, MTP3, chain 8, DDTree 32
-AX_PALE = "#c4e6cf"
-AX_LIGHT = "#8fd0a6"
-AX = "#2e9e5f"          # green
-AX_DEEP = "#0b5d36"     # deep green
-AX_VLLM = "#5fb7a6"     # AX Engine for vLLM
+SGLANG_LIGHT = "#eea36c"   # stock SGLang AR
+SGLANG = "#e36a12"         # stock SGLang speculative route
+SGLANG_DARK = "#a34108"    # a second stock SGLang speculative route
+VLLM_LIGHT = "#89b1e9"     # stock vLLM AR
+VLLM = "#3b7ddb"           # stock vLLM speculative route
+VLLM_DARK = "#1a4e9a"      # a second stock vLLM speculative route
+EDGE_LIGHT = "#c5cad3"     # TensorRT AR
+EDGE = "#8b939e"           # TensorRT speculative route
+EDGE_DARK = "#3e4650"      # TensorRT tree
+# A fourth TensorRT route sits between the standard and dark greys.
+EDGE_MID = "#646c76"
+AX_LIGHT = "#91d7b7"
+AX = "#37b67c"             # standard green, the README banner mark
+AX_DARK = "#0b5d36"
+# A fourth AX route sits between the standard and dark greens.
+AX_MID = "#1f8a56"
 WORKLOADS = ["Code", "Math", "Chat"]
 
 
@@ -35,7 +42,7 @@ def main():
         OUT / "b300-flash-next-bf16-throughput.svg",
         title="Two B300 GPUs · Qwen3.8-Flash-Next BF16",
         subtitle="SGLang 0.5.23 · TP2 · second pass · 24 greedy prompts per workload · 256-token limit",
-        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("AX Engine MTP7", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock SGLang MTP3", SGLANG), ("AX Engine MTP7", AX_DARK)],
         panels=[
             {"title": "Concurrency 1", "categories": WORKLOADS,
              "values": [[184.9, 206.8, 207.2], [306.6, 353.9, 294.4], [390.0, 409.9, 268.0]]},
@@ -53,8 +60,8 @@ def main():
         OUT / "b200x2-flash-next-bf16-throughput.svg",
         title="Two B200 GPUs · Qwen3.8-Flash-Next BF16",
         subtitle="TP2 · PLE in pinned host memory · 24 greedy prompts per workload · 256-token limit · two passes",
-        series=[("Stock SGLang AR", AR), ("Stock vLLM AR", VLLM), ("Stock SGLang MTP3", STOCK),
-                ("Stock vLLM MTP3", VLLM_DEEP), ("AX Engine MTP7", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock vLLM AR", VLLM_LIGHT), ("Stock SGLang MTP3", SGLANG),
+                ("Stock vLLM MTP3", VLLM), ("AX Engine MTP7", AX_DARK)],
         panels=[
             {"title": "Concurrency 1", "categories": WORKLOADS,
              "values": split("215.9 / 230.1 / 227.9", "220.1 / 223.6 / 223.3", "406.7 / 430.3 / 336.9",
@@ -75,7 +82,7 @@ def main():
         OUT / "b200-27b-nvfp4-serving-retest.svg",
         title="B200 · Qwen3.8-27B NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
-        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("AX tree/chain", AX), ("AX GDN replay", AX_DEEP)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("AX tree/chain", AX), ("AX GDN replay", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("136.0 / 136.0 / 136.4", "448.5 / 408.1 / 281.3", "632.5 / 516.5 / 333.8",
@@ -94,7 +101,7 @@ def main():
         OUT / "b200-27b-nvfp4-throughput.svg",
         title="B200 · Qwen3.8-27B NVFP4 · earlier 1,024-token study",
         subtitle="64 prompts per workload · 1,024-token limit · 64 server slots · mean of two passes",
-        series=[("Stock SGLang + DFlash2 block 8", STOCK), ("SGLang + ax-engine-sglang", AX_DEEP)],
+        series=[("Stock SGLang + DFlash2 block 8", SGLANG), ("SGLang + ax-engine-sglang", AX_DARK)],
         panels=[
             {"title": "Concurrency 1 · AX tree 16", "categories": WORKLOADS,
              "values": [[816, 733, 401], [1160, 971, 458]]},
@@ -110,7 +117,7 @@ def main():
         OUT / "b200-dflash2-recurrent-replay-throughput.svg",
         title="B200 · Qwen3.8-27B NVFP4 chat",
         subtitle="DFlash2 width 8 · concurrency 16 · 32 slots · 64 chat prompts",
-        series=[("Stock GDN snapshots", STOCK), ("AX recurrent GDN replay (benchmark overlay)", AX_DEEP)],
+        series=[("Stock GDN snapshots", SGLANG), ("AX recurrent GDN replay (benchmark overlay)", AX_DARK)],
         panels=[{"categories": ["Chat · C16"], "values": [[2685.6], [2957.3]]}],
         xlabel="Output tokens per second", legend_columns=2,
         description="Stock DFlash2 reached 2,685.6 output tokens per second and the recurrent GDN replay overlay "
@@ -121,7 +128,7 @@ def main():
         OUT / "b200-flash-next-nvfp4-serving-retest.svg",
         title="B200 · Qwen3.8-Flash-Next NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
-        series=[("Stock AR", AR), ("Stock MTP3", STOCK), ("AX MTP3", AX), ("AX MTP7", AX_DEEP)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock MTP3", SGLANG), ("AX MTP3", AX), ("AX MTP7", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("136.9 / 136.4 / 130.6", "304.9 / 273.3 / 223.4", "302.8 / 270.9 / 213.3",
@@ -139,7 +146,7 @@ def main():
         OUT / "b200-flash-next-mtp-throughput.svg",
         title="B200 · Qwen3.8-Flash-Next NVFP4 · earlier MTP study",
         subtitle="Concurrency 1 · second pass · 256-token limit · SGLang 0.5.23",
-        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("MTP7 + AX Engine QSA fix", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock SGLang MTP3", SGLANG), ("MTP7 + AX Engine QSA fix", AX_DARK)],
         panels=[{"categories": WORKLOADS,
                  "values": split("204.9 / 212.5 / 211.7", "435.2 / 432.3 / 334.4", "547.9 / 487.7 / 296.8")}],
         xlabel="Output tokens per second",
@@ -151,7 +158,8 @@ def main():
     bar_chart(
         OUT / "rtx-pro-6000-27b-bf16-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B BF16",
-        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX_DEEP)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM),
+                ("AX tree / chain", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "135.3 / 120.6 / 73.7",
@@ -171,8 +179,8 @@ def main():
     bar_chart(
         OUT / "rtx-pro-6000-27b-nvfp4-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
-        series=[("Stock AR", AR), ("Stock DFlash2", STOCK), ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX),
-                ("AX GDN replay", AX_DEEP)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM),
+                ("AX tree / chain", AX), ("AX GDN replay", AX_DARK)],
         panels=[{"title": t, "categories": WORKLOADS, "values": split(*cells)} for t, *cells in nvfp4],
         description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, stock vLLM DFlash2, the "
                     "AX tree/chain and AX GDN replay.",
@@ -184,8 +192,9 @@ def main():
         OUT / "rtx-pro-6000-27b-retest-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B at concurrency 8",
         subtitle="128 greedy output tokens per request · two passes per route",
-        series=[("Stock SGLang AR", AR), ("Stock DFlash2, width 8", STOCK), ("Stock vLLM DFlash2, width 8", VLLM),
-                ("AX tree 32 / chain 8", AX), ("AX GDN replay, width 8", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock DFlash2, width 8", SGLANG),
+                ("Stock vLLM DFlash2, width 8", VLLM), ("AX tree 32 / chain 8", AX),
+                ("AX GDN replay, width 8", AX_DARK)],
         panels=[{"title": "BF16", "categories": WORKLOADS, "values": bf16_c8 + [[None, None, None]],
                  "missing": "not run"},
                 {"title": "NVFP4", "categories": WORKLOADS, "values": split(*nvfp4[1][1:])}],
@@ -197,7 +206,7 @@ def main():
         OUT / "rtx-pro-6000-27b-fp8-verify-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
         subtitle="DFlash2 GDN replay · 8 concurrent requests · 64 chat prompts × 512 tokens",
-        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DEEP)],
+        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DARK)],
         panels=[{"title": "Default first", "categories": ["Chat"], "values": [[699.74], [718.01]]},
                 {"title": "Candidate first", "categories": ["Chat"], "values": [[710.20], [724.04]]}],
         xlabel="End-to-end output tokens per second",
@@ -211,7 +220,7 @@ def main():
         OUT / "rtx-27b-nvfp4-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · earlier pooled sweep",
         subtitle="Ten frozen prompts · 128-token outputs · rates pooled across workloads · SGLang 0.5.23",
-        series=[("Stock SGLang AR", AR), ("Stock DFlash2 block 8", STOCK), ("SGLang + AX Engine", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock DFlash2 block 8", SGLANG), ("SGLang + AX Engine", AX_DARK)],
         panels=[{"title": "C1 · 10 requests", "categories": ["All workloads"],
                  "values": [[54.41], [124.50], [156.87]], "suffix": [[None], [None], ["tree 64"]]},
                 {"title": "C8 · 40 requests", "categories": ["All workloads"],
@@ -227,7 +236,7 @@ def main():
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · batched lattice trees",
         subtitle="200 prompts · 256 greedy output tokens · 8 slots · 16-node trees · fused GDN kernels",
         series=[("AX tree 16, chain rounds above one request", AX_LIGHT), ("AX batched trees (AX_BTREE=4)", AX),
-                ("AX batched trees + AX_TREE_TEMP=1.55", AX_DEEP)],
+                ("AX batched trees + AX_TREE_TEMP=1.55", AX_DARK)],
         panels=[{"title": "C1", "categories": ["Output"], "values": [[235.1], [235.3], [244.1]]},
                 {"title": "C2", "categories": ["Output"], "values": [[336.6], [395.1], [407.7]]},
                 {"title": "C4", "categories": ["Output"], "values": [[536.8], [678.8], [689.0]]}],
@@ -240,7 +249,7 @@ def main():
         OUT / "rtx-pro-6000-flash-next-nvfp4-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-Flash-Next NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
-        series=[("Stock AR", AR), ("Stock MTP3", STOCK), ("AX MTP3", AX), ("AX MTP7", AX_DEEP)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock MTP3", SGLANG), ("AX MTP3", AX), ("AX MTP7", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("83.1 / 83.8 / 83.7", "183.5 / 164.1 / 134.0", "182.1 / 164.8 / 135.0",
@@ -258,7 +267,7 @@ def main():
         OUT / "rtx-5090-27b-nvfp4-throughput.svg",
         title="GeForce RTX 5090 · Qwen3.8-27B NVFP4",
         subtitle="SGLang 0.5.23 · 128 greedy output tokens per request · two passes · two GPU request slots",
-        series=[("Stock SGLang AR", AR), ("Stock DFlash2 block 8", STOCK), ("SGLang + AX Engine", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock DFlash2 block 8", SGLANG), ("SGLang + AX Engine", AX_DARK)],
         panels=[{"title": "C1 · 10 requests", "categories": ["All workloads"],
                  "values": [[57.64], [125.01], [135.18]], "suffix": [[None], [None], ["tree 32"]]},
                 {"title": "C2 · 40 requests", "categories": ["All workloads"],
@@ -273,8 +282,8 @@ def main():
         OUT / "rtx-5090-27b-batched-trees.svg",
         title="GeForce RTX 5090 · Qwen3.8-27B NVFP4 · trees at low concurrency",
         subtitle="200 prompts · 256 greedy output tokens · 2 slots · AX_SSM_POSITIONS=8 · AX_TREE_TEMP=1.55",
-        series=[("AX GDN replay, DFlash2 chain 16", AX_PALE), ("AX tree 16, chain 8 above one request", AX_LIGHT),
-                ("AX tree 32", AX), ("AX batched trees (AX_BTREE=2)", AX_DEEP)],
+        series=[("AX GDN replay, DFlash2 chain 16", AX_LIGHT), ("AX tree 16, chain 8 above one request", AX),
+                ("AX tree 32", AX_MID), ("AX batched trees (AX_BTREE=2)", AX_DARK)],
         panels=[{"title": "C1", "categories": ["Output"],
                  "values": [[187.6], [220.4], [237.8], [220.2]]},
                 {"title": "C2", "categories": ["Output"],
@@ -288,7 +297,7 @@ def main():
         OUT / "rtx-5090-27b-gdn-replay-throughput.svg",
         title="GeForce RTX 5090 · DFlash2 GDN replay",
         subtitle="Qwen3.8-27B NVFP4 · width-8 chain · 128 output tokens per request",
-        series=[("Stock DFlash2", STOCK), ("AX GDN replay", AX_DEEP)],
+        series=[("Stock DFlash2", SGLANG), ("AX GDN replay", AX_DARK)],
         panels=[{"title": "C1 · 2 slots", "categories": ["Output"], "values": [[123.21], [124.39]]},
                 {"title": "C2 · 2 slots", "categories": ["Output"], "values": [[178.67], [181.19]]},
                 {"title": "C8 · 8 slots", "categories": ["Output"], "values": [[None], [389.63]],
@@ -302,7 +311,7 @@ def main():
         OUT / "rtx-5090-27b-fp8-verify-throughput.svg",
         title="GeForce RTX 5090 · Qwen3.8-27B NVFP4",
         subtitle="DFlash2 GDN replay · 8 concurrent requests · 64 chat prompts × 512 tokens",
-        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DEEP)],
+        series=[("Default FP8 tactics", AX), ("Candidate FP8 tactics", AX_DARK)],
         panels=[{"title": "Default first", "categories": ["Chat"], "values": [[802.33], [824.01]]},
                 {"title": "Candidate first", "categories": ["Chat"], "values": [[807.25], [824.02]]}],
         xlabel="End-to-end output tokens per second",
@@ -312,15 +321,15 @@ def main():
                     "GPU's qualified FP8 tactics.",
     )
 
-    thor = [("Stock SGLang AR", AR, "13.4 / 13.5 / 13.5", "4.6 / 4.6 / 4.6"),
-            ("Edge-LLM AR", EDGE[0], "13.3 / 13.3 / 13.3", "4.7 / 4.7 / 4.7"),
-            ("Stock SGLang MTP3", STOCK, "36.2 / 35.2 / 27.0", "13.5 / 12.9 / 9.9"),
-            ("Edge-LLM MTP3", EDGE[1], "39.1 / 37.3 / 28.4", "13.8 / 12.9 / 10.2"),
-            ("Edge-LLM DFlash2 chain 8", EDGE[2], "73.0 / 65.7 / 34.5", "30.1 / 25.1 / 14.0"),
-            ("Edge-LLM DDTree 32", EDGE[3], "71.4 / 68.8 / 44.2", "30.1 / 28.8 / 18.2"),
+    thor = [("Stock SGLang AR", SGLANG_LIGHT, "13.4 / 13.5 / 13.5", "4.6 / 4.6 / 4.6"),
+            ("Edge-LLM AR", EDGE_LIGHT, "13.3 / 13.3 / 13.3", "4.7 / 4.7 / 4.7"),
+            ("Stock SGLang MTP3", SGLANG, "36.2 / 35.2 / 27.0", "13.5 / 12.9 / 9.9"),
+            ("Edge-LLM MTP3", EDGE, "39.1 / 37.3 / 28.4", "13.8 / 12.9 / 10.2"),
+            ("Edge-LLM DFlash2 chain 8", EDGE_MID, "73.0 / 65.7 / 34.5", "30.1 / 25.1 / 14.0"),
+            ("Edge-LLM DDTree 32", EDGE_DARK, "71.4 / 68.8 / 44.2", "30.1 / 28.8 / 18.2"),
             ("Stock vLLM DFlash2 chain 8", VLLM, "65.9 / 57.6 / 33.1", "28.7 / 24.4 / 13.6"),
-            ("Stock SGLang DFlash2 chain 16", STOCK2, "93.0 / 73.5 / 30.6", "43.1 / 29.6 / 12.5"),
-            ("AX Engine tree 32", AX_DEEP, "106.1 / 92.1 / 43.1", "47.5 / 37.6 / 18.3")]
+            ("Stock SGLang DFlash2 chain 16", SGLANG_DARK, "93.0 / 73.5 / 30.6", "43.1 / 29.6 / 12.5"),
+            ("AX Engine tree 32", AX_DARK, "106.1 / 92.1 / 43.1", "47.5 / 37.6 / 18.3")]
     bar_chart(
         OUT / "jetson-thor-27b-throughput.svg",
         title="Jetson Thor · Qwen3.8-27B",
@@ -338,7 +347,7 @@ def main():
         OUT / "thor-01-fp8-projection-time.svg",
         title="Thor-01 · FP8 projection time reduction",
         subtitle="Synthetic CUDA graph benchmark vs. default cuBLAS · bit-exact BF16",
-        series=[("GDN QKVZ", AX), ("Attention QKV", AX_DEEP)],
+        series=[("GDN QKVZ", AX), ("Attention QKV", AX_DARK)],
         panels=[{"title": "48 rows", "categories": ["Reduction"], "values": [[4.65], [4.55]]},
                 {"title": "64 rows", "categories": ["Reduction"], "values": [[4.49], [5.88]]},
                 {"title": "96 rows", "categories": ["Reduction"], "values": [[0.62], [1.70]]},
@@ -353,7 +362,7 @@ def main():
         OUT / "dflash-draft-vocab-retest.svg",
         title="Qwen3.8-27B NVFP4 · DFlash2 draft vocabulary subset",
         subtitle="Throughput change with the subset enabled, by launch order · fixed-code retest",
-        series=[("Full head first", AX), ("Subset first", AX_DEEP)],
+        series=[("Full head first", AX), ("Subset first", AX_DARK)],
         panels=[{"title": "Thor-01", "categories": ["C1", "C2"],
                  "values": [[2.19, 2.33], [-0.29, 0.05]]},
                 {"title": "B200", "categories": ["C1", "C8"],
@@ -363,11 +372,11 @@ def main():
         description="Throughput change from the draft vocabulary subset on Thor-01 and B200 in both launch orders.",
     )
 
-    single = [("Edge-LLM 0.12.0 MTP3", EDGE[1], "37.2 / 34.7 / 26.4", "89.8 / 90.3 / 67.0"),
-              ("Stock SGLang MTP3", STOCK, "42.3 / 38.8 / 28.9", "96.2 / 92.2 / 65.4"),
+    single = [("Edge-LLM 0.12.0 MTP3", EDGE, "37.2 / 34.7 / 26.4", "89.8 / 90.3 / 67.0"),
+              ("Stock SGLang MTP3", SGLANG, "42.3 / 38.8 / 28.9", "96.2 / 92.2 / 65.4"),
               ("Stock vLLM MTP3", VLLM, "42.4 / 41.2 / 31.3", "101.0 / 101.5 / 75.8"),
-              ("AX SGLang adaptive MTP + 64K draft vocabulary", AX_DEEP, "59.8 / 49.1 / 33.6", "123.3 / 103.1 / 70.5"),
-              ("AX vLLM adaptive MTP + NVFP4 draft head", AX_VLLM, "62.4 / 53.3 / 36.9", "131.4 / 117.2 / 82.7")]
+              ("AX SGLang adaptive MTP + 64K draft vocabulary", AX, "59.8 / 49.1 / 33.6", "123.3 / 103.1 / 70.5"),
+              ("AX vLLM adaptive MTP + NVFP4 draft head", AX_DARK, "62.4 / 53.3 / 36.9", "131.4 / 117.2 / 82.7")]
     bar_chart(
         OUT / "jetson-thor-single-flash-next-adaptive-mtp.svg",
         title="One Jetson Thor · Qwen3.8-Flash-Next NVFP4",
@@ -383,13 +392,45 @@ def main():
         OUT / "jetson-thor-flash-next-mtp-throughput.svg",
         title="Two Jetson Thor hosts · Qwen3.8-Flash-Next NVFP4",
         subtitle="Concurrency 1 · 24 prompts per workload · 256-token cap · two pipeline stages over 2.5 GbE",
-        series=[("Stock SGLang AR", AR), ("Stock SGLang MTP3", STOCK), ("MTP3 + AX QSA fix", AX),
-                ("MTP7 + AX QSA fix", AX_DEEP)],
+        series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock SGLang MTP3", SGLANG), ("MTP3 + AX QSA fix", AX),
+                ("MTP7 + AX QSA fix", AX_DARK)],
         panels=[{"categories": WORKLOADS,
                  "values": split("18.3 / 19.0 / 19.2", "32.0 / 32.4 / 24.8", "33.3 / 32.5 / 25.7",
                                  "43.1 / 37.5 / 22.8")}],
         xlabel="Output tokens per second",
         description="MTP7 with the QSA fix leads on code and math. MTP3 with the fix leads on chat.",
+    )
+
+    bar_chart(
+        OUT / "thor-01-dflash-draft-vocab.svg",
+        title="Thor-01 · DFlash2 draft vocabulary",
+        subtitle="Qwen3.8-27B NVFP4 weight projection and top-k on synthetic inputs",
+        series=[("Full · 248,320 rows", AX), ("Subset · 148,736 rows", AX_DARK)],
+        panels=[{"categories": ["7", "14", "56"],
+                 "values": [[3.738, 2.898, 3.340], [2.224, 1.744, 1.999]]}],
+        xlabel="Median CUDA graph time (ms) · draft rows",
+        fmt=lambda v: f"{v:.3f}", legend_columns=2,
+        description="Median CUDA graph time for the full and reduced draft vocabulary projection and top-k at 7, 14 "
+                    "and 56 draft rows.",
+    )
+
+    bar_chart(
+        OUT / "dflash-draft-vocab-serving.svg",
+        title="Qwen3.8-27B NVFP4 · DFlash2 draft vocabulary",
+        subtitle="Throughput change with the subset enabled, by launch order",
+        series=[("Full head first", AX), ("Subset first", AX_DARK)],
+        panels=[
+            {"title": "Slot refill · 16 requests",
+             "categories": ["Thor-01 · C1", "Thor-01 · C2", "RTX PRO 6000 · C1", "RTX PRO 6000 · C8",
+                            "B200 · C1", "B200 · C8"],
+             "values": [[0.86, -0.02, 0.43, 0.99, 6.52, 2.46], [0.14, -0.10, 1.75, -0.71, 0.47, -14.03]]},
+            {"title": "Fixed groups · 80 requests", "categories": ["B200 · C8"],
+             "values": [[-0.38], [-0.09]]},
+        ],
+        xlabel="Change in output tokens per second vs. the full draft head (%)",
+        fmt=percent, legend_columns=2, tick_suffix="%",
+        description="Throughput change from the draft vocabulary subset on Thor-01, RTX PRO 6000 and B200 in both "
+                    "launch orders, plus the fixed-group B200 retest.",
     )
 
 
