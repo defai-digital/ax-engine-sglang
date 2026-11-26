@@ -191,7 +191,7 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
         "route": route,
         "quality": {
             "profile": environ.get("AX_QUALITY_PROFILE") or None,
-            "claims_exact_output": bool(config and config.quality_profile == "verified"),
+            "claims_exact_output": bool(config and config.quality_profile == "verified" and not errors),
             "exact_output": lookup(capability, target_key(target, quant), route).as_dict(),
         },
         "gdn_chain_replay": replay,

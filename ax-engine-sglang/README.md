@@ -338,7 +338,9 @@ AX_QUALITY_PROFILE=verified AX_TREE=0 ax-engine-sglang doctor RadixArk/Qwen3.8-2
 
 The report gives `supported`, `experimental` or `unsupported`, the derived
 settings, the exact-output qualification of the GPU, target and route, and
-whether the launch could use GDN replay. It does not estimate GPU memory.
+whether the launch could use GDN replay. It claims exact output only for a
+verified-profile launch the launcher would start: a verified launch it
+reports as unsupported makes no claim. It does not estimate GPU memory.
 
 | Variable | Meaning |
 |---|---|

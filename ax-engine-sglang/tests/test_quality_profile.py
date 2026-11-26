@@ -367,10 +367,18 @@ class DoctorTests(unittest.TestCase):
                 self.assertFalse(self.report(argv + extra)["gdn_chain_replay"]["eligible"])
 
     def test_only_the_verified_profile_claims_exact_output(self):
-        for environ, claimed in (({"AX_QUALITY_PROFILE": "fast"}, False), ({}, False), (VERIFIED, True)):
-            report = self.report(self.TREE_ARGV, environ)
-            self.assertEqual(report["quality"]["claims_exact_output"], claimed)
-            self.assertEqual("not claimed" in doctor.render(report), not claimed)
+        cases = (
+            (self.TREE_ARGV, {"AX_QUALITY_PROFILE": "fast"}, "supported", False),
+            (self.TREE_ARGV, {}, "supported", False),
+            (self.CHAIN_ARGV, CHAIN, "supported", True),
+            (self.TREE_ARGV, VERIFIED, "unsupported", False),
+        )
+        for argv, environ, status, claimed in cases:
+            with self.subTest(environ=environ, status=status):
+                report = self.report(argv, environ)
+                self.assertEqual(report["status"], status)
+                self.assertEqual(report["quality"]["claims_exact_output"], claimed)
+                self.assertEqual("not claimed" in doctor.render(report), not claimed)
         fast = self.report(self.TREE_ARGV, {"AX_QUALITY_PROFILE": "fast"})
         self.assertIn("fast profile: this launch makes no exact-output claim", fast["derived"]["notes"])
 
