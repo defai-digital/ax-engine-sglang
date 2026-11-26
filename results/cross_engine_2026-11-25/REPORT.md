@@ -158,15 +158,33 @@ Against the README's SGLang rows from the same workload, vLLM MTP3 led
 stock SGLang MTP3 on every cell, by 5–12%. AX MTP7 led code at both
 concurrencies (218.9 and 728.0 tok/s); vLLM MTP3 led math and chat.
 
-**TensorRT-LLM speculative lanes failed.** DFlash on SM120 cannot use the
-`TRTLLM` drafter attention backend (`requires SM100 or SM103, got SM120`).
-The `VANILLA` backend imports `flash_attn_with_kvcache` from FlashAttention
-2, which the TensorRT-LLM environment does not ship. A FlashAttention 2.8.3
-wheel built for SM120 (C++20, required by PyTorch 2.14 headers) installed,
-but the import still failed because the FA4 package already owns the
-`flash_attn` namespace. Flash Next NVFP4 MTP3 ran out of GPU memory while
-loading experts (94.2 of 95.0 GiB in use), so the checkpoint does not fit
-one RTX PRO 6000 under TensorRT-LLM.
+**TensorRT-LLM DFlash2.** DFlash on SM120 cannot use the `TRTLLM` drafter
+attention backend (`requires SM100 or SM103, got SM120`). The `VANILLA`
+backend imports `flash_attn_with_kvcache` from FlashAttention 2, which the
+TensorRT-LLM environment does not ship. A FlashAttention 2.8.3 wheel built
+for SM120 (`FLASH_ATTN_CUDA_ARCHS=120`, `-std=c++20` for the PyTorch 2.14
+headers) supplies it: installed after TensorRT-LLM, it adds
+`flash_attn/__init__.py` beside the FA4 package's `flash_attn/cute`. The
+first attempt's install had not completed, so the import failed there. The
+rerun used a fresh pod with the same client, `max_draft_len: 7` and
+`attention_backend: VANILLA`.
+
+| Model | Clients | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---|---:|---:|---:|---:|
+| 27B NVFP4 | 1 | 246.0 / 210.3 / 128.9 | 279.8 / 266.4 / **154.5** | **324.7 / 270.9** / 152.2 |
+| 27B NVFP4 | 8 | 878.7 / **1,178.0** / 605.3 | **1,002.3** / 980.1 / **704.0** | 907.7 / 823.3 / 487.0 |
+| 27B BF16 | 1 | 133.1 / 119.3 / 73.8 | 135.3 / 120.6 / 73.7 | **184.3 / 163.2 / 94.1** |
+| 27B BF16 | 8 | **529.5 / 720.6 / 402.4** | 520.8 / 664.0 / 382.0 | 510.8 / 572.0 / 335.1 |
+
+TensorRT-LLM led every BF16 workload at eight clients and NVFP4 math at
+eight clients. Its first eight-client sweep ran slower than the second on
+NVFP4 (code 759.5 → 1,042.2, chat 567.5 → 648.5 tok/s); the cells pool
+both. At one client the two sweeps agreed within 1.1%. TensorRT-LLM
+exposes no acceptance counters to this client.
+
+Flash Next NVFP4 MTP3 ran out of GPU memory while loading experts (94.2 of
+95.0 GiB in use), so the checkpoint does not fit one RTX PRO 6000 under
+TensorRT-LLM.
 
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4 DFlash2
 
@@ -194,8 +212,14 @@ Pooled output tok/s; the SGLang rows are from the README study.
 Stock vLLM DFlash2 ran 1.25 times as fast as the AX tree at one request
 and 1.53 times stock SGLang DFlash2 at two, with 3.29 and 3.25 tokens per
 verify on this pooled mix. The four passes of each lane agreed within
-0.5%. TensorRT-LLM DFlash2 failed for the same FlashAttention reason as on
-the RTX PRO 6000.
+0.5%.
+
+TensorRT-LLM DFlash2 does not fit the 32 GB card. With the FlashAttention 2
+wheel from the RTX PRO 6000 section installed, model creation for the 27B
+NVFP4 target and the DFlash2 drafter allocated 29.3 GiB of the 31.4 GiB and
+failed on the 2.37 GiB embedding, with both `checkpoint_io_policy: auto`
+(rank-striped read-ahead) and `native`. TensorRT-LLM AR, without a
+drafter, fit.
 
 The first vLLM attempt stalled for 25 minutes in FlashInfer's SM120 JIT
 build: parallel `nvcc` jobs filled the pod's 62 GB memory limit and were

@@ -29,7 +29,9 @@ HOTPATHS = {
     PLAN_REUSE_LANE: ("plan_reuse", "AX_DFLASH_PLAN_REUSE"),
 }
 REPLAY_LANES = tuple(HOTPATHS)
-LANES = (*DEFAULT_LANES, *REPLAY_LANES, "stock16", "tree16", "chain8")
+# Tree lanes draft a 16-token block and verify a tree of N nodes (FC1_TREE_N); tree32 is the default route.
+TREE_LANES = ("tree8", "tree16", "tree24", "tree32")
+LANES = (*DEFAULT_LANES, *REPLAY_LANES, "stock16", *(lane for lane in TREE_LANES if lane != "tree32"), "chain8")
 PROMPT_SHA256 = "e2b5edfeb7a18b4b01c2a67501a6659fe06eeb3ff2f98e95ef3cd957e17a7fe0"
 
 
@@ -78,7 +80,7 @@ def launch_config(args, lane):
         flags.update(SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1", AX_NVFP4_PARITY_ROWS="0")
     if lane == "ar":
         return command, flags, None
-    tree = lane in ("tree16", "tree32")
+    tree = lane in TREE_LANES
     custom_dflash = tree or lane == "chain8"
     algorithm = "FC1_DFLASH_TREE" if custom_dflash else "DFLASH"
     draft_block = "16" if tree or lane in ("stock16", "replay16") else "8"

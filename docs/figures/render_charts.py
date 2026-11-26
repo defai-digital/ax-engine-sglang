@@ -158,43 +158,43 @@ def main():
     bar_chart(
         OUT / "rtx-pro-6000-27b-bf16-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B BF16",
-        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM),
-                ("AX tree / chain", AX_DARK)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("TensorRT-LLM DFlash2", EDGE),
+                ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
-             "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "135.3 / 120.6 / 73.7",
-                             "184.3 / 163.2 / 94.1")},
+             "values": split("27.1 / 27.2 / 27.2", "132.0 / 120.9 / 70.5", "133.1 / 119.3 / 73.8",
+                             "135.3 / 120.6 / 73.7", "184.3 / 163.2 / 94.1")},
             {"title": "8 concurrent clients", "categories": WORKLOADS,
-             "values": split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "520.8 / 664.0 / 382.0",
-                             "510.8 / 572.0 / 335.1")},
+             "values": split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "529.5 / 720.6 / 402.4",
+                             "520.8 / 664.0 / 382.0", "510.8 / 572.0 / 335.1")},
         ],
-        description="BF16 throughput at one and eight clients for stock AR, stock DFlash2, stock vLLM DFlash2 and the "
-                    "AX tree/chain.",
+        description="BF16 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, "
+                    "stock vLLM DFlash2 and the AX tree/chain.",
         **retest,
     )
-    nvfp4 = [("1 concurrent client", "54.2 / 54.1 / 54.4", "229.3 / 188.5 / 125.2", "279.8 / 266.4 / 154.5",
-              "324.7 / 270.9 / 152.2", "235.8 / 195.2 / 128.9"),
-             ("8 concurrent clients", "376.0 / 377.3 / 367.0", "819.2 / 760.5 / 505.3", "1,002.3 / 980.1 / 704.0",
-              "907.7 / 823.3 / 487.0", "996.8 / 898.1 / 580.8")]
+    nvfp4 = [("1 concurrent client", "54.2 / 54.1 / 54.4", "229.3 / 188.5 / 125.2", "246.0 / 210.3 / 128.9",
+              "279.8 / 266.4 / 154.5", "324.7 / 270.9 / 152.2", "235.8 / 195.2 / 128.9"),
+             ("8 concurrent clients", "376.0 / 377.3 / 367.0", "819.2 / 760.5 / 505.3", "878.7 / 1,178.0 / 605.3",
+              "1,002.3 / 980.1 / 704.0", "907.7 / 823.3 / 487.0", "996.8 / 898.1 / 580.8")]
     bar_chart(
         OUT / "rtx-pro-6000-27b-nvfp4-retest.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
-        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM),
-                ("AX tree / chain", AX), ("AX GDN replay", AX_DARK)],
+        series=[("Stock AR", SGLANG_LIGHT), ("Stock DFlash2", SGLANG), ("TensorRT-LLM DFlash2", EDGE),
+                ("Stock vLLM DFlash2", VLLM), ("AX tree / chain", AX), ("AX GDN replay", AX_DARK)],
         panels=[{"title": t, "categories": WORKLOADS, "values": split(*cells)} for t, *cells in nvfp4],
-        description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, stock vLLM DFlash2, the "
-                    "AX tree/chain and AX GDN replay.",
+        description="NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, "
+                    "stock vLLM DFlash2, the AX tree/chain and AX GDN replay.",
         **retest,
     )
-    bf16_c8 = split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "520.8 / 664.0 / 382.0",
-                    "510.8 / 572.0 / 335.1")
+    bf16_c8 = split("199.4 / 200.5 / 202.4", "487.5 / 567.6 / 333.7", "529.5 / 720.6 / 402.4",
+                    "520.8 / 664.0 / 382.0", "510.8 / 572.0 / 335.1")
     bar_chart(
         OUT / "rtx-pro-6000-27b-retest-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B at concurrency 8",
         subtitle="128 greedy output tokens per request · two passes per route",
         series=[("Stock SGLang AR", SGLANG_LIGHT), ("Stock DFlash2, width 8", SGLANG),
-                ("Stock vLLM DFlash2, width 8", VLLM), ("AX tree 32 / chain 8", AX),
-                ("AX GDN replay, width 8", AX_DARK)],
+                ("TensorRT-LLM DFlash2, 7 draft tokens", EDGE), ("Stock vLLM DFlash2, width 8", VLLM),
+                ("AX tree 32 / chain 8", AX), ("AX GDN replay, width 8", AX_DARK)],
         panels=[{"title": "BF16", "categories": WORKLOADS, "values": bf16_c8 + [[None, None, None]],
                  "missing": "not run"},
                 {"title": "NVFP4", "categories": WORKLOADS, "values": split(*nvfp4[1][1:])}],

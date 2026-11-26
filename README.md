@@ -248,23 +248,30 @@ concurrencies.
 #### Qwen3.8-27B BF16
 
 The same retest with package 0.4.0. The tree led at one client. At eight
-clients chat was 335.1 tok/s against 333.7 for stock DFlash2.
+clients TensorRT-LLM DFlash2 led every workload (529.5 / 720.6 / 402.4
+tok/s).
 
-![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, and the AX tree or chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
+![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, and the AX tree or chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
+
+| Clients | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---:|---:|---:|---:|---:|
+| 1 | 132.0 / 120.9 / 70.5 | 133.1 / 119.3 / 73.8 | 135.3 / 120.6 / 73.7 | **184.3 / 163.2 / 94.1** |
+| 8 | 487.5 / 567.6 / 333.7 | **529.5 / 720.6 / 402.4** | 520.8 / 664.0 / 382.0 | 510.8 / 572.0 / 335.1 |
 
 #### Qwen3.8-27B NVFP4
 
 Package 0.4.0 on the same prompt corpus.
 
-![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, the AX tree or chain, and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
+![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, the AX tree or chain, and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
 
-| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
-|---:|---:|---:|---:|
-| 1 | 229.3 / 188.5 / 125.2 | **324.7 / 270.9 / 152.2** | 235.8 / 195.2 / 128.9 |
-| 8 | 819.2 / 760.5 / 505.3 | 907.7 / 823.3 / 487.0 | **996.8 / 898.1 / 580.8** |
+| Clients | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain | AX GDN replay |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 229.3 / 188.5 / 125.2 | 246.0 / 210.3 / 128.9 | 279.8 / 266.4 / **154.5** | **324.7 / 270.9** / 152.2 | 235.8 / 195.2 / 128.9 |
+| 8 | 819.2 / 760.5 / 505.3 | 878.7 / **1,178.0** / 605.3 | **1,002.3** / 980.1 / **704.0** | 907.7 / 823.3 / 487.0 | 996.8 / 898.1 / 580.8 |
 
-At one client the tree led. At eight clients GDN replay raised chat from
-505.3 to 580.8 tok/s.
+At one client the tree led code and math. At eight clients stock vLLM led
+code and chat, TensorRT-LLM led math, and GDN replay raised SGLang chat
+from 505.3 to 580.8 tok/s.
 [RTX PRO 6000 per-pass results](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
 
 ### RTX 5090
@@ -275,7 +282,8 @@ On a 32 GB RTX 5090 the checkpoint used two slots and a pooled
 ten-prompt mix. Tree 32 reached 135.18 tok/s at one request (2.35× stock
 AR, 8.1% above stock DFlash2). At two requests the SGLang speculative
 routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
-inputs, reached 168.5 and 279.6 tok/s.
+inputs, reached 168.5 and 279.6 tok/s. TensorRT-LLM DFlash2 ran out of
+memory creating the target and drafter on the 32 GB card.
 
 ![GeForce RTX 5090 Qwen3.8-27B NVFP4 output throughput. The AX tree leads at one request. Stock DFlash2 and the add-on finish within 0.6% at two requests.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
 

@@ -99,17 +99,17 @@ was 0.4.0; the later B200 retest used 0.5.1 on the same prompt corpus.
 
 #### BF16
 
-| Clients | Stock AR | Stock DFlash2 | Stock vLLM DFlash2 | AX tree / chain |
-|---:|---:|---:|---:|---:|
-| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | 135.3 / 120.6 / 73.7 | **184.3** / **163.2** / **94.1** |
-| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **520.8** / **664.0** / **382.0** | 510.8 / 572.0 / 335.1 |
+| Clients | Stock AR | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree / chain |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | 133.1 / 119.3 / 73.8 | 135.3 / 120.6 / 73.7 | **184.3** / **163.2** / **94.1** |
+| 8 | 199.4 / 200.5 / 202.4 | 487.5 / 567.6 / 333.7 | **529.5** / **720.6** / **402.4** | 520.8 / 664.0 / 382.0 | 510.8 / 572.0 / 335.1 |
 
 #### NVFP4
 
-| Clients | Stock AR | Stock DFlash2 | Stock vLLM DFlash2 | AX tree / chain | AX GDN replay |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | 279.8 / 266.4 / **154.5** | **324.7** / **270.9** / 152.2 | 235.8 / 195.2 / 128.9 |
-| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | **1,002.3** / **980.1** / **704.0** | 907.7 / 823.3 / 487.0 | 996.8 / 898.1 / 580.8 |
+| Clients | Stock AR | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree / chain | AX GDN replay |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | 246.0 / 210.3 / 128.9 | 279.8 / 266.4 / **154.5** | **324.7** / **270.9** / 152.2 | 235.8 / 195.2 / 128.9 |
+| 8 | 376.0 / 377.3 / 367.0 | 819.2 / 760.5 / 505.3 | 878.7 / **1,178.0** / 605.3 | **1,002.3** / 980.1 / **704.0** | 907.7 / 823.3 / 487.0 | 996.8 / 898.1 / 580.8 |
 
 At eight clients, NVFP4 GDN replay raised chat from 505.3 to 580.8 tok/s
 over stock SGLang DFlash2 and matched it on 48 of 48 greedy chat outputs.
@@ -124,8 +124,11 @@ verify on code and math, and about 3.1–3.3 on chat. Stock vLLM refuses
 Flash Next with DFlash2: "Qwen4Exp speculative decoding supports only its
 native MTP checkpoint and linear n-gram proposers". TensorRT-LLM 1.4.0rc3
 AR ran within 1.5% of stock AR at one client; at eight clients it was
-14% slower on NVFP4 and 2% faster on BF16. Its DFlash2 lanes failed on
-SM120, where the drafter needs FlashAttention 2.
+14% slower on NVFP4 and 2% faster on BF16. Its DFlash2 drafter needs
+FlashAttention 2 on SM120; with an SM120 build installed, TensorRT-LLM
+DFlash2 led every BF16 workload at eight clients (529.5 / 720.6 / 402.4)
+and NVFP4 math (1,178.0). The AX tree still led BF16 and NVFP4 code and
+math at one client.
 [Latency, checkpoints, and output agreement](../results/rtx_pro_6000_retest/REPORT.md) · [Stock vLLM setup](../results/cross_engine_2026-11-25/REPORT.md#rtx-pro-6000-qwen38-27b-and-flash-next-dflash2)
 
 ### Earlier pooled speed sweep
