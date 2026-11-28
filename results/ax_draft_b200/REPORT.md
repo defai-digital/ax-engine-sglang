@@ -104,3 +104,55 @@ graphs and overlap disabled, the eight-row draft engines continued
 to match each other, and the differences against target-only remained.
 The final eager C8 runs were 141.58 tok/s for DFlash2 and 87.69 tok/s for
 AX. Those rates describe the diagnostic run with graphs disabled.
+
+## Expanded training on a new B200
+
+One B200 ran the same four held-out prompts at the same 64-token cap,
+with fixed request grouping, 8 slots, overlap, decode CUDA graphs, eager
+prefill, FP8 KV, and FP32 GDN ReplaySSM for draft routes. SGLang 0.5.23,
+PyTorch 2.14.1+cu130, FlashInfer 0.7.2 and driver 595.112.07 were used.
+The three independently trained AX Draft checkpoints all run as
+two-row causal pairs. DFlash2 verifies eight rows.
+
+The seed-0 control trains on 138 prompts. The expanded fixed arm trains
+on 758 prompts while keeping the control's ordered 3,080-token shortlist.
+The expanded learned arm trains on the same 758 prompts and relearns a
+4,096-token shortlist. All three use hidden width 256, seven draft
+positions, and 2,500 steps with early-position decay 0.35.
+
+| Lane | Last C1 tok/s | Last C8 tok/s | Last C8 tokens/verify | C8 exact vs DFlash2, both passes | C8 exact vs first direct lane, both passes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct greedy | 115.44 | 884.85 | — | 0/32 | Reference |
+| AX Draft control | 114.28 | 784.49 | 1.249 | 32/32 | 0/32 |
+| AX Draft expanded, fixed shortlist | 118.20 | 807.41 | 1.293 | 16/32 | 0/32 |
+| AX Draft expanded, learned shortlist | 120.59 | 838.81 | 1.347 | 24/32 | 0/32 |
+| DFlash2 | 217.45 | 1,336.81 | 3.606 | Reference | 0/32 |
+
+The best observed AX Draft rate is 37.3% below DFlash2 and 5.2% below
+direct greedy on this workload. The control is the C8 comparison with
+the exact same outputs as DFlash2. Both expanded checkpoints have higher
+observed acceptance and different token streams on some requests, so the
+throughput gains do not isolate equivalent-work performance.
+
+At its observed pace of about 623 verification rounds per second, the
+best AX Draft lane would need about 2.15 output tokens per round to match
+DFlash2. Its two-row verifier can emit at most two tokens per round. This
+is a fixed-round-rate estimate from the latest pass. Matching the
+baseline requires lower per-round cost or a wider verifier with more
+accepted tokens.
+
+Use the existing parity harness with `--ax-draft-parity --overlap`,
+`--slots 8 --concurrency 8 8 --repeat 4 --output-tokens 64`,
+`--kv-tokens 16384 --mem-fraction-static .82`, and
+`--ax-draft-rows 2`. Repeat the AX Draft lane with each checkpoint.
+
+A second direct run, after all speculative lanes, reached 882.78 tok/s
+in its last C8 pass and matched the first direct lane on all 32 C8
+outputs. Direct C1 and C8 differed on all four prompts, including a
+first-token difference on the first prompt. DFlash2 also differed from
+the matching C8 direct lane, and both expanded AX Draft routes changed
+outputs relative to DFlash2. The parity gate remains open.
+
+The raw archive `same-pod-serving.tar.gz` contains per-request output
+IDs, timings, launch settings, and route-activity counts. Its SHA-256
+is `7b47485d2c238f0331dd4d5763fd461b09440df07f6ba7836366484e1f80e273`.
