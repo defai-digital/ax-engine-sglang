@@ -118,6 +118,13 @@ def gdn_shape(config: Mapping) -> tuple[int, int] | None:
     return (layers, int(heads)) if layers and heads else None
 
 
+def gdn_head_dims(config: Mapping) -> tuple[int, int] | None:
+    """Gated-DeltaNet key / value head widths (FlashInfer's GDN prefill takes 128 / 128 only)."""
+    text = text_config(config)
+    key, value = text.get("linear_key_head_dim"), text.get("linear_value_head_dim")
+    return (int(key), int(value)) if key and value else None
+
+
 def is_qwen4_exp(config: Mapping) -> bool:
     text = text_config(config)
     return (any("Qwen4Exp" in name for name in config.get("architectures") or ())
@@ -232,9 +239,38 @@ def _plan_b12x_down128(result: Plan, args, environ: Mapping[str, str], target: M
     result.args["fp4_gemm_runner_backend"] = (CUTEDSL, feature)
 
 
+def humming_available() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("humming") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _humming_by_default(args, environ: Mapping[str, str], target: Mapping | None, target_quant: Mapping | None,
+                        capability: tuple[int, int] | None) -> bool:
+    """Dense 27B NVFP4 DFlash routes on SM90 with humming-kernels installed: the measured launch.
+
+    On an H200 (five servers each against two of same-pod vLLM 0.34, results/h200_humming)
+    Humming with --min-free-slots-delay 1 took the eight-client replay8 lane from -2/-10/-14% to
+    +6/+7/+1% (code/math/chat) and tree32 from -3/-10/-14% to +9/+9/+1%; one client moved -2..+4%."""
+    algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
+    return (environ.get("AX_NVFP4_HUMMING") in (None, "") and environ.get("AX_AUTO_DEFAULTS", "1") != "0"
+            and algorithm in ("DFLASH", TREE_ALGORITHM) and capability is not None and capability[0] == 9
+            and is_nvfp4(target or {}, target_quant) and not has_nvfp4_moe(target or {}, target_quant)
+            and not parity_requested(environ)
+            and getattr(args, "fp4_gemm_runner_backend", None) in (None, "auto", "marlin")
+            and humming_available())
+
+
 def _plan_nvfp4_humming(result: Plan, args, environ: Mapping[str, str], target: Mapping | None,
                         target_quant: Mapping | None, capability: tuple[int, int] | None) -> None:
     feature = "AX_NVFP4_HUMMING"
+    if _humming_by_default(args, environ, target, target_quant, capability):
+        result.default_env(environ, feature, "1", "dense NVFP4 on SM90 with humming-kernels installed: "
+                           "Humming measured faster than SGLang's Marlin W4A16 (AX_NVFP4_HUMMING=0 keeps Marlin)")
+        result.args["fp4_gemm_runner_backend"] = ("marlin", feature)
+        return
     if environ.get(feature) != "1":
         return
     if parity_requested(environ):
@@ -255,15 +291,59 @@ def _plan_dflash_admission(result: Plan, args, environ: Mapping[str, str]) -> No
     SGLang 0.5.23 holds new DFlash prefills until two of eight running slots are free
     (resolve_min_free_slots: min(4, max(2, (8 + 5) // 6))). With eight clients a finished request
     frees one slot, so the next one queued for another request to finish: the server ran seven
-    requests and the 27B chat TTFT tail reached 0.3-0.6 s against vLLM's 0.12-0.18 s. Admitting
-    each prefill raised the eight-client 27B NVFP4 replay8 throughput on B200 by 2-9% and, with
-    AX_NVFP4_HUMMING, put H200 ahead of vLLM on chat (results/h200_humming)."""
+    requests and the 27B eight-client first-token p90 reached 0.19-0.27 s. Admitting each prefill
+    cut that p90 to 0.10-0.12 s on H200, B200 and RTX PRO 6000 (vLLM: 0.11-0.26 s); with
+    AX_NVFP4_HUMMING it moved H200 eight-client math and chat from +3/-6% to +7/+1% against vLLM
+    (replay8) and from +4/-4% to +9/+1% (tree32). Code moved -13..+6% across GPUs, inside the
+    pass-to-pass spread (results/h200_humming, results/b200_gdn_prefill)."""
     algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
     if (algorithm not in ("DFLASH", TREE_ALGORITHM) or getattr(args, "max_running_requests", None) != 8
             or getattr(args, "min_free_slots_delay", None) is not None or parity_requested(environ)):
         return
     result.args["min_free_slots_delay"] = (
         1, "DFlash at 8 slots: SGLang otherwise holds each new prefill until 2 slots are free")
+
+
+def torch_cuda_major() -> int | None:
+    try:
+        import torch
+        return int(torch.version.cuda.split(".", 1)[0])
+    except Exception:
+        return None
+
+
+FLASHINFER_GDN_PREFILL_MAX_CHUNK = 8192   # SGLang's own SM100 FlashInfer prefill domain
+
+
+def _plan_gdn_flashinfer_prefill(result: Plan, args, environ: Mapping[str, str], target: Mapping | None,
+                                 capability: tuple[int, int] | None) -> None:
+    """Run the Gated-DeltaNet prefills with FlashInfer on SM100 when the SSM state is fp32.
+
+    SGLang 0.5.23 picks FlashInfer GDN prefill on SM100 only for a bf16 state pool; the DFlash
+    routes keep an fp32 state, so B200 ran the FLA Triton chunk kernels, six eager launches per
+    layer with 20-80 us gaps between them, where vLLM runs FlashInfer. The FlashInfer chunk kernel
+    reads the fp32 pool as given. On a B200 (27B NVFP4, two warm passes each, with
+    --min-free-slots-delay 1) it raised replay8 at eight clients 9-11% and tree32 at one client
+    2-10%; the RTX PRO 6000 (SM120) gained nothing, so it keeps Triton (results/b200_gdn_prefill).
+    Verify keeps Triton: SGLang only moves verify to FlashInfer with the FlashInfer decode."""
+    algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
+    chunk = getattr(args, "chunked_prefill_size", None)
+    if (capability is None or capability[0] != 10 or algorithm not in ("DFLASH", TREE_ALGORITHM)
+            or not gdn_shape(target or {}) or parity_requested(environ)
+            or getattr(args, "linear_attn_prefill_backend", None) is not None
+            or getattr(args, "linear_attn_backend", None) not in (None, "triton")
+            or getattr(args, "enable_deterministic_inference", False)
+            or getattr(args, "rl_on_policy_target", None) is not None   # SGLang turns determinism on
+            or getattr(args, "enable_mis", False)                       # SGLang turns chunking off
+            or getattr(args, "enable_dynamic_chunking", False)
+            or gdn_head_dims(target or {}) != (128, 128)
+            or chunk is None or not 1 <= chunk <= FLASHINFER_GDN_PREFILL_MAX_CHUNK):
+        return
+    major = torch_cuda_major()
+    if major is None or major < 13:   # SGLang refuses SM100 FlashInfer GDN prefill below CUDA 13
+        return
+    result.args["linear_attn_prefill_backend"] = (
+        "flashinfer", "Gated-DeltaNet prefill on SM100: FlashInfer measured faster than the Triton chunk kernels")
 
 
 def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapping | None,
@@ -293,6 +373,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
     _plan_nvfp4_humming(result, args, environ, target, target_quant, capability)
     if environ.get("AX_AUTO_DEFAULTS", "1") != "0":
         _plan_dflash_admission(result, args, environ)
+        _plan_gdn_flashinfer_prefill(result, args, environ, target, capability)
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         _plan_b12x_down128(result, args, environ, target, target_quant, capability)

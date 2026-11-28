@@ -15,6 +15,7 @@ QWEN35_9B = {"architectures": ["Qwen3_5ForConditionalGeneration"],
                              "layer_types": ["linear_attention"] * 24 + ["full_attention"] * 8}}
 QWEN38_27B = {"architectures": ["Qwen3_5ForConditionalGeneration"],
               "text_config": {"model_type": "qwen3_5_text", "linear_num_value_heads": 48,
+                              "linear_key_head_dim": 128, "linear_value_head_dim": 128,
                               "layer_types": ["linear_attention"] * 48 + ["full_attention"] * 16}}
 QWEN38_27B_NVFP4 = {**QWEN38_27B, "quantization_config": {"quant_method": "modelopt",
                                                           "quant_algo": "MIXED_PRECISION"}}
@@ -207,6 +208,45 @@ class StockRouteDefaultsTests(unittest.TestCase):
                 except LaunchConfigError:
                     continue
                 self.assertNotIn("min_free_slots_delay", result.args)
+
+    def test_sm100_gdn_prefill_runs_flashinfer(self):
+        from unittest.mock import patch
+        launch = dict(speculative_num_draft_tokens=8, chunked_prefill_size=8192)
+        with patch("ax_engine_sglang.defaults.torch_cuda_major", return_value=13):
+            for route, environ in ((args("DFLASH", **launch), {}), (args(chunked_prefill_size=8192), {}),
+                                   (args("DFLASH", disable_radix_cache=True, **launch),
+                                    {"AX_GDN_CHAIN_REPLAY": "1"})):
+                result = plan(route, environ, QWEN38_27B, DFLASH2, capability=(10, 0))
+                value, reason = result.args["linear_attn_prefill_backend"]
+                self.assertEqual(value, "flashinfer")
+                self.assertIn("SM100", reason)
+                self.assertNotIn("linear_attn_verify_backend", {k for k, (v, _) in result.args.items()
+                                                                if v == "flashinfer"})
+            untouched = (
+                (args("DFLASH", **launch), {}, (9, 0)),
+                (args("DFLASH", **launch), {}, (12, 0)),
+                (args("DFLASH", speculative_num_draft_tokens=8), {}, (10, 0)),
+                (args("DFLASH", speculative_num_draft_tokens=8, chunked_prefill_size=16384), {}, (10, 0)),
+                (args("DFLASH", linear_attn_prefill_backend="triton", **launch), {}, (10, 0)),
+                (args("DFLASH", enable_deterministic_inference=True, **launch), {}, (10, 0)),
+                (args("DFLASH", rl_on_policy_target="fsdp", **launch), {}, (10, 0)),
+                (args("DFLASH", enable_mis=True, **launch), {}, (10, 0)),
+                (args("DFLASH", **launch), {"AX_AUTO_DEFAULTS": "0"}, (10, 0)),
+                (args("DFLASH", **launch), {"AX_NVFP4_VERIFY_PARITY": "1"}, (10, 0)),
+            )
+            for route, environ, capability in untouched:
+                with self.subTest(route=vars(route), environ=environ, capability=capability):
+                    try:
+                        result = plan(route, environ, QWEN38_27B, DFLASH2, capability=capability)
+                    except LaunchConfigError:
+                        continue
+                    self.assertNotIn("linear_attn_prefill_backend", result.args)
+            narrow = {**QWEN38_27B, "text_config": {**QWEN38_27B["text_config"], "linear_value_head_dim": 256}}
+            self.assertNotIn("linear_attn_prefill_backend",
+                             plan(args("DFLASH", **launch), {}, narrow, DFLASH2, capability=(10, 0)).args)
+        with patch("ax_engine_sglang.defaults.torch_cuda_major", return_value=12):
+            self.assertNotIn("linear_attn_prefill_backend",
+                             plan(args("DFLASH", **launch), {}, QWEN38_27B, DFLASH2, capability=(10, 0)).args)
 
     def test_b12x_down128_is_scoped_to_the_measured_replay_launch(self):
         launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True)

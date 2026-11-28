@@ -131,6 +131,19 @@ full draft head. The packed head is for a static checkpoint. Keep the option
 off for hot weight replacement.
 [Thor validation and benchmark commands](../results/dflash_draft_vocab/REPORT.md)
 
+## Humming on Hopper
+
+On SM90 SGLang serves ModelOpt NVFP4 weights with Marlin W4A16; vLLM serves the same checkpoints with
+[humming-kernels](https://pypi.org/project/humming-kernels/). With `AX_NVFP4_HUMMING=1` the plugin
+converts each Marlin NVFP4 linear (MLP and lm_head) to Humming's layout at load time, keeping the
+per-shard global scales that Marlin collapses to their maximum. Install it into the SGLang environment
+with `uv pip install --no-deps humming-kernels==0.1.20`; the launcher then enables it for dense NVFP4
+DFlash and tree launches. On an H200 at eight clients it took replay 8 from 2-14% behind same-pod vLLM
+to 3-10% ahead on code and math, and with `--min-free-slots-delay 1` (five servers each) replay 8 to
++5.6 / +7.2 / +1.1% and tree 32 to +9.2 / +9.3 / +1.1% (code / math / chat); one client moved within ±3%. Humming's split-K reduces
+through locks, so its outputs are not run-to-run deterministic and differ from Marlin's; the parity and
+verified profiles refuse it. [H200 report](../results/h200_humming/REPORT.md)
+
 ## Launch defaults
 
 On SGLang 0.5.23 the plugin fills in the settings below while SGLang resolves the server arguments,
@@ -150,6 +163,9 @@ and supply the settings in the table below explicitly.
 | `FC1_DFLASH_TREE` | `--max-running-requests 1 --cuda-graph-max-bs-decode 1` | only when `--max-running-requests` is not given; set it (and `AX_CHAIN_*`) for multi-user chain rounds |
 | Qwen4-Exp target with any speculative algorithm | `AX_QSA_RING=16` | the stock 4-slot ring is wrong for verify windows that cross a group and refuses windows above 4 |
 | Dense NVFP4 target on SM12x | `--fp4-gemm-backend flashinfer_cutedsl` | only when left at `auto`, and not with `AX_NVFP4_VERIFY_PARITY=1` or `AX_QUALITY_PROFILE=verified` (they keep CUTLASS). SGLang 0.5.23 `auto` picks CUTLASS; on the RTX PRO 6000 cute-dsl ran the 27B MLP GEMMs 23-37% faster at 8-64 rows (no gain at 128) and the served routes 6-19% faster at one client with identical greedy outputs. On the RTX 5090 (two slots, 32 GB) the tree ran 4-5% faster at one request and 8-10% at two, stock DFlash2 9-14% faster, with identical one-request outputs ([report](../results/rtx_pro_6000_fp4_backend/REPORT.md)). cute-dsl compiles a kernel the first time it meets a shape: warm the server up |
+| `DFLASH` or `FC1_DFLASH_TREE` with `--max-running-requests 8` | `--min-free-slots-delay 1` | SGLang 0.5.23 holds each new DFlash prefill until two of eight slots are free, so eight clients ran as seven and the first-token p90 reached 0.19-0.27 s. Admitting one at a time cut it to 0.10-0.12 s on H200, B200 and RTX PRO 6000 and, with Humming, put H200 ahead of vLLM at eight clients ([report](../results/h200_humming/REPORT.md)). Not set under the parity profiles |
+| Gated-DeltaNet target, `DFLASH` or `FC1_DFLASH_TREE`, on SM100 with CUDA 13+ | `--linear-attn-prefill-backend flashinfer` | only with prefill chunks of 1-8,192 tokens and no `--linear-attn-backend`, deterministic inference, dynamic chunking or parity profile. SGLang picks FlashInfer prefill on SM100 only for a bf16 state; with the fp32 state the B200 ran the Triton chunk kernels. FlashInfer raised replay 8 at eight clients 9-11% and the tree at one client 2-10% on a B200; verify stays on Triton. The RTX PRO 6000 (SM120) showed no gain and keeps Triton ([report](../results/b200_gdn_prefill/REPORT.md)) |
+| Dense ModelOpt NVFP4 target, `DFLASH` or `FC1_DFLASH_TREE`, on SM90 with `humming-kernels` installed | `AX_NVFP4_HUMMING=1 --fp4-gemm-backend marlin` | only with the FP4 backend left at `auto` or `marlin`, and not under the parity profiles; `AX_NVFP4_HUMMING=0` keeps Marlin. See [Humming on Hopper](#humming-on-hopper) |
 | NVFP4 MoE target on SM110 (Jetson Thor) / SM120 | `--moe-runner-backend flashinfer_cutlass`, and `--speculative-moe-runner-backend` with speculative decoding | only when left at `auto`: SGLang 0.5.23 picks TRT-LLM (SM100 only) |
 
 The tree is refused on Qwen4-Exp targets. If the target's or drafter's `config.json` cannot be read (offline, a wrong revision), a tree launch stops instead of guessing: set `AX_GDN_LAYERS` and `AX_GDN_HEADS`, or `AX_LATTICE` (`1` for DFlash2, `0` for DFlash v1), explicitly. It also stops when neither `--speculative-num-draft-tokens`, the drafter config nor `FC1_DRAFT_BLOCK` gives the draft block length. The published DFlash2 drafters list `block_size` 8; the measured lanes draft 16 tokens per round, so keep `--speculative-num-draft-tokens 16` (the launcher prints a note about the difference). For a stock speculative route (MTP) with an unreadable target config, the launcher notes that the NVFP4 MoE backend and `AX_QSA_RING` defaults were not derived. A speculative launch that passes `--disable-prefill-cuda-graph` outside the parity path (`AX_NVFP4_VERIFY_PARITY`, `AX_QUALITY_PROFILE=verified`) gets a note: eager prefills stall the decode batch. On two B200s they cost Flash Next 26-45% of the four-client throughput, and on an RTX PRO 6000 they cost the 27B stock, tree and replay routes 7-16% at one client and 16-34% at eight ([B200](../results/b200x2_flash_next_prefill_graph/REPORT.md), [RTX PRO 6000](../results/rtx_pro_6000_prefill_graph/REPORT.md)).

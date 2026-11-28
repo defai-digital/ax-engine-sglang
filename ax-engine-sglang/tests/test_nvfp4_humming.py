@@ -154,8 +154,10 @@ class LaunchTests(unittest.TestCase):
         for route in (args("DFLASH", speculative_num_draft_tokens=8), args()):
             result = plan(route, environ, QWEN38_27B_NVFP4, DFLASH2, capability=(9, 0))
             self.assertEqual(result.args["fp4_gemm_runner_backend"], ("marlin", "AX_NVFP4_HUMMING"))
-        self.assertNotIn("fp4_gemm_runner_backend",
-                         plan(args("DFLASH"), {}, QWEN38_27B_NVFP4, DFLASH2, capability=(9, 0)).args)
+        from unittest.mock import patch
+        with patch("ax_engine_sglang.defaults.humming_available", return_value=False):
+            self.assertNotIn("fp4_gemm_runner_backend",
+                             plan(args("DFLASH"), {}, QWEN38_27B_NVFP4, DFLASH2, capability=(9, 0)).args)
         launch = args("DFLASH", speculative_num_draft_tokens=8)
         cases = (
             (launch, environ, QWEN38_27B_NVFP4, (10, 0), "SM90"),
@@ -168,6 +170,33 @@ class LaunchTests(unittest.TestCase):
         for route, options, target, capability, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(LaunchConfigError, message):
                 plan(route, options, target, DFLASH2, capability=capability)
+
+    def test_installed_humming_is_the_sm90_default_for_dense_nvfp4_dflash(self):
+        from unittest.mock import patch
+        launch = args("DFLASH", speculative_num_draft_tokens=8)
+        with patch("ax_engine_sglang.defaults.humming_available", return_value=True):
+            for route in (launch, args()):
+                result = plan(route, {}, QWEN38_27B_NVFP4, DFLASH2, capability=(9, 0))
+                self.assertEqual(result.env["AX_NVFP4_HUMMING"][0], "1")
+                self.assertEqual(result.args["fp4_gemm_runner_backend"], ("marlin", "AX_NVFP4_HUMMING"))
+            untouched = (
+                (launch, {"AX_NVFP4_HUMMING": "0"}, QWEN38_27B_NVFP4, (9, 0)),
+                (launch, {"AX_AUTO_DEFAULTS": "0"}, QWEN38_27B_NVFP4, (9, 0)),
+                (launch, {"AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, (9, 0)),
+                (launch, {}, QWEN38_27B_NVFP4, (10, 0)),
+                (launch, {}, QWEN38_27B, (9, 0)),
+                (args("EAGLE"), {}, QWEN38_27B_NVFP4, (9, 0)),
+                (args("DFLASH", fp4_gemm_runner_backend="flashinfer_cutlass"), {}, QWEN38_27B_NVFP4, (9, 0)),
+            )
+            for route, environ, target, capability in untouched:
+                with self.subTest(environ=environ, capability=capability, route=vars(route)):
+                    try:
+                        result = plan(route, environ, target, DFLASH2, capability=capability)
+                    except LaunchConfigError:
+                        continue
+                    self.assertNotIn("AX_NVFP4_HUMMING", result.env)
+        with patch("ax_engine_sglang.defaults.humming_available", return_value=False):
+            self.assertNotIn("AX_NVFP4_HUMMING", plan(launch, {}, QWEN38_27B_NVFP4, DFLASH2, capability=(9, 0)).env)
 
 
 if __name__ == "__main__":
