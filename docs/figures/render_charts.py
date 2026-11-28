@@ -282,6 +282,21 @@ def main():
                         "for BF16, FP8 and NVFP4.",
         )
 
+    # README: NVFP4 only (TensorRT-LLM has no SM90 NVFP4 path).
+    h200_nvfp4 = [row for row in h200 if row[2][2] is not None]
+    bar_chart(
+        OUT / "h200-27b-nvfp4-throughput.svg",
+        title="H200 · Qwen3.8-27B NVFP4 · Marlin W4A16",
+        subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
+        series=[(name, color) for name, color, *_ in h200_nvfp4],
+        panels=[{"title": clients, "categories": WORKLOADS, "values": split(*[row[col][2] for row in h200_nvfp4])}
+                for clients, col in (("1 concurrent client", 2), ("8 concurrent clients", 3))],
+        xlabel="End-to-end output tokens per second · same scale in both panels",
+        note="TensorRT-LLM NVFP4 needs Blackwell. SGLang lanes ran with eager prefills.",
+        description="Stock SGLang AR and DFlash2, stock vLLM DFlash2 and the AX tree/chain on one H200 for NVFP4 "
+                    "at one and eight clients. Stock vLLM leads; the tree is second at one client.",
+    )
+
     bar_chart(
         OUT / "rtx-pro-6000-27b-fp8-verify-throughput.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4",
@@ -421,6 +436,18 @@ def main():
                  "values": split(*[row[2] for row in thor])}],
         xlabel="Output tokens per second · each precision has its own scale", share_scale=False,
         description="Stock SGLang, stock vLLM, TensorRT Edge-LLM and the add-on, grouped by BF16 or NVFP4 and workload.",
+    )
+
+    bar_chart(
+        OUT / "jetson-thor-27b-nvfp4-throughput.svg",
+        title="Jetson Thor · Qwen3.8-27B NVFP4",
+        subtitle="Concurrency 1 · arm64 · SGLang 0.5.23, vLLM 0.34.0rc1 and TensorRT Edge-LLM 0.12.0 · "
+                 "12 prompts · 512-token limit",
+        series=[(name, color) for name, color, *_ in thor],
+        panels=[{"title": "NVFP4", "categories": WORKLOADS, "values": split(*[row[2] for row in thor])}],
+        xlabel="Output tokens per second",
+        description="Stock SGLang, stock vLLM, TensorRT Edge-LLM and the add-on on one Jetson Thor for NVFP4. "
+                    "The AX tree leads code and math and ties Edge-LLM DDTree 32 on chat.",
     )
 
     bar_chart(

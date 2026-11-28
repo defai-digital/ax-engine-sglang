@@ -99,6 +99,8 @@ was 0.4.0; the later B200 retest used 0.5.1 on the same prompt corpus.
 
 #### BF16
 
+![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, and the AX tree or chain.](figures/rtx-pro-6000-27b-bf16-retest.svg)
+
 | Clients | Stock AR | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree / chain |
 |---:|---:|---:|---:|---:|---:|
 | 1 | 27.1 / 27.2 / 27.2 | 132.0 / 120.9 / 70.5 | 133.1 / 119.3 / 73.8 | 135.3 / 120.6 / 73.7 | **184.3** / **163.2** / **94.1** |
@@ -709,6 +711,8 @@ attention kernel JIT could not find `cuda.h`.
 The SGLang lanes above ran with `--disable-prefill-cuda-graph`. A second two-B200 pod reran them with
 SGLang's default prefill CUDA graphs, alongside stock vLLM MTP3. Cells pool every pass (four for the
 graphed MTP lanes and vLLM, two otherwise):
+
+![Two B200s on one pod: stock SGLang MTP3 with eager and graphed prefill, stock vLLM MTP3 and AX MTP7.](figures/b200x2-flash-next-bf16-prefill-graph.svg)
 
 | Clients | Stock SGLang MTP3, eager prefill | Stock SGLang MTP3 | Stock vLLM MTP3 | AX MTP7 |
 |---:|---:|---:|---:|---:|

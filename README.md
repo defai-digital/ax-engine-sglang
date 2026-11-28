@@ -134,38 +134,12 @@ the serving retest: SGLang 0.5.23, 128 greedy output tokens, eight request
 slots, two streamed passes, and the same prompt corpus. Cells are code /
 math / chat output tokens per second. Studies with 256, 512, or 1,024
 tokens, a different slot count, or a pooled prompt mix do not substitute
-for these rates. Sections run by GPU, then model (Flash Next before 27B),
-then precision (BF16 before NVFP4). Full tables, the TensorRT-LLM
-comparison, and the kernel ablations are in
+for these rates. This section shows NVFP4 checkpoints only, by GPU and then
+model (Flash Next before 27B). BF16 and FP8 results, full tables, the
+TensorRT-LLM comparison, and the kernel ablations are in
 [Serving performance](docs/performance.md).
 
 ### B200
-
-#### Qwen3.8-Flash-Next BF16
-
-BF16 weights are about 360 GB, so this checkpoint does not fit one B200.
-Two B200s served it with tensor parallelism of 2 and the PLE table in
-pinned host memory. The greedy limit was 256 tokens at concurrency 1, 4,
-and 16. AX MTP7 led code and math at one client. Stock vLLM MTP3 led chat
-there, and led every workload at 4 and 16 clients. TensorRT-LLM 1.4.0rc3
-failed in its first decode step.
-
-![Qwen3.8-Flash-Next BF16 throughput on two B200s with tensor parallelism of 2.](docs/figures/b200x2-flash-next-bf16-throughput.svg)
-
-[Two-B200 study](docs/performance.md#qwen38-flash-next-bf16-mtp)
-
-Those SGLang lanes ran with `--disable-prefill-cuda-graph`. Eager prefills
-took two to three times as long as vLLM's, and each one stalled the
-running decode batch. A rerun on one pod used SGLang's default prefill CUDA
-graphs and stock vLLM MTP3 as the reference. Stock SGLang MTP3 rose 34–78%
-at four clients and 36–157% at sixteen, to within 16% of vLLM in every
-cell. AX MTP7 then led code at one and four clients (549.4 and 1,073.5
-tok/s against 364.7 and 884.3), was level on math, and trailed vLLM on
-chat by up to 14%. That pod was slower than the first for both engines.
-
-![Two B200s on one pod: stock SGLang MTP3 with eager and graphed prefill, stock vLLM MTP3 and AX MTP7.](docs/figures/b200x2-flash-next-bf16-prefill-graph.svg)
-
-[Prefill-graph rerun](results/b200x2_flash_next_prefill_graph/REPORT.md)
 
 #### Qwen3.8-Flash-Next NVFP4
 
@@ -216,42 +190,27 @@ The second sweep ran slower than the first by up to 30%; the cells pool
 both.
 [H200 Flash Next](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-flash-next-nvfp4)
 
-#### Qwen3.8-27B BF16, FP8 and NVFP4
+#### Qwen3.8-27B NVFP4
 
-The same 128-token retest on one H200 (SM90, 141 GB): BF16, the official
-`Qwen/Qwen3.8-27B-FP8` checkpoint, and NVFP4 through Marlin W4A16, since
-Hopper has no FP4 tensor cores. Stock vLLM and TensorRT-LLM 1.4.0rc3
-served the same token IDs with the same DFlash2 drafter.
+The same 128-token retest on one H200 (SM90, 141 GB). NVFP4 runs through
+Marlin W4A16, since Hopper has no FP4 tensor cores, and TensorRT-LLM NVFP4
+needs Blackwell. Stock vLLM served the same token IDs with the same DFlash2
+drafter. The SGLang lanes ran with eager prefills.
 
-![H200 Qwen3.8-27B at one client for BF16, FP8 and NVFP4: stock SGLang AR and DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2 and the AX tree.](docs/figures/h200-27b-c1-throughput.svg)
+![H200 Qwen3.8-27B NVFP4 at one and eight clients: stock SGLang AR and DFlash2, stock vLLM DFlash2 and the AX tree/chain.](docs/figures/h200-27b-nvfp4-throughput.svg)
 
-![H200 Qwen3.8-27B at eight clients. Stock vLLM DFlash2 leads every workload.](docs/figures/h200-27b-c8-throughput.svg)
+| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
+|---:|---:|---:|---:|
+| 1 | 342.7 / 304.5 / 204.2 | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
+| 8 | 1,063.8 / 873.5 / 609.4 | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
 
-| Precision | Clients | Stock SGLang DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
-|---|---:|---:|---:|---:|---:|
-| BF16 | 1 | 268.9 / 244.4 / 153.0 | 286.2 / 259.8 / 164.7 | 309.1 / 285.5 / 175.9 | **366.2 / 325.4 / 193.3** |
-| BF16 | 8 | 1,029.1 / 946.3 / 619.4 | 931.7 / 1,011.1 / 702.6 | **1,084.5 / 1,313.6 / 830.1** | 1,061.0 / 955.4 / 626.7 |
-| FP8 | 1 | 311.3 / 289.6 / 189.1 | 350.1 / 316.4 / 198.9 | 402.2 / **373.7 / 236.9** | **410.5** / 352.4 / 226.1 |
-| FP8 | 8 | 1,122.1 / 895.0 / 690.7 | 1,083.0 / 1,115.2 / 721.7 | **1,160.3 / 1,359.2 / 1,018.3** | 1,132.4 / 938.0 / 705.0 |
-| NVFP4 | 1 | 342.7 / 304.5 / 204.2 | needs Blackwell | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
-| NVFP4 | 8 | 1,063.8 / 873.5 / 609.4 | needs Blackwell | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
-
-At one client the tree led BF16 on every workload and FP8 on code. Stock
-vLLM led the rest, and every workload at eight clients. The tree accepted
-more tokens per verify at one client (10.3–11.4 on code against vLLM's
-6.5–7.1), so the FP8 and NVFP4 gap is per-step cost, not draft quality.
-[H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4)
-
-A second H200 pod swept the AX routes with package 0.5.1, which sets
-`AX_TREE_TEMP=1.55` by default (stock ran 5–10% faster on that pod). At one
-client tree 32 reached 443.3 / 388.1 / 246.6 tok/s on FP8 against 332.1 /
-307.2 / 197.9 for stock DFlash2, and 448.5 / 379.9 / 248.8 on NVFP4
-against 368.5 / 324.9 / 214.7. Tree 16 finished within 2% of tree 32, so
-the 32-node default stays. GEMMs are about 80% of a verify round; Marlin
-W4A16 alone is 44–50% on NVFP4, and no faster bit-identical Marlin tile
-exists for these shapes. The Gated-DeltaNet update, convolution and state
-commit take about 8% of a round, so faster GDN kernels would gain at most
-about 4%.
+Stock vLLM led every workload. The tree accepted more tokens per verify at
+one client (10.3–11.4 on code against vLLM's 6.5–7.1 across the H200
+precisions), so the gap is per-step cost, not draft quality: Marlin W4A16 alone is 44–50% of a verify round, and no
+faster bit-identical Marlin tile exists for these shapes. A second H200 pod
+with package 0.5.1 (`AX_TREE_TEMP=1.55`) ran tree 32 at 448.5 / 379.9 /
+248.8 tok/s at one client against 368.5 / 324.9 / 214.7 for stock DFlash2.
+[H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4) ·
 [H200 tree sweep](results/h200_tree_sweep/REPORT.md)
 
 ### RTX PRO 6000
@@ -269,19 +228,6 @@ concurrencies.
 | 8 | 679.0 / 582.6 / 455.4 | 728.0 / 542.7 / 356.5 | stock MTP3, 455.4 |
 
 [RTX PRO 6000 Flash Next tables](docs/performance.md#rtx-pro-6000-flash-next-serving-retest)
-
-#### Qwen3.8-27B BF16
-
-The same retest with package 0.4.0. The tree led at one client. At eight
-clients TensorRT-LLM DFlash2 led every workload (529.5 / 720.6 / 402.4
-tok/s).
-
-![RTX PRO 6000 Qwen3.8-27B BF16 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, and the AX tree or chain.](docs/figures/rtx-pro-6000-27b-bf16-retest.svg)
-
-| Clients | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
-|---:|---:|---:|---:|---:|
-| 1 | 132.0 / 120.9 / 70.5 | 133.1 / 119.3 / 73.8 | 135.3 / 120.6 / 73.7 | **184.3 / 163.2 / 94.1** |
-| 8 | 487.5 / 567.6 / 333.7 | **529.5 / 720.6 / 402.4** | 520.8 / 664.0 / 382.0 | 510.8 / 572.0 / 335.1 |
 
 #### Qwen3.8-27B NVFP4
 
@@ -333,12 +279,13 @@ of each route. These runs used 128-token outputs on the retest prompts.
 
 ### Jetson Thor
 
-#### Qwen3.8-27B BF16 and NVFP4
+#### Qwen3.8-27B NVFP4
 
-On one Jetson Thor, tree 32 led Edge-LLM DDTree 32 on code and math and
-tied it on chat, for both BF16 and NVFP4.
+On one Jetson Thor, tree 32 reached 106.1 / 92.1 / 43.1 tok/s. It led
+Edge-LLM DDTree 32 (71.4 / 68.8 / 44.2) on code and math and was within 3%
+on chat.
 
-![Jetson Thor throughput for stock SGLang, TensorRT Edge-LLM, and the add-on, grouped by BF16 or NVFP4 and prompt family.](docs/figures/jetson-thor-27b-throughput.svg)
+![Jetson Thor Qwen3.8-27B NVFP4 throughput for stock SGLang, stock vLLM, TensorRT Edge-LLM, and the add-on by prompt family.](docs/figures/jetson-thor-27b-nvfp4-throughput.svg)
 
 [Jetson Thor](docs/performance.md#jetson-thor-qwen38-27b)
 
