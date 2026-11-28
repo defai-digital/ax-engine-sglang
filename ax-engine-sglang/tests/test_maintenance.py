@@ -384,6 +384,29 @@ class StartupTests(unittest.TestCase):
             self.assertIs(Pool.__init__, original)
             self.assertFalse(ax_state_cap._installed)
 
+    def test_state_cap_guards_verify_wider_than_the_cache(self):
+        from ax_engine_sglang import ax_state_cap
+
+        class Rows:
+            def __init__(self, values):
+                self.values, self.shape = list(values), (len(values),)
+
+            def new_full(self, shape, value):
+                return Rows([value] * shape[0])
+
+        seen = []
+        verify = ax_state_cap.guard_verify(lambda self, **kw: seen.append(kw["intermediate_state_indices"].values))
+        cache = SimpleNamespace(shape=(9, 8, 48, 128, 128))   # 8 slots + pad row, 8 positions each
+        verify(None, intermediate_states_buffer=cache, intermediate_state_indices=Rows(range(8)), cache_steps=8)
+        self.assertEqual(seen[-1], list(range(8)))   # a chain round inside the cap is untouched
+        with self.assertRaisesRegex(RuntimeError, "AX_SSM_POSITIONS"):
+            verify(None, intermediate_states_buffer=cache, intermediate_state_indices=Rows(range(8)), cache_steps=32)
+        dummy = ax_state_cap.mark_dummy_run(lambda self: verify(
+            None, intermediate_states_buffer=cache, intermediate_state_indices=Rows(range(8)), cache_steps=32))
+        dummy(None)
+        self.assertEqual(seen[-1], [-1] * 8)   # the warmup dummy skips every snapshot
+        self.assertEqual(ax_state_cap._dummy_runs[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

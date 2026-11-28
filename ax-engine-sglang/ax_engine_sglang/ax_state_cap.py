@@ -47,6 +47,44 @@ def budget_positions(n):
     return POS + (int(n) - POS) * CONV_SHARE
 
 
+_dummy_runs = [0]   # depth of BaseRunner._dummy_run (FlashInfer autotune / PP DeepGEMM warmup forwards)
+
+
+def mark_dummy_run(native):
+    """Count SGLang's warmup dummy forwards, the only callers allowed past guard_verify's check."""
+    def _dummy_run(self, *args, **kwargs):
+        _dummy_runs[0] += 1
+        try:
+            return native(self, *args, **kwargs)
+        finally:
+            _dummy_runs[0] -= 1
+    return _dummy_run
+
+
+def guard_verify(native):
+    """Keep SGLang's GDN verify kernel inside the capped intermediate SSM cache.
+
+    The kernel writes one snapshot per draft token at row * pitch + step, with the pitch taken from
+    the buffer (POS here). Served rounds never exceed it (check_widths; tree rounds take the fused
+    hooks), but the FlashInfer autotune dummy forward (BaseRunner._dummy_run, before any graph
+    capture sets the round kind) verifies max_running_requests rows at the tree's full draft count:
+    rows overlap and the last GDN layer writes past the end of the cache (illegal address). The dummy
+    only needs the GEMM shapes, so its snapshot rows are set to -1, which the kernel skips (no
+    snapshot reads or writes). Anywhere else the overflow is a bug and fails loudly."""
+    def target_verify(self, *args, intermediate_states_buffer=None, intermediate_state_indices=None,
+                      cache_steps=0, **kwargs):
+        if (intermediate_states_buffer is not None and intermediate_state_indices is not None
+                and cache_steps > intermediate_states_buffer.shape[1]):
+            if not _dummy_runs[0]:
+                raise RuntimeError(
+                    f"ax-engine: GDN verify of {cache_steps} draft tokens per request exceeds the "
+                    f"{intermediate_states_buffer.shape[1]} positions of the capped SSM cache (AX_SSM_POSITIONS)")
+            intermediate_state_indices = intermediate_state_indices.new_full(intermediate_state_indices.shape, -1)
+        return native(self, *args, intermediate_states_buffer=intermediate_states_buffer,
+                      intermediate_state_indices=intermediate_state_indices, cache_steps=cache_steps, **kwargs)
+    return target_verify
+
+
 def install():
     if _installed or not POS:
         return
@@ -63,6 +101,8 @@ def install():
         ("* get_spec().speculative_num_draft_tokens", "* _ax_budget_positions(get_spec().speculative_num_draft_tokens)", 2),
         ("D = get_spec().speculative_num_draft_tokens", "D = _ax_budget_positions(get_spec().speculative_num_draft_tokens)", 1),
     ])
+    from sglang.srt.layers.attention.linear.kernels.gdn_triton import TritonGDNKernel
+    from sglang.srt.model_executor.runner.base_runner import BaseRunner
     # Compile both replacements first. A failed anchor must leave allocation and budget paired.
     with installation():
         for fn in (init, budget):
@@ -71,6 +111,8 @@ def install():
             patch_item(namespace, "_ax_budget_positions", budget_positions)
         patch_attribute(MambaPool, "__init__", init)
         patch_attribute(KVCacheConfigurator, "_handle_max_mamba_cache", budget)
+        patch_attribute(TritonGDNKernel, "target_verify", guard_verify(TritonGDNKernel.target_verify))
+        patch_attribute(BaseRunner, "_dummy_run", mark_dummy_run(BaseRunner._dummy_run))
         patch_attribute(sys.modules[__name__], "_installed", True)
     print(f"[ax_state_cap] intermediate SSM cache capped at {POS} draft positions per slot", flush=True)
 
