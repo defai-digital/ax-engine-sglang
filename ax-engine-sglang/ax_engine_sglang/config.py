@@ -52,6 +52,9 @@ class PluginConfig:
     dflash_draft_vocab: bool = False
     nvfp4_b12x_down128: bool = False
     nvfp4_humming: bool = False
+    norm_fp4: bool = False
+    gdn_verify_tiles: bool = False
+    gdn_verify_views: bool = False
     nvfp4_verify_parity: bool = False
     nvfp4_parity_rows: int = 0
     quality_profile: str | None = None
@@ -170,6 +173,9 @@ class PluginConfig:
             dflash_draft_vocab=flag("AX_DFLASH_DRAFT_VOCAB"),
             nvfp4_b12x_down128=flag("AX_NVFP4_B12X_DOWN128"),
             nvfp4_humming=flag("AX_NVFP4_HUMMING"),
+            norm_fp4=flag("AX_NORM_FP4"),
+            gdn_verify_tiles=flag("AX_GDN_VERIFY_TILES"),
+            gdn_verify_views=flag("AX_GDN_VERIFY_VIEWS"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
             nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
             quality_profile=env.get("AX_QUALITY_PROFILE") or None,
@@ -270,6 +276,8 @@ class PluginConfig:
         if self.nvfp4_humming and (self.nvfp4_verify_parity or self.nvfp4_b12x_down128):
             raise ValueError("AX_NVFP4_HUMMING replaces SGLang's SM90 Marlin kernels: it is not measured with "
                              "AX_NVFP4_VERIFY_PARITY and does not combine with AX_NVFP4_B12X_DOWN128 (SM12x)")
+        if self.norm_fp4 and self.nvfp4_verify_parity:
+            raise ValueError("AX_NORM_FP4 changes the NVFP4 activation codes the parity profile pins")
         if self.ax_draft_model and (not self.gdn_chain_replay or self.dflash_kv_graph
                                     or self.dflash_kv_direct or self.dflash_plan_reuse
                                     or self.dflash_draft_vocab or self.nvfp4_b12x_down128):

@@ -187,9 +187,20 @@ Change from the previous run:
 
 Previous run: the same pod and harness before the two defaults (admission, FlashInfer GDN prefill).
 
-FlashInfer prefill alone added 9–11% to replay at eight clients. Tokens per verify match vLLM, so the rest of the
-eight-client gap is per-round cost: the replay fold, the verify conv
-window writes, and RMSNorm + quantization that vLLM fuses.
+FlashInfer prefill alone added 9–11% to replay at eight clients.
+
+GDN verify tiles and projection views (now SM100 launch defaults) on a later same-pod rerun, against three
+vLLM servers (code / math / chat):
+
+| Clients | AX GDN replay, previous defaults (n = 3) | AX GDN replay, verify tiles + views (n = 4) | Stock vLLM DFlash2 (n = 3) |
+|---:|---:|---:|---:|
+| 1 | 706.3 / 636.8 / 397.3 (−14.5 / −5.6 / −8.8%) | 755.0 / 667.1 / 428.6 (−8.6 / −1.1 / −1.6%) | **826.2 / 674.3 / 435.5** |
+| 8 | 2,540.0 / 2,705.6 / 1,570.3 (−5.5 / −6.7 / −7.2%) | **2,757.7** / 2,796.6 / **1,724.9** (+2.6 / −3.6 / +2.0%) | 2,688.8 / **2,901.2** / 1,691.4 |
+
+Eight clients now lead vLLM on code and chat. Decode rounds cost the same as vLLM's; the math gap is the
+prefill step, which SGLang's breakable prefill graph runs with every attention and Gated-DeltaNet layer
+eager, while vLLM folds prefills into decode steps.
+[GDN verify report](results/b200_gdn_verify/REPORT.md) ·
 [Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#b200) ·
 [GDN prefill report](results/b200_gdn_prefill/REPORT.md) ·
 [Earlier B200 results](docs/performance.md#b200-qwen38-27b)

@@ -86,6 +86,15 @@ def _install_fixes(config):
     if config.nvfp4_humming:
         from . import ax_nvfp4_humming
         ax_nvfp4_humming.install()
+    if config.norm_fp4:
+        from . import ax_norm_fp4
+        ax_norm_fp4.install()
+    if config.gdn_verify_tiles:
+        from . import ax_gdn_verify_tiles
+        ax_gdn_verify_tiles.install()
+    if config.gdn_verify_views:
+        from . import ax_gdn_verify_views
+        ax_gdn_verify_views.install()
     if config.gdn_chain_replay:
         from . import ax_dflash_activity
         ax_dflash_activity.install()

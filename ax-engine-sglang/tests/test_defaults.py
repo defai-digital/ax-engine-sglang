@@ -248,6 +248,33 @@ class StockRouteDefaultsTests(unittest.TestCase):
             self.assertNotIn("linear_attn_prefill_backend",
                              plan(args("DFLASH", **launch), {}, QWEN38_27B, DFLASH2, capability=(10, 0)).args)
 
+    def test_sm100_gdn_verify_tiles_and_views(self):
+        launch = dict(speculative_num_draft_tokens=8, chunked_prefill_size=8192)
+        for route, environ in ((args("DFLASH", **launch), {}), (args(chunked_prefill_size=8192), {}),
+                               (args("DFLASH", disable_radix_cache=True, **launch), {"AX_GDN_CHAIN_REPLAY": "1"})):
+            result = plan(route, environ, QWEN38_27B, DFLASH2, capability=(10, 0))
+            tree = route.speculative_algorithm == "FC1_DFLASH_TREE"
+            for name in ("AX_GDN_VERIFY_TILES",) + (() if tree else ("AX_GDN_VERIFY_VIEWS",)):
+                value, reason = result.env[name]
+                self.assertEqual(value, "1")
+                self.assertIn("SM100", reason)
+            if tree:
+                self.assertNotIn("AX_GDN_VERIFY_VIEWS", result.env)
+        self.assertNotIn("AX_GDN_VERIFY_TILES",
+                         plan(args("DFLASH", **launch), {"AX_GDN_VERIFY_TILES": "0"}, QWEN38_27B, DFLASH2,
+                              capability=(10, 0)).env)
+        for route, environ, capability in ((args("DFLASH", **launch), {}, (9, 0)),
+                                           (args("DFLASH", **launch), {}, (12, 0)),
+                                           (args("DFLASH", **launch), {"AX_AUTO_DEFAULTS": "0"}, (10, 0)),
+                                           (args("DFLASH", **launch), {"AX_NVFP4_VERIFY_PARITY": "1"}, (10, 0))):
+            with self.subTest(environ=environ, capability=capability):
+                try:
+                    result = plan(route, environ, QWEN38_27B, DFLASH2, capability=capability)
+                except LaunchConfigError:
+                    continue
+                self.assertNotIn("AX_GDN_VERIFY_TILES", result.env)
+                self.assertNotIn("AX_GDN_VERIFY_VIEWS", result.env)
+
     def test_b12x_down128_is_scoped_to_the_measured_replay_launch(self):
         launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True)
         environ = {"AX_GDN_CHAIN_REPLAY": "1", "AX_NVFP4_B12X_DOWN128": "1"}

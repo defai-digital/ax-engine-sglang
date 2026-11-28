@@ -346,6 +346,32 @@ def _plan_gdn_flashinfer_prefill(result: Plan, args, environ: Mapping[str, str],
         "flashinfer", "Gated-DeltaNet prefill on SM100: FlashInfer measured faster than the Triton chunk kernels")
 
 
+def _plan_gdn_verify_sm100(result: Plan, args, environ: Mapping[str, str], target: Mapping | None,
+                           capability: tuple[int, int] | None) -> None:
+    """Narrower verify tiles and projection views for the fp32-state GDN DFlash verify on SM100.
+
+    AX_GDN_VERIFY_TILES launches the ReplaySSM ring verify on a 16-wide value tile and the window-saving
+    verify conv on 64 channels (33 against 46 us and 8.6 against 11.8 us at eight requests);
+    AX_GDN_VERIFY_VIEWS feeds the verify from the projection's own views instead of a per-layer copy and
+    drops a per-layer mask that only pipeline-parallel stable rows read. On a B200 (27B NVFP4 replay8,
+    four servers against three same-pod vLLM 0.34 servers) the two took eight clients from
+    -5.5/-6.7/-7.2% to +2.6/-3.6/+2.0% (code/math/chat) and one client from -14.5/-5.6/-8.8% to
+    -8.6/-1.1/-1.6%. The views and the conv tile leave outputs bitwise unchanged; the ring tile sums
+    in another order and changed 5 of 24 one-client greedy outputs (results/b200_gdn_verify)."""
+    algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
+    if (capability is None or capability[0] != 10 or algorithm not in ("DFLASH", TREE_ALGORITHM)
+            or not gdn_shape(target or {}) or gdn_head_dims(target or {}) != (128, 128)
+            or parity_requested(environ)):
+        return
+    result.default_env(environ, "AX_GDN_VERIFY_TILES", "1",
+                       "GDN verify on SM100: the narrower ring and conv tiles measured faster "
+                       "(the ring tile changes fp32 summation order)")
+    if algorithm == TREE_ALGORITHM:   # the views were measured on the replay route only
+        return
+    result.default_env(environ, "AX_GDN_VERIFY_VIEWS", "1",
+                       "GDN verify on SM100: projection views replace a per-layer copy, outputs unchanged")
+
+
 def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapping | None,
          target_quant: Mapping | None = None, capability: tuple[int, int] | None = None) -> Plan:
     """Decide defaults for one launch. `args` is the raw (unresolved) ServerArgs."""
@@ -374,6 +400,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
     if environ.get("AX_AUTO_DEFAULTS", "1") != "0":
         _plan_dflash_admission(result, args, environ)
         _plan_gdn_flashinfer_prefill(result, args, environ, target, capability)
+        _plan_gdn_verify_sm100(result, args, environ, target, capability)
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         _plan_b12x_down128(result, args, environ, target, target_quant, capability)
