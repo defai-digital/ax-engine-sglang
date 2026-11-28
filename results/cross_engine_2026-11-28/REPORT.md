@@ -82,8 +82,9 @@ Eight-client code varied by up to 13% between two servers of the same lane.
 ## Not in these rows
 
 - **B200, bf16 SSM state.** Stock DFlash2 with `--mamba-ssm-dtype bfloat16` and FlashInfer decode and
-  verify (SGLang's CuTeDSL MTP kernel, no replay fold) ran eight clients at 2,977.7 / 2,784.5 / 1,765.8
-  (one server), +11.9 / −2.4 / −3.0% against vLLM. One-client tokens per verify fell from 6.61 / 5.79 to
-  6.40 / 5.31 on code and math. vLLM ran an FP32 state, so it is not a like-for-like route.
+  verify (SGLang's CuTeDSL MTP kernel, no replay fold) ran eight clients at 2,739.4 / 2,779.5 / 1,723.6
+  (two servers; the first alone read 2,977.7 / 2,784.5 / 1,765.8), +3.0 / −2.5 / −5.3% against vLLM and
+  1-5% ahead of AX replay. One-client tokens per verify fell from 6.61 / 5.79 to 6.40 / 5.31 on code and
+  math. vLLM ran an FP32 state, so it is not a like-for-like route.
 - **The remaining B200 eight-client gap** is per decode round: the replay fold, the verify conv window
   writes, and the RMSNorm + FP4/FP8 quantization that vLLM fuses (`results/b200_gdn_prefill`).
