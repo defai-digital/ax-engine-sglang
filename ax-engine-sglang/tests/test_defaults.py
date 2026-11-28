@@ -184,6 +184,24 @@ class StockRouteDefaultsTests(unittest.TestCase):
         result = plan(launch, {"AX_GDN_CHAIN_REPLAY": "1"}, QWEN38_27B, DFLASH2, capability=(12, 0))
         self.assertEqual(result.args["enable_linear_replayssm_spec"][0], True)
 
+    def test_b12x_down128_is_scoped_to_the_measured_replay_launch(self):
+        launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True)
+        environ = {"AX_GDN_CHAIN_REPLAY": "1", "AX_NVFP4_B12X_DOWN128": "1"}
+        result = plan(launch, environ, QWEN38_27B_NVFP4, DFLASH2, capability=(12, 0))
+        self.assertEqual(result.args["fp4_gemm_runner_backend"][0], "flashinfer_cutedsl")
+        cases = (
+            (launch, environ, QWEN38_27B_NVFP4, (10, 0), "SM12x"),
+            (launch, environ, QWEN38_27B, (12, 0), "dense ModelOpt NVFP4"),
+            (args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True,
+                  fp4_gemm_runner_backend="flashinfer_cutlass"), environ, QWEN38_27B_NVFP4, (12, 0),
+             "flashinfer_cutedsl"),
+            (launch, {**environ, "AX_NVFP4_VERIFY_PARITY": "1"}, QWEN38_27B_NVFP4, (12, 0),
+             "parity or verified"),
+        )
+        for replay, options, target, capability, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(LaunchConfigError, message):
+                plan(replay, options, target, DFLASH2, capability=capability)
+
     def test_ax_draft_uses_its_own_checkpoint_with_chain_replay(self):
         env = {"AX_GDN_CHAIN_REPLAY": "1", "AX_DRAFT_MODEL": "ax-draft"}
         drafter = {"model_type": "ax_draft", "version": 1, "depth": 7}

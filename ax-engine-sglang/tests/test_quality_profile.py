@@ -276,6 +276,14 @@ class DoctorTests(unittest.TestCase):
         ready = self.report(argv + ["--disable-radix-cache"], {"AX_GDN_CHAIN_REPLAY": "1"})
         self.assertEqual((ready["status"], ready["gdn_chain_replay"]["eligible"]), ("experimental", True))
 
+    def test_b12x_down128_is_experimental_on_a_qualified_replay_launch(self):
+        argv = ["target", "--speculative-algorithm", "DFLASH", "--speculative-draft-model-path", "draft",
+                "--speculative-num-draft-tokens", "8", "--disable-radix-cache"]
+        report = self.report(argv, {"AX_GDN_CHAIN_REPLAY": "1", "AX_NVFP4_B12X_DOWN128": "1"})
+        self.assertEqual(report["status"], "experimental")
+        self.assertEqual(report["experimental_features"], ["AX_GDN_CHAIN_REPLAY=1", "AX_NVFP4_B12X_DOWN128=1"])
+        self.assertEqual(report["derived"]["args"]["fp4_gemm_runner_backend"]["value"], "flashinfer_cutedsl")
+
     def test_invalid_settings_are_reported_once(self):
         report = self.report(self.TREE_ARGV, {"AX_POLICY_MODE": "adaptive", "AX_CHAIN_GRAPH_WIDTHS": "16"})
         self.assertEqual(report["status"], "unsupported")

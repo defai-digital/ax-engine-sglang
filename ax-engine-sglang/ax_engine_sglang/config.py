@@ -50,6 +50,7 @@ class PluginConfig:
     dflash_kv_direct: bool = False
     dflash_plan_reuse: bool = False
     dflash_draft_vocab: bool = False
+    nvfp4_b12x_down128: bool = False
     nvfp4_verify_parity: bool = False
     nvfp4_parity_rows: int = 0
     quality_profile: str | None = None
@@ -166,6 +167,7 @@ class PluginConfig:
             dflash_kv_direct=flag("AX_DFLASH_KV_DIRECT"),
             dflash_plan_reuse=flag("AX_DFLASH_PLAN_REUSE"),
             dflash_draft_vocab=flag("AX_DFLASH_DRAFT_VOCAB"),
+            nvfp4_b12x_down128=flag("AX_NVFP4_B12X_DOWN128"),
             nvfp4_verify_parity=flag("AX_NVFP4_VERIFY_PARITY"),
             nvfp4_parity_rows=integer("AX_NVFP4_PARITY_ROWS", 0),
             quality_profile=env.get("AX_QUALITY_PROFILE") or None,
@@ -261,9 +263,11 @@ class PluginConfig:
             raise ValueError("AX_DFLASH_PLAN_REUSE requires AX_GDN_CHAIN_REPLAY=1")
         if self.dflash_draft_vocab and not self.gdn_chain_replay:
             raise ValueError("AX_DFLASH_DRAFT_VOCAB requires AX_GDN_CHAIN_REPLAY=1")
+        if self.nvfp4_b12x_down128 and not self.gdn_chain_replay:
+            raise ValueError("AX_NVFP4_B12X_DOWN128 requires AX_GDN_CHAIN_REPLAY=1")
         if self.ax_draft_model and (not self.gdn_chain_replay or self.dflash_kv_graph
                                     or self.dflash_kv_direct or self.dflash_plan_reuse
-                                    or self.dflash_draft_vocab):
+                                    or self.dflash_draft_vocab or self.nvfp4_b12x_down128):
             raise ValueError("AX_DRAFT_MODEL requires standalone AX_GDN_CHAIN_REPLAY=1")
         if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
                                       or self.nvfp4_verify_parity or self.gdn_unpacked_decode):

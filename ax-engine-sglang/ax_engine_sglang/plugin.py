@@ -80,6 +80,9 @@ def _install_fixes(config):
     if config.dflash_draft_vocab:
         from . import ax_dflash_draft_vocab
         ax_dflash_draft_vocab.install()
+    if config.nvfp4_b12x_down128:
+        from . import ax_nvfp4_b12x
+        ax_nvfp4_b12x.install()
     if config.gdn_chain_replay:
         from . import ax_dflash_activity
         ax_dflash_activity.install()

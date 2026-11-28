@@ -91,6 +91,15 @@ zero errors, and identical reference outputs before and after. Use
 `AX_QUALITY_PROFILE=verified` with the width-eight chain for the measured
 exact-output configuration. [RTX PRO 6000 hot-path validation](../results/rtx_pro_6000_hotpath_validation/REPORT.md)
 
+Add `AX_NVFP4_B12X_DOWN128=1` to this launch to try FlashInfer's b12x kernel
+only for the 27B NVFP4 down projection at 128 rows. It requires an SM12x GPU,
+a dense ModelOpt NVFP4 target, SGLang 0.5.23 and
+`--fp4-gemm-backend flashinfer_cutedsl` (derived by the launcher), and is not
+available with the parity or verified profiles. Other projections and row
+counts stay on cute-dsl, so C1 is unchanged. Early RTX PRO 6000 A/B runs
+at 512 tokens per request measured +2.3–3.9% at C16; later runs remained
+workload-dependent, and C16 outputs can diverge on near-ties.
+
 Add `AX_DFLASH_KV_GRAPH=1` to this launch to try CUDA graph replay for
 the draft-context KV commit after verify. It captures per live batch size
 through 16 when the draft uses the standard unquantized KV layout. Prefill
