@@ -61,13 +61,13 @@ def gate_up(scales=(2.0, 3.0)):
     return SimpleNamespace(
         weight=Tensor((34816, 2560)), weight_scale=Tensor((34816, 320)),
         weight_scale_2=Tensor((len(scales),), list(scales)), input_size_per_partition=5120,
-        logical_widths=[17408, 17408], params_dtype="bf16", quant_config=SimpleNamespace(group_size=16))
+        logical_widths=[17408, 17408], params_dtype="bf16")
 
 
 class ConvertTests(unittest.TestCase):
     def test_each_shard_keeps_its_own_global_scale(self):
         layer, ops = gate_up(), Ops()
-        convert(layer, ops)
+        convert(layer, ops, 16)
         call = ops.schema.convert_humming.call_args.kwargs
         self.assertEqual(call["shape_n_stacks"], [17408, 17408])
         self.assertEqual(call["shape_k_stacks"], [5120])
@@ -80,7 +80,7 @@ class ConvertTests(unittest.TestCase):
 
     def test_the_converted_layer_passes_the_marlin_lm_head_gate(self):
         layer, ops = gate_up(), Ops()
-        convert(layer, ops)
+        convert(layer, ops, 16)
         self.assertEqual(layer.weight, ("param", "packed"))   # Humming packs int32, as Marlin does
         self.assertEqual(layer.weight_scale_2, ("param", "scale-2"))
         self.assertEqual(layer.weight_global_scale, ("param", 3.0))
@@ -90,15 +90,15 @@ class ConvertTests(unittest.TestCase):
 
     def test_layouts_it_does_not_understand_are_refused(self):
         cases = (
-            (dict(weight_scale_2=Tensor((1,), [2.0])), "1 weight_scale_2 values for 2 shards"),
-            (dict(logical_widths=[17408]), "does not match"),
-            (dict(quant_config=SimpleNamespace(group_size=32)), "group_size=16"),
+            (dict(weight_scale_2=Tensor((1,), [2.0])), 16, "1 weight_scale_2 values for 2 shards"),
+            (dict(logical_widths=[17408]), 16, "does not match"),
+            ({}, 32, "group_size=16"),
         )
-        for changes, message in cases:
+        for changes, group_size, message in cases:
             layer = gate_up()
             vars(layer).update(changes)
             with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
-                convert(layer, Ops())
+                convert(layer, Ops(), group_size)
 
 
 class DispatchTests(unittest.TestCase):
@@ -115,7 +115,8 @@ class DispatchTests(unittest.TestCase):
                 self.assertEqual(process(SimpleNamespace(quant_mode=mode), gate_up()), "stock")
         self.ops.transform.assert_not_called()
         layer = gate_up()
-        _process(original, lambda: self.marlin, lambda: self.ops)(SimpleNamespace(quant_mode="w4a4"), layer)
+        method = SimpleNamespace(quant_mode="w4a4", quant_config=SimpleNamespace(group_size=16))
+        _process(original, lambda: self.marlin, lambda: self.ops)(method, layer)
         self.assertEqual(layer.ax_humming, "layer-config")
         self.assertEqual(original.call_count, 2)
 

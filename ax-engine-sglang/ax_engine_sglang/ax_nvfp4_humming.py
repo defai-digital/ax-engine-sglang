@@ -51,15 +51,17 @@ class HummingOps:
         return self.torch.zeros(count, dtype=self.torch.int32, device=device)
 
 
-def convert(layer, ops) -> None:
-    """Replace a loaded ModelOpt NVFP4 layer's weights with Humming's layout, in place."""
+def convert(layer, ops, group_size: int) -> None:
+    """Replace a loaded ModelOpt NVFP4 layer's weights with Humming's layout, in place.
+
+    group_size is the method's NVFP4 config's (a mixed-precision checkpoint's layer.quant_config has none)."""
     weight = layer.weight.data
     n, k = int(weight.shape[0]), int(layer.input_size_per_partition)
     widths = [int(width) for width in (getattr(layer, "logical_widths", None) or [n])]
     if sum(widths) != n or int(weight.shape[1]) * 2 != k:
         raise RuntimeError(f"{FEATURE}: weight {tuple(weight.shape)} does not match N={widths} K={k}")
-    if layer.quant_config.group_size != 16:
-        raise RuntimeError(f"{FEATURE} requires group_size=16, got {layer.quant_config.group_size}")
+    if group_size != 16:
+        raise RuntimeError(f"{FEATURE} requires group_size=16, got {group_size}")
     scale_2 = layer.weight_scale_2.data.float().reshape(-1)
     if scale_2.numel() != len(widths):
         raise RuntimeError(f"{FEATURE}: {scale_2.numel()} weight_scale_2 values for {len(widths)} shards")
@@ -86,7 +88,7 @@ def _process(original, backend, ops):
     def process_weights_after_loading(self, layer):
         if self.quant_mode != "w4a4" or not backend().is_marlin():
             return original(self, layer)
-        convert(layer, ops())
+        convert(layer, ops(), self.quant_config.group_size)
         return None
 
     return process_weights_after_loading
