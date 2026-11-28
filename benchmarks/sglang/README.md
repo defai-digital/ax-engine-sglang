@@ -77,6 +77,25 @@ graphs, then add `--overlap` to measure overlap. This measures client
 wall time and batch latency. CUDA phase attribution requires a separate
 profiling run.
 
+Use `--ax-draft-rows 2`, `4` or `8` to compare the same AX checkpoint
+at different verification widths. DFlash2 remains at eight rows.
+
+Record backend-matched training data from a target-only SGLang instance
+with `--return-hidden-states-mode full`, radix caching disabled, and a
+prefill chunk that covers the longest prompt. Record serially by default
+or use `--batch-size` within the server's maximum running requests:
+
+```sh
+python benchmarks/sglang/capture_ax_draft_teacher.py --url http://127.0.0.1:30517 \
+  --prompts "$prompt_jsonl" --output "$recording" --length 96 \
+  --hidden-size "$hidden_size" --vocab-size "$vocab_size"
+```
+
+Each prompt has `id` and `input_ids`. The recording uses the same format
+as AX Engine's `ax_draft_teacher` and `scripts/train_ax_draft.py`. Row zero
+for each request is the last prefill feature paired with the first
+generated token. Each later row is the feature that produced its token.
+
 `--verified-profile` requires `ar` when selecting lanes explicitly. A
 timed replay pass requires at least one optimized round and zero fallbacks
 at the requested live batch size. The results also record smaller batches.

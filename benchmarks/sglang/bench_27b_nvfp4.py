@@ -98,6 +98,8 @@ def launch_config(args, lane):
     custom_dflash = tree or lane == "chain8"
     algorithm = "FC1_DFLASH_TREE" if custom_dflash else "DFLASH"
     draft_block = "16" if tree or lane in ("stock16", "replay16") else "8"
+    if lane == "axdraft8":
+        draft_block = str(getattr(args, "ax_draft_rows", 8))
     draft = args.ax_draft if lane == "axdraft8" else args.draft
     command += ["--speculative-algorithm", algorithm, "--speculative-draft-model-path",
                 str(draft.resolve()), "--speculative-num-draft-tokens", draft_block]
@@ -297,7 +299,8 @@ def run_lane(args, lane, prompts):
             if bool(info.get("enable_linear_replayssm_spec")) != (lane in REPLAY_LANES):
                 raise RuntimeError(f"Unexpected ReplaySSM setting for {lane}")
             measure(base_url, [max(prompts, key=len)], 1, 32, speculative)
-            measure(base_url, prompts[:args.slots], args.slots, 32, speculative)
+            warmup = [prompts[index % len(prompts)] for index in range(args.slots)]
+            measure(base_url, warmup, args.slots, 32, speculative)
             passes = []
             for concurrency, repeat in ((1, 1), *args.concurrent_passes, (1, 1)):
                 if lane in HOTPATHS:
@@ -320,6 +323,8 @@ def main():
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--draft", type=Path, required=True)
     parser.add_argument("--ax-draft", type=Path, help="AX Draft depth-seven checkpoint for axdraft8")
+    parser.add_argument("--ax-draft-rows", type=int, choices=(2, 4, 8), default=8,
+                        help="verification rows for the AX Draft lane")
     parser.add_argument("--input-ids", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--lanes", nargs="+", choices=LANES)
@@ -408,6 +413,8 @@ def main():
             for lane, result in (("replay8", replay), ("axdraft8", ax_draft)):
                 failed |= report_matches(f"{lane} C{concurrency} against ar C{concurrency}",
                                          canonical, result["rows"]) != len(canonical)
+            report_matches(f"axdraft8 C{concurrency} against replay8 C{concurrency}",
+                           (row["output_ids"] for row in replay["rows"]), ax_draft["rows"])
         if failed:
             raise SystemExit("Greedy token sequences differ; see the saved passes for each lane")
         return

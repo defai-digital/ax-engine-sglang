@@ -7,6 +7,7 @@ import textwrap
 
 from .compat import check_sglang, patch_attribute, rebuild_function
 from .config import get_config
+from .defaults import AX_DRAFT_VERIFY_WIDTHS
 
 
 class ProposalModel:
@@ -21,7 +22,6 @@ class ProposalModel:
         self.depth = config["depth"]
         self.hidden_size = config["hidden_size"]
         vocabulary = config["vocabulary"]
-        self.rank_scale = config["rank"] ** -0.5
         if (config["version"] != 1 or self.depth != 7 or self.hidden_size != target.hidden_size
                 or config["target_vocab_size"] != target.vocab_size
                 or len(vocabulary) < 4 or len(set(vocabulary)) != len(vocabulary)
@@ -30,6 +30,7 @@ class ProposalModel:
         width, size, rank = config["width"], len(vocabulary), config["rank"]
         if min(width, rank) < 1:
             raise ValueError("invalid AX Draft dimensions")
+        self.rank_scale = rank ** -0.5
         shapes = {
             "context.weight": (width, self.hidden_size), "anchor.weight": (size + 1, width),
             "mix.weight": (width, width), "mix.bias": (width,), "depth": (self.depth, width),
@@ -44,26 +45,36 @@ class ProposalModel:
         self.vocabulary = torch.tensor(vocabulary, device=device)
         self.classes = torch.full((target.vocab_size,), size, dtype=torch.long, device=device)
         self.classes[self.vocabulary] = torch.arange(size, device=device)
+        self.select_chain = None
+        if self.vocabulary.is_cuda and torch.version.hip is None:
+            from .ax_draft_kernels import select_chain
 
-    def __call__(self, hidden, anchor):
+            self.select_chain = select_chain
+
+    def __call__(self, hidden, anchor, depth=None):
         import torch
         from torch.nn import functional as F
 
         w = self.weights
+        depth = self.depth if depth is None else depth
         normalized = F.rms_norm(hidden.float(), (self.hidden_size,), eps=1e-5)
         shared = F.linear(normalized, w["context.weight"]) + w["anchor.weight"][self.classes[anchor]]
         shared = shared + F.silu(F.linear(shared, w["mix.weight"], w["mix.bias"]))
-        queries = F.silu(shared[:, None, :] + w["depth"])
+        queries = F.silu(shared[:, None, :] + w["depth"][:depth])
         logits = F.linear(queries, w["output.weight"], w["output.bias"])
+        if depth == 1:
+            return self.vocabulary[logits.argmax(dim=-1)]
         # Select each position conditioned on the actual proposed parent.
         # The parallel logits and all shortlist edges are computed only once.
         scores, candidates = logits.topk(min(8, self.vocabulary.numel()), dim=-1)
         parent = w["parent.weight"][candidates[:, :-1]]
         child = w["child"][candidates[:, 1:]]
         edges = (parent @ child.transpose(-1, -2)) * self.rank_scale
+        if self.select_chain is not None:
+            return self.select_chain(scores, candidates, edges, self.vocabulary)
         picks = [scores[:, 0].argmax(-1)]
         lanes = torch.arange(anchor.numel(), device=anchor.device)
-        for position in range(1, self.depth):
+        for position in range(1, depth):
             picks.append((scores[:, position] + edges[lanes, position - 1, picks[-1]]).argmax(-1))
         selected = torch.gather(candidates, 2, torch.stack(picks, dim=1).unsqueeze(-1)).squeeze(-1)
         return self.vocabulary[selected]
@@ -89,7 +100,8 @@ def _forward(native):
         section("    if self._full_embed_gpu is not None:", "    positions = positions_2d.reshape", ""),
         section("    seq_lens_cpu = self._draft_seq_lens_cpu_buf[:bs]",
                 "    draft_tokens = self._draft_block_tokens_buf[:bs]",
-                "    draft_next = self._ax_model(self._ax_hidden[batch.req_pool_indices], block_ids[:, 0])\n\n"),
+                "    draft_next = self._ax_model(self._ax_hidden[batch.req_pool_indices], "
+                "block_ids[:, 0], block_size - 1)\n\n"),
         section("    # Consume in this step:", "    # Avoid copying large",
                 "    self._remember_verify(batch, hidden, commit_lens)\n\n"),
     )
@@ -109,7 +121,8 @@ def install(directory):
     def resolve_aux(**args):
         # With no auxiliary taps the native logits processor exposes final post-norm.
         if not args["spec_algorithm"].is_dflash():
-            original_aux(**args)
+            return original_aux(**args)
+        return None
 
     forward = _forward(native)
 
@@ -136,8 +149,8 @@ def install(directory):
             self.block_size = self.speculative_num_draft_tokens = int(
                 native.get_spec().speculative_num_draft_tokens
             )
-            if self.block_size != 8:
-                raise ValueError("AX Draft requires eight verify rows")
+            if self.block_size not in AX_DRAFT_VERIFY_WIDTHS:
+                raise ValueError("AX Draft requires 2, 4 or 8 verify rows")
             self._ax_model = ProposalModel(directory, self.model_runner.model_config, self.device)
             self._tp_sync = native.SpecTpSync(native.get_dp_tp_group())
             native.check_simulate_acc_token_mode()
@@ -179,7 +192,7 @@ def install(directory):
             self._ax_hidden.index_copy_(0, batch.req_pool_indices, hidden[last].to(self._ax_hidden.dtype))
 
         def _remember_verify(self, batch, hidden, commit_lens):
-            lanes = torch.arange(hidden.shape[0], device=hidden.device)
+            lanes = torch.arange(commit_lens.numel(), device=hidden.device)
             last = hidden[lanes, commit_lens.to(torch.long) - 1]
             self._ax_hidden.index_copy_(0, batch.req_pool_indices, last.to(self._ax_hidden.dtype))
 

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -125,6 +126,10 @@ class ArgumentTests(unittest.TestCase):
             self.assertIn("--disable-cuda-graph", command)
             self.assertEqual(command[command.index("--mamba-ssm-dtype") + 1], "float32")
             self.assertEqual(command[command.index("--kv-cache-dtype") + 1], "fp8_e4m3")
+        self.assertEqual(self.run_main("--ax-draft-parity", "--ax-draft", "ax", "--ax-draft-rows", "2")[0], 0)
+        for lane, width in (("replay8", "8"), ("axdraft8", "2")):
+            command, _, _ = bench.launch_config(self.lanes[-1], lane)
+            self.assertEqual(command[command.index("--speculative-num-draft-tokens") + 1], width)
         code, message = self.run_main("--ax-draft-parity", "--ax-draft", "ax", "--slots", "8",
                                       "--repeat", "1", "--kv-tokens", "8192")
         self.assertEqual(code, 2)
@@ -132,6 +137,20 @@ class ArgumentTests(unittest.TestCase):
 
 
 class HotpathPassTests(unittest.TestCase):
+    def test_lane_warms_full_width_when_the_corpus_is_smaller_than_the_batch(self):
+        prompts = [[1], [2]]
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(out=Path(directory), target=Path("target"), port=1234,
+                                   slots=4, concurrent_passes=[], output_tokens=64,
+                                   ax_draft_parity=True)
+            with patch.object(bench, "launch_config", return_value=([], {}, None)), \
+                    patch.object(bench.subprocess, "Popen"), patch.object(bench, "stop_server"), \
+                    patch.object(bench, "wait_for_server", return_value={}), \
+                    patch.object(bench, "run_fixed_pass",
+                                 return_value={"output_tokens": 2, "wall_s": 1}) as measure:
+                bench.run_lane(args, "ar", prompts)
+            self.assertEqual(measure.call_args_list[1].args[1:4], (prompts * 2, 4, 32))
+
     def test_fixed_pass_submits_ordered_groups(self):
         prompts = [[1], [2], [3], [4]]
         def reply(_url, batch, _length):

@@ -45,8 +45,8 @@ throughput result.
 
 ## Experimental AX Draft checkpoint
 
-SGLang 0.5.23 can run a seven-token AX Draft checkpoint with the same
-width-eight verifier and accepted-prefix GDN replay. In this mode the
+SGLang 0.5.23 can run a seven-token AX Draft checkpoint with the native
+chain verifier and accepted-prefix GDN replay. In this mode the
 proposal model uses the target's last committed normalized hidden row. It
 loads AX Draft weights and keeps one feature row per request without a
 separate draft KV cache.
@@ -59,7 +59,8 @@ AX_DRAFT_MODEL="$draft_dir" AX_GDN_CHAIN_REPLAY=1 ax-engine-sglang serve "$targe
 ```
 
 Use a version 1 AX Draft checkpoint with `model_type: ax_draft` and
-`depth: 7`. The `DFLASH` flag selects the native verifier and scheduler.
+`depth: 7`. The experimental verifier accepts 2, 4 or 8 rows, including
+the anchor. The `DFLASH` flag selects the native verifier and scheduler.
 The experimental route uses a single GPU, standard prefill and the
 dense Qwen 3.8 27B target.
 

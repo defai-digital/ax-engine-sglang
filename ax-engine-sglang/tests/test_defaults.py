@@ -186,11 +186,15 @@ class StockRouteDefaultsTests(unittest.TestCase):
 
     def test_ax_draft_uses_its_own_checkpoint_with_chain_replay(self):
         env = {"AX_GDN_CHAIN_REPLAY": "1", "AX_DRAFT_MODEL": "ax-draft"}
-        launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True,
-                      speculative_draft_model_path="ax-draft")
-        result = plan(launch, env, QWEN38_27B, {"model_type": "ax_draft", "version": 1, "depth": 7},
-                      capability=(10, 0))
-        self.assertIs(result.args["enable_linear_replayssm_spec"][0], True)
+        drafter = {"model_type": "ax_draft", "version": 1, "depth": 7}
+        for width in (2, 4, 8):
+            launch = args("DFLASH", speculative_num_draft_tokens=width, disable_radix_cache=True,
+                          speculative_draft_model_path="ax-draft")
+            result = plan(launch, env, QWEN38_27B, drafter, capability=(10, 0))
+            self.assertIs(result.args["enable_linear_replayssm_spec"][0], True)
+        launch.speculative_num_draft_tokens = 3
+        with self.assertRaisesRegex(LaunchConfigError, "width 2, 4 or 8"):
+            plan(launch, env, QWEN38_27B, drafter, capability=(10, 0))
         with self.assertRaisesRegex(LaunchConfigError, "its own version 1"):
             plan(launch, env, QWEN38_27B, DFLASH2, capability=(10, 0))
 

@@ -170,6 +170,7 @@ def _int_env(environ, name):
 
 
 REPLAY_WIDTHS = (8, 16)
+AX_DRAFT_VERIFY_WIDTHS = (2, 4, 8)
 
 
 def _plan_gdn_chain_replay(result, args, environ, target, drafter, capability):
@@ -182,12 +183,12 @@ def _plan_gdn_chain_replay(result, args, environ, target, drafter, capability):
     if environ.get("AX_DRAFT_MODEL"):
         path = getattr(args, "speculative_draft_model_path", None)
         if (not path or Path(path).resolve() != Path(environ["AX_DRAFT_MODEL"]).resolve()
-                or width != 8 or (drafter or {}).get("model_type") != "ax_draft"
+                or width not in AX_DRAFT_VERIFY_WIDTHS or (drafter or {}).get("model_type") != "ax_draft"
                 or (drafter or {}).get("version") != 1
                 or (drafter or {}).get("depth") != 7
                 or getattr(args, "enable_mixed_chunk", False)):
             raise LaunchConfigError("AX_DRAFT_MODEL requires its own version 1 depth-seven model as "
-                                    "--speculative-draft-model-path, width 8 and standard prefill")
+                                    "--speculative-draft-model-path, width 2, 4 or 8 and standard prefill")
     elif width not in REPLAY_WIDTHS or drafter_kind(drafter) != "dflash2":
         raise LaunchConfigError(f"{feature} requires a DFlash2 drafter with --speculative-num-draft-tokens 8 "
                                 "(or 16, experimental)")
