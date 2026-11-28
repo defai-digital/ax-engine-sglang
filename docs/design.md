@@ -23,13 +23,14 @@ Batching already lets one target pass serve several requests, and a chain
 avoids spending verification rows on extra branches for each request. The
 chain can also use an attention backend tuned for batched decoding.
 
-On the RTX PRO 6000 serving retest, the 32-node tree led stock DFlash2 on
-every single-request workload: 324.7 / 270.9 / 152.2 output tok/s against
-229.3 / 188.5 / 125.2 on code / math / chat. At eight clients,
-accepted-prefix GDN replay led, at 996.8 / 898.1 / 580.8. The tree and chain
-route stayed ahead on code and math and was slower on chat.
+On an RTX PRO 6000 with SGLang's prefill CUDA graphs, the 32-node tree led
+stock DFlash2 and stock vLLM DFlash2 on every single-request workload:
+464.8 / 389.5 / 222.0 output tok/s against 337.5 / 273.6 / 177.9 and
+317.2 / 292.0 / 182.9 on code / math / chat. At eight clients,
+accepted-prefix GDN replay led, at 1,464.4 / 1,389.7 / 835.2. The tree and
+chain route stayed ahead of stock on code and math and was slower on chat.
 [Round and backend design](decisions/2026-11-16-dual-attention-backend.md) ·
-[RTX retest](../results/rtx_pro_6000_retest/REPORT.md)
+[Prefill-graph rerun](../results/rtx_pro_6000_prefill_graph/REPORT.md)
 
 ## Fit the verifier to the model
 

@@ -106,6 +106,11 @@ was 0.4.0; the later B200 retest used 0.5.1 on the same prompt corpus.
 
 #### NVFP4
 
+These SGLang lanes ran with eager prefills (`--disable-prefill-cuda-graph`) and CUTLASS FP4 GEMMs; the
+[same-pod rerun with prefill graphs](#rtx-pro-6000-prefill-cuda-graphs) supersedes them.
+
+![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, the AX tree or chain, and AX GDN replay.](figures/rtx-pro-6000-27b-nvfp4-retest.svg)
+
 | Clients | Stock AR | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree / chain | AX GDN replay |
 |---:|---:|---:|---:|---:|---:|---:|
 | 1 | 54.2 / 54.1 / 54.4 | 229.3 / 188.5 / 125.2 | 246.0 / 210.3 / 128.9 | 279.8 / 266.4 / **154.5** | **324.7** / **270.9** / 152.2 | 235.8 / 195.2 / 128.9 |

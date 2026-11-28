@@ -285,42 +285,28 @@ tok/s).
 
 #### Qwen3.8-27B NVFP4
 
-Package 0.4.0 on the same prompt corpus.
-
-![RTX PRO 6000 Qwen3.8-27B NVFP4 throughput at one and eight clients for stock AR, stock DFlash2, TensorRT-LLM DFlash2, stock vLLM DFlash2, the AX tree or chain, and AX GDN replay.](docs/figures/rtx-pro-6000-27b-nvfp4-retest.svg)
-
-| Clients | Stock DFlash2 | TensorRT-LLM DFlash2 | Stock vLLM DFlash2 | AX tree/chain | AX GDN replay |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 229.3 / 188.5 / 125.2 | 246.0 / 210.3 / 128.9 | 279.8 / 266.4 / **154.5** | **324.7 / 270.9** / 152.2 | 235.8 / 195.2 / 128.9 |
-| 8 | 819.2 / 760.5 / 505.3 | 878.7 / **1,178.0** / 605.3 | **1,002.3** / 980.1 / **704.0** | 907.7 / 823.3 / 487.0 | 996.8 / 898.1 / 580.8 |
-
-At one client the tree led code and math. At eight clients stock vLLM led
-code and chat, TensorRT-LLM led math, and GDN replay raised SGLang chat
-from 505.3 to 580.8 tok/s.
-[RTX PRO 6000 per-pass results](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
-
-SGLang 0.5.23 runs the NVFP4 GEMMs on SM120 with FlashInfer CUTLASS. On
-the 27B MLP shapes, FlashInfer cute-dsl was 23–37% faster at 8–64 rows. On
-another RTX PRO 6000 pod, with the two backends alternating route by route,
-cute-dsl raised one-client throughput by 6.2–6.9% for the tree, 15–18% for
-GDN replay and 17–19% for stock DFlash2, with identical greedy outputs
-(24/24 per route). At eight clients the second sweep moved by −3% to +12%.
-The plugin now selects cute-dsl for dense NVFP4 targets on SM12x unless the
-backend is set explicitly or parity is requested.
-[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md)
-
-The SGLang rows above ran with `--disable-prefill-cuda-graph`, which the
-27B harness passed. On a later RTX PRO 6000 (Workstation Edition, cute-dsl
-GEMMs), SGLang's default prefill CUDA graphs raised every route by 7–16% at
-one client and 16–34% at eight, with unchanged tokens per verify. Stock vLLM
-DFlash2 ran on the same pod. With prefill graphs, AX GDN replay led it on
-every workload at eight clients (1,464.4 / 1,389.7 / 835.2 against 1,144.9 /
-1,157.5 / 775.5 tok/s), and the tree led every workload at one client
-(464.8 / 389.5 / 222.0 against 317.2 / 292.0 / 182.9).
+The 128-token retest on one RTX PRO 6000 (Workstation Edition), with stock
+vLLM on the same pod. SGLang used its default prefill CUDA graphs and
+FlashInfer cute-dsl FP4 GEMMs, the add-on's SM12x default. AX GDN replay led
+every workload at eight clients, and the 32-node tree led every workload at
+one client.
 
 ![RTX PRO 6000 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/rtx-pro-6000-27b-nvfp4-prefill-graph.svg)
 
-[Prefill-graph report](results/rtx_pro_6000_prefill_graph/REPORT.md)
+| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 337.5 / 273.6 / 177.9 | 317.2 / 292.0 / 182.9 | **464.8 / 389.5 / 222.0** | 349.9 / 284.6 / 184.8 |
+| 8 | 1,310.4 / 1,226.2 / 725.7 | 1,144.9 / 1,157.5 / 775.5 | 1,349.4 / 1,281.5 / 714.5 | **1,464.4 / 1,389.7 / 835.2** |
+
+Earlier 27B SGLang rows in this README ran with
+`--disable-prefill-cuda-graph`, which the 27B harness passed. On this pod that cost the SGLang routes 7–16%
+at one client and 16–34% at eight, with unchanged tokens per verify. With
+it, every SGLang route trailed stock vLLM on math and chat at eight clients.
+FlashInfer cute-dsl GEMMs, measured on another pod, add 6–19% at one client
+over SGLang's CUTLASS choice.
+[Prefill-graph report](results/rtx_pro_6000_prefill_graph/REPORT.md) ·
+[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md) ·
+[Earlier cross-engine table with TensorRT-LLM](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
 
 ### RTX 5090
 
