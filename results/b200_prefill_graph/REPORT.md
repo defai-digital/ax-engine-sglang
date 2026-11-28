@@ -12,10 +12,12 @@ servers (8 sequences, 4,096-token context, 8,192 batched tokens, memory utilizat
 off, FP32 Mamba state, 7 speculative tokens). Cells pool every sweep except the first sweep of each
 lane's first server.
 
-**GEMM backend caveat.** cute-dsl is the add-on's default on SM12x only; on SM100 the add-on leaves
-SGLang's choice in place, and the earlier B200 retest (`results/blackwell_nvfp4_serving_retest`) ran
-`flashinfer_cutlass`. This run did not compare the two backends on the B200, so part of the gap to vLLM
-below may be the backend.
+**GEMM backend.** On SM100 SGLang 0.5.23's `auto` already picks `flashinfer_cutedsl`
+(`fp4_utils.initialize_fp4_gemm_config`), the backend this run passed explicitly, and vLLM runs the
+same cute-dsl `mm_fp4` kernels; the earlier B200 retest (`results/blackwell_nvfp4_serving_retest`) ran
+`flashinfer_cutlass`. (An earlier version of this note said cute-dsl was not the SM100 default; it is.)
+The gap below was later traced to DFlash prefill admission and the Triton GDN prefill
+(`results/b200_gdn_prefill`).
 
 ## Results
 
@@ -56,8 +58,7 @@ Output tok/s, code / math / chat. First-token time is the median over the cell's
 - **Outputs.** Greedy outputs matched between eager and prefill-graph servers on 33-39 of 72
   one-client requests per route and 79-103 of 216 at eight.
 
-Next step: rerun the SGLang lanes on SM100 with `flashinfer_cutlass` and prefill graphs against the
-same vLLM, to separate the GEMM backend from the rest of the per-step gap.
+Follow-up: `results/b200_gdn_prefill` (FlashInfer GDN prefill and one-at-a-time DFlash admission).
 
 ## Files
 

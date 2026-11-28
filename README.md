@@ -110,8 +110,9 @@ SM110, which is Jetson Thor.
 
 Hopper at SM90 covers H100 and H200. Package 0.5.1 ran the 27B tree
 and chain routes on one H200 for BF16, FP8 and NVFP4 (through Marlin
-W4A16). The NVFP4 verify and GDN recurrent kernels are SM12-only and stay
-off there.
+W4A16). NVFP4 on SM90 now runs on Humming when `humming-kernels` is
+installed, as vLLM does. The NVFP4 verify and GDN recurrent kernels are
+SM12-only and stay off there.
 [H200 retest](#h200) · [Earlier H200 baselines](results/track_a_stage0_h200/REPORT.md)
 
 | Platform | Host | Capability | Measured board |
@@ -157,24 +158,26 @@ Chat stayed with a three-step MTP window.
 
 #### Qwen3.8-27B NVFP4
 
-The 128-token retest on one B200 with stock vLLM on the same pod. SGLang used
-its default prefill CUDA graphs and FlashInfer cute-dsl FP4 GEMMs. Stock vLLM
-DFlash2 led every workload: the AX tree trailed it by 10–14% at one client
-and 21–33% at eight. vLLM verified about as many tokens per round as stock
-SGLang, and the tree more at one client, so the gap is per-step cost.
+The 128-token retest on one B200 with stock vLLM on the same pod, rerun
+with the current launch defaults: one DFlash prefill admitted at a time
+and FlashInfer Gated-DeltaNet prefill (SGLang picks it on SM100 only for a
+bf16 state). The 32-node tree led every workload at one client; at eight
+clients GDN replay came within 2–7% of vLLM.
 
 ![B200 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/b200-27b-nvfp4-prefill-graph.svg)
 
 | Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
 |---:|---:|---:|---:|---:|
-| 1 | 490.3 / 428.3 / 286.6 | **750.8 / 627.5 / 417.3** | 654.7 / 565.2 / 360.7 | 500.5 / 440.2 / 295.7 |
-| 8 | 1,534.7 / 1,510.2 / 1,012.7 | **2,034.3 / 2,179.9 / 1,531.6** | 1,617.4 / 1,507.3 / 1,033.7 | 1,591.8 / 1,522.0 / 1,016.5 |
+| 1 | 692.7 / 581.7 / 370.2 | 838.4 / 695.6 / 451.6 | **945.6 / 766.5 / 459.1** | 717.1 / 645.7 / 406.2 |
+| 8 | 2,271.3 / 1,976.9 / 1,329.0 | **2,660.1 / 2,851.6 / 1,819.6** | 2,634.3 / 2,551.6 / 1,538.8 | 2,613.2 / 2,656.8 / 1,707.0 |
 
-cute-dsl is not the add-on's SM100 default, and CUTLASS with prefill graphs
-has not been measured on the B200, so part of the gap may be the GEMM
-backend. Against the earlier B200 retest (eager prefill, CUTLASS), these
-rows ran −0.5% to +31%.
-[B200 prefill-graph report](results/b200_prefill_graph/REPORT.md) ·
+Against vLLM the tree ran +12.8 / +10.2 / +1.7% at one client and replay
+−1.8 / −6.8 / −6.2% at eight. FlashInfer prefill alone added 9–11% to
+replay at eight clients. Tokens per verify match vLLM, so the rest of the
+eight-client gap is per-round cost: the replay fold, the verify conv
+window writes, and RMSNorm + quantization that vLLM fuses.
+[Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#b200) ·
+[GDN prefill report](results/b200_gdn_prefill/REPORT.md) ·
 [Earlier B200 results](docs/performance.md#b200-qwen38-27b)
 
 ### H200
@@ -198,25 +201,26 @@ both.
 #### Qwen3.8-27B NVFP4
 
 The 128-token retest on one H200 (SM90, 141 GB), with stock vLLM on the
-same pod. NVFP4 runs through Marlin W4A16, since Hopper has no FP4 tensor
-cores, and TensorRT-LLM NVFP4 needs Blackwell. SGLang used its default
-prefill CUDA graphs. The tree led code at one client; at eight clients the
-AX routes were level with vLLM on code and math, and vLLM led chat.
+same pod. Hopper has no FP4 tensor cores: SGLang runs NVFP4 through Marlin
+W4A16 and vLLM through humming-kernels. With `humming-kernels` installed
+the launcher now runs the AX routes on Humming too, and admits one DFlash
+prefill at a time. Both AX routes led every workload at eight clients, and
+the tree led at one.
 
-![H200 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/h200-27b-nvfp4-throughput.svg)
+![H200 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/h200-27b-nvfp4-throughput.svg)
 
-| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
+| Clients | Stock SGLang DFlash2 (Marlin) | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
 |---:|---:|---:|---:|---:|
-| 1 | 438.0 / 370.0 / 232.5 | 470.3 / 426.6 / **286.5** | **548.2 / 443.1** / 271.7 | 412.3 / 349.5 / 218.7 |
-| 8 | 1,382.1 / 1,283.0 / 805.2 | 1,382.8 / **1,338.0 / 989.4** | 1,413.1 / 1,322.5 / 825.8 | **1,421.1** / 1,281.8 / 833.6 |
+| 1 | 485.4 / 407.4 / 259.9 | 486.3 / 431.5 / 282.8 | **587.0 / 483.6 / 294.2** | 463.2 / 396.0 / 252.0 |
+| 8 | 1,514.0 / 1,387.4 / 876.1 | 1,570.1 / 1,574.0 / 1,063.5 | **1,714.0 / 1,720.7** / 1,074.9 | 1,658.4 / 1,687.0 / **1,075.7** |
 
-Eager prefills, as in the earlier H200 rows, cost SGLang 13–34% at one
-client and 28–49% at eight; every SGLang route then trailed vLLM by 13–38%.
-Tokens per verify did not change. The tree accepts more per verify than
-vLLM at one client (11.5 against 7.1 on code), so the remaining gap is
-per-step cost: Marlin W4A16 alone is 44–50% of a verify round, and no
-faster bit-identical Marlin tile exists for these shapes.
-[H200 prefill-graph report](results/h200_prefill_graph/REPORT.md) ·
+Against vLLM the tree ran +20.7 / +12.1 / +4.0% at one client and
++9.2 / +9.3 / +1.1% at eight; replay +5.6 / +7.2 / +1.1% at eight. With
+Marlin both AX routes trailed vLLM by 10–14% on math and chat at eight
+clients. AX cells pool five servers, vLLM the faster two of three (the
+third ran 12–27% slower at eight clients; with it the tree leads by
++22.9 / +17.3 / +3.8%).
+[H200 Humming report](results/h200_humming/REPORT.md) ·
 [H200 tree sweep](results/h200_tree_sweep/REPORT.md)
 
 ### RTX PRO 6000
@@ -238,24 +242,22 @@ concurrencies.
 #### Qwen3.8-27B NVFP4
 
 The 128-token retest on one RTX PRO 6000 (Workstation Edition), with stock
-vLLM on the same pod. SGLang used its default prefill CUDA graphs and
-FlashInfer cute-dsl FP4 GEMMs, the add-on's SM12x default. AX GDN replay led
-every workload at eight clients, and the 32-node tree led every workload at
-one client.
+vLLM on the same pod. SGLang used FlashInfer cute-dsl FP4 GEMMs (the
+add-on's SM12x default) and admitted one DFlash prefill at a time. The
+32-node tree led every workload at one client, and GDN replay every
+workload at eight.
 
-![RTX PRO 6000 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/rtx-pro-6000-27b-nvfp4-prefill-graph.svg)
+![RTX PRO 6000 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/rtx-pro-6000-27b-nvfp4-prefill-graph.svg)
 
 | Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
 |---:|---:|---:|---:|---:|
-| 1 | 337.5 / 273.6 / 177.9 | 317.2 / 292.0 / 182.9 | **464.8 / 389.5 / 222.0** | 349.9 / 284.6 / 184.8 |
-| 8 | 1,310.4 / 1,226.2 / 725.7 | 1,144.9 / 1,157.5 / 775.5 | 1,349.4 / 1,281.5 / 714.5 | **1,464.4 / 1,389.7 / 835.2** |
+| 1 | 318.4 / 258.6 / 168.8 | 294.1 / 283.4 / 179.5 | **431.4 / 363.4 / 209.5** | 329.4 / 267.1 / 174.9 |
+| 8 | 1,236.8 / 1,127.7 / 678.8 | 897.9 / 926.7 / 690.1 | 1,151.8 / 1,216.0 / 684.9 | **1,194.8 / 1,313.8 / 790.1** |
 
-Earlier 27B SGLang rows in this README ran with
-`--disable-prefill-cuda-graph`, which the 27B harness passed. On this pod that cost the SGLang routes 7–16%
-at one client and 16–34% at eight, with unchanged tokens per verify. With
-it, every SGLang route trailed stock vLLM on math and chat at eight clients.
-FlashInfer cute-dsl GEMMs, measured on another pod, add 6–19% at one client
-over SGLang's CUTLASS choice.
+Against vLLM the tree ran +46.7 / +28.2 / +16.8% at one client and replay
++33.1 / +41.8 / +14.5% at eight. Eight-client code varied by up to 13%
+between servers of the same lane (replay 1,079–1,338 tok/s).
+[Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#rtx-pro-6000) ·
 [Prefill-graph report](results/rtx_pro_6000_prefill_graph/REPORT.md) ·
 [FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md) ·
 [Earlier cross-engine table with TensorRT-LLM](docs/performance.md#rtx-pro-6000-qwen38-27b-nvfp4)
@@ -265,22 +267,22 @@ over SGLang's CUTLASS choice.
 #### Qwen3.8-27B NVFP4
 
 The 128-token retest on one 32 GB RTX 5090 with two request slots, with
-stock vLLM on the same pod. SGLang used its default prefill CUDA graphs and
-FlashInfer cute-dsl FP4 GEMMs, the add-on's SM12x default. The 32-node tree
-led every workload at one and two requests. TensorRT-LLM DFlash2 ran out of
-memory creating the target and drafter on the 32 GB card.
+stock vLLM on the same pod. SGLang used FlashInfer cute-dsl FP4 GEMMs, the
+add-on's SM12x default. The 32-node tree led every workload at one and
+two requests. TensorRT-LLM DFlash2 ran out of memory creating the target
+and drafter on the 32 GB card.
 
-![RTX 5090 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and two requests.](docs/figures/rtx-5090-27b-nvfp4-prefill-graph.svg)
+![RTX 5090 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and two requests.](docs/figures/rtx-5090-27b-nvfp4-prefill-graph.svg)
 
 | Requests | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
 |---:|---:|---:|---:|---:|
-| 1 | 328.6 / 268.9 / 162.6 | 291.5 / 253.1 / 179.6 | **422.5 / 343.6 / 205.7** | 339.5 / 277.4 / 168.2 |
-| 2 | 442.9 / 439.1 / 264.4 | 421.0 / 402.9 / 268.6 | **464.0 / 461.1 / 271.0** | 457.2 / 451.0 / **271.0** |
+| 1 | 294.9 / 237.2 / 155.1 | 245.3 / 213.6 / 173.1 | **389.4 / 318.0 / 186.4** | 317.0 / 259.4 / 160.3 |
+| 2 | 378.0 / 393.3 / 234.9 | 316.2 / 345.9 / 231.2 | **418.2 / 421.8** / 243.7 | 402.9 / 405.5 / **255.7** |
 
-The tree led vLLM by 14.5–44.9% at one request and 0.9–14.4% at two.
-Eager prefills, as in the earlier 5090 rows, cost SGLang 9–27% at one
-request and 18–28% at two; the prefill graphs took 0.73 GB of the 32 GB
-card. cute-dsl GEMMs add 4–14% over SGLang's CUTLASS choice.
+Against vLLM the tree ran +58.8 / +48.9 / +7.7% at one request and
++32.3 / +21.9 / +5.4% at two. vLLM's first-token median was 0.16–0.20 s
+against 0.07–0.10 s for SGLang.
+[Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#rtx-5090) ·
 [5090 prefill-graph report](results/rtx_5090_prefill_graph/REPORT.md) ·
 [FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090) ·
 [Earlier 5090 studies](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)

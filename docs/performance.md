@@ -42,9 +42,15 @@ DFlash2 on the same pod. Output tok/s, code / math / chat:
 | AX GDN replay 8 | 8 | 1,591.8 / 1,522.0 / 1,016.5 | |
 
 The eager-prefill lanes of that run spread up to 48% between passes with cute-dsl and are not used as a
-baseline. CUTLASS with prefill graphs has not been measured on SM100. The tables below ran with eager
-prefills and CUTLASS.
+baseline. The tables below ran with eager prefills and CUTLASS.
 [B200 prefill-graph report](../results/b200_prefill_graph/REPORT.md)
+
+**2026-11-28 rerun with the current launch defaults** (one DFlash prefill admitted at a time at eight
+slots, FlashInfer GDN prefill on SM100): tree 32 at one client 945.6 / 766.5 / 459.1 (+12.8 / +10.2 /
++1.7% against same-pod vLLM), GDN replay at eight clients 2,613.2 / 2,656.8 / 1,707.0 (−1.8 / −6.8 /
+−6.2%). The README shows this run.
+[Cross-engine rerun](../results/cross_engine_2026-11-28/REPORT.md#b200) ·
+[GDN prefill report](../results/b200_gdn_prefill/REPORT.md)
 
 ### Serving retest
 
@@ -548,6 +554,13 @@ alternating, then stock vLLM DFlash2 on the same pod. Output tok/s, code / math 
 
 The tables below ran with eager prefills.
 [H200 prefill-graph report](../results/h200_prefill_graph/REPORT.md)
+
+**2026-11-28 rerun with Humming and one-at-a-time admission** (both launch defaults on SM90 with
+`humming-kernels` installed): tree 32 at eight clients 1,714.0 / 1,720.7 / 1,074.9 (+9.2 / +9.3 / +1.1%
+against same-pod vLLM), GDN replay 1,658.4 / 1,687.0 / 1,075.7 (+5.6 / +7.2 / +1.1%); tree 32 at one
+client 587.0 / 483.6 / 294.2 (+20.7 / +12.1 / +4.0%). The README shows this run.
+[H200 Humming report](../results/h200_humming/REPORT.md) ·
+[Cross-engine rerun](../results/cross_engine_2026-11-28/REPORT.md#h200)
 
 ### Cross-engine retest
 

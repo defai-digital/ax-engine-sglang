@@ -108,21 +108,20 @@ def main():
         title="RTX 5090 · Qwen3.8-27B NVFP4 · one pod",
         subtitle="128 greedy output tokens per request · 8 prompts at one request, 24 at two per workload · "
                  "two servers per lane · cute-dsl FP4 GEMMs",
-        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
-                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
+                ("AX GDN replay", AX_DARK)],
         panels=[
             {"title": "1 concurrent request", "categories": WORKLOADS,
-             "values": split("271.5 / 229.4 / 149.0", "328.6 / 268.9 / 162.6", "291.5 / 253.1 / 179.6",
-                             "422.5 / 343.6 / 205.7", "339.5 / 277.4 / 168.2")},
+             "values": split("294.9 / 237.2 / 155.1", "245.3 / 213.6 / 173.1", "389.4 / 318.0 / 186.4",
+                             "317.0 / 259.4 / 160.3")},
             {"title": "2 concurrent requests", "categories": WORKLOADS,
-             "values": split("352.5 / 354.1 / 223.8", "442.9 / 439.1 / 264.4", "421.0 / 402.9 / 268.6",
-                             "464.0 / 461.1 / 271.0", "457.2 / 451.0 / 271.0")},
+             "values": split("378.0 / 393.3 / 234.9", "316.2 / 345.9 / 231.2", "418.2 / 421.8 / 243.7",
+                             "402.9 / 405.5 / 255.7")},
         ],
         xlabel="End-to-end output tokens per second · same scale in both panels",
-        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. The other SGLang lanes use "
-             "SGLang's default prefill CUDA graphs.",
-        description="On one RTX 5090, with prefill CUDA graphs the AX tree leads stock vLLM DFlash2 on every "
-                    "workload at one and two requests.",
+        note="SGLang lanes use prefill CUDA graphs. First sweep of every server dropped (both engines).",
+        description="On one RTX 5090 the AX tree leads stock vLLM DFlash2 on every workload at one and two "
+                    "requests (+59/+49/+8% and +32/+22/+5%).",
     )
 
     bar_chart(
@@ -130,21 +129,21 @@ def main():
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · one pod",
         subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · "
                  "two servers per lane · cute-dsl FP4 GEMMs",
-        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
-                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
+                ("AX GDN replay", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
-             "values": split("299.8 / 248.5 / 165.6", "337.5 / 273.6 / 177.9", "317.2 / 292.0 / 182.9",
-                             "464.8 / 389.5 / 222.0", "349.9 / 284.6 / 184.8")},
+             "values": split("318.4 / 258.6 / 168.8", "294.1 / 283.4 / 179.5", "431.4 / 363.4 / 209.5",
+                             "329.4 / 267.1 / 174.9")},
             {"title": "8 concurrent clients", "categories": WORKLOADS,
-             "values": split("1,080.9 / 977.7 / 624.4", "1,310.4 / 1,226.2 / 725.7", "1,144.9 / 1,157.5 / 775.5",
-                             "1,349.4 / 1,281.5 / 714.5", "1,464.4 / 1,389.7 / 835.2")},
+             "values": split("1,236.8 / 1,127.7 / 678.8", "897.9 / 926.7 / 690.1", "1,151.8 / 1,216.0 / 684.9",
+                             "1,194.8 / 1,313.8 / 790.1")},
         ],
         xlabel="End-to-end output tokens per second · same scale in both panels",
-        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. The other SGLang lanes use "
-             "SGLang's default prefill CUDA graphs.",
-        description="On one pod, prefill CUDA graphs put stock SGLang DFlash2 and both AX routes ahead of stock "
-                    "vLLM DFlash2 on code and math at eight clients; the AX tree leads every workload at one client.",
+        note="AX lanes admit one DFlash prefill at a time (launch default at 8 slots). First sweep of every "
+             "server dropped (both engines).",
+        description="On one RTX PRO 6000 the AX tree leads stock vLLM DFlash2 on every workload at one client "
+                    "and AX GDN replay on every workload at eight.",
     )
 
     bar_chart(
@@ -156,18 +155,18 @@ def main():
                 ("AX GDN replay", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
-             "values": split("490.3 / 428.3 / 286.6", "750.8 / 627.5 / 417.3", "654.7 / 565.2 / 360.7",
-                             "500.5 / 440.2 / 295.7")},
+             "values": split("692.7 / 581.7 / 370.2", "838.4 / 695.6 / 451.6", "945.6 / 766.5 / 459.1",
+                             "717.1 / 645.7 / 406.2")},
             {"title": "8 concurrent clients", "categories": WORKLOADS,
-             "values": split("1,534.7 / 1,510.2 / 1,012.7", "2,034.3 / 2,179.9 / 1,531.6",
-                             "1,617.4 / 1,507.3 / 1,033.7", "1,591.8 / 1,522.0 / 1,016.5")},
+             "values": split("2,271.3 / 1,976.9 / 1,329.0", "2,660.1 / 2,851.6 / 1,819.6",
+                             "2,634.3 / 2,551.6 / 1,538.8", "2,613.2 / 2,656.8 / 1,707.0")},
         ],
         xlabel="End-to-end output tokens per second",
-        note="SGLang lanes use SGLang's default prefill CUDA graphs. cute-dsl is not the SM100 default; "
-             "CUTLASS with prefill graphs was not measured.",
+        note="AX lanes: launch defaults (one DFlash prefill admitted at a time, FlashInfer GDN prefill). "
+             "First sweep of every server dropped (both engines).",
         share_scale=False,
-        description="On one B200, stock vLLM DFlash2 leads stock SGLang DFlash2 and both AX routes at one and "
-                    "eight clients.",
+        description="On one B200 the AX tree leads stock vLLM DFlash2 on every workload at one client; at eight "
+                    "clients AX GDN replay is within 2-7% of vLLM.",
     )
 
     bar_chart(
@@ -330,22 +329,24 @@ def main():
     # README: NVFP4 only, the same-pod prefill-graph run (results/h200_prefill_graph).
     bar_chart(
         OUT / "h200-27b-nvfp4-throughput.svg",
-        title="H200 · Qwen3.8-27B NVFP4 · Marlin W4A16 · one pod",
-        subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · two servers per lane",
-        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
-                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        title="H200 · Qwen3.8-27B NVFP4 · one pod",
+        subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · "
+                 "AX five servers, vLLM two",
+        series=[("Stock SGLang DFlash2 (Marlin)", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
+                ("AX GDN replay", AX_DARK)],
         panels=[
             {"title": "1 concurrent client", "categories": WORKLOADS,
-             "values": split("346.5 / 307.9 / 206.3", "438.0 / 370.0 / 232.5", "470.3 / 426.6 / 286.5",
-                             "548.2 / 443.1 / 271.7", "412.3 / 349.5 / 218.7")},
+             "values": split("485.4 / 407.4 / 259.9", "486.3 / 431.5 / 282.8", "587.0 / 483.6 / 294.2",
+                             "463.2 / 396.0 / 252.0")},
             {"title": "8 concurrent clients", "categories": WORKLOADS,
-             "values": split("1,081.8 / 884.4 / 628.3", "1,382.1 / 1,283.0 / 805.2", "1,382.8 / 1,338.0 / 989.4",
-                             "1,413.1 / 1,322.5 / 825.8", "1,421.1 / 1,281.8 / 833.6")},
+             "values": split("1,514.0 / 1,387.4 / 876.1", "1,570.1 / 1,574.0 / 1,063.5",
+                             "1,714.0 / 1,720.7 / 1,074.9", "1,658.4 / 1,687.0 / 1,075.7")},
         ],
         xlabel="End-to-end output tokens per second · same scale in both panels",
-        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. TensorRT-LLM NVFP4 needs Blackwell.",
-        description="On one H200, prefill CUDA graphs bring the AX routes level with stock vLLM DFlash2 on code and "
-                    "math at eight clients; the tree leads code at one client and vLLM leads chat.",
+        note="AX lanes run the NVFP4 linears on Humming and admit one DFlash prefill at a time (launch defaults). "
+             "TensorRT-LLM NVFP4 needs Blackwell.",
+        description="On one H200 both AX routes lead stock vLLM DFlash2 on every workload at eight clients, and "
+                    "the AX tree leads at one client.",
     )
 
     bar_chart(

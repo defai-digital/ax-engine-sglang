@@ -69,7 +69,8 @@ on the third server below). First token: p50 / p90 over the cell's requests.
 - **The third vLLM server** ran eight clients at 1,383 / 1,387 / 910 and then 1,139 / 1,290 / 985 tok/s
   (first-token p90 0.31 s), 12-27% below the first two servers, with one client unchanged. The cause
   was not found. With all three servers pooled, vLLM reads 1,394.1 / 1,466.3 / 1,035.9 at eight clients
-  and the tree with Humming and admission +29.4 / +21.1 / +4.9%; the table uses the first two.
+  and the tree with Humming and admission +29.4 / +21.1 / +4.9% (three flagged servers) or
+  +22.9 / +17.3 / +3.8% (all five); the table uses the first two.
 - **Outputs.** Humming's split-K is not run-to-run deterministic (it reduces through locks), and its
   greedy outputs differ from Marlin's; acceptance stayed within run variance. The parity and verified
   profiles refuse it.
