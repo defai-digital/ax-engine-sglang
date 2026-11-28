@@ -18,11 +18,13 @@ import urllib.request
 DEFAULT_LANES = ("ar", "stock8", "tree32")
 PARITY_LANES = ("ar", "tree16", "chain8")
 VERIFIED_LANES = ("ar", "chain8")      # the routes AX_QUALITY_PROFILE=verified admits
+AX_DRAFT_PARITY_LANES = ("ar", "replay8", "axdraft8")
 KV_GRAPH_LANE = "replay8-kv-graph"
 KV_DIRECT_LANE = "replay8-kv-direct"
 PLAN_REUSE_LANE = "replay8-plan-reuse"
 HOTPATHS = {
     "replay8": ("gdn_replay", None),
+    "axdraft8": ("gdn_replay", None),
     "replay16": ("gdn_replay", None),     # experimental: replay with a 16-token draft block
     KV_GRAPH_LANE: ("kv_graph", "AX_DFLASH_KV_GRAPH"),
     KV_DIRECT_LANE: ("kv_direct", "AX_DFLASH_KV_DIRECT"),
@@ -65,7 +67,8 @@ def launch_config(args, lane):
     if args.verified_profile:
         return verified_launch(args, lane)
     # Fit the entire frozen prompt in one prefill pass for the parity comparison.
-    prefill_size = "4096" if args.verify_parity else "512"
+    ax_parity = getattr(args, "ax_draft_parity", False)
+    prefill_size = "4096" if args.verify_parity or ax_parity else "512"
     command = [
         sys.executable, "-m", "sglang.launch_server", "--model-path", str(args.target.resolve()),
         "--host", "127.0.0.1", "--port", str(args.port), "--attention-backend", "flashinfer",
@@ -78,8 +81,14 @@ def launch_config(args, lane):
     # The parity lanes were matched with eager prefills. Speed lanes keep SGLang's prefill CUDA graphs:
     # eager prefills cost the 27B routes 7-16% at one client and 16-34% at eight on an RTX PRO 6000
     # (results/rtx_pro_6000_prefill_graph); reports before it ran with the flag.
-    if args.verify_parity or os.environ.get("AX_BENCH_EAGER_PREFILL") == "1":
+    if args.verify_parity or ax_parity or os.environ.get("AX_BENCH_EAGER_PREFILL") == "1":
         command.append("--disable-prefill-cuda-graph")
+    if ax_parity:
+        command += ["--mamba-ssm-dtype", "float32", "--kv-cache-dtype", "fp8_e4m3"]
+        if not args.overlap:
+            command.append("--disable-overlap-schedule")
+        if args.eager_decode:
+            command.append("--disable-cuda-graph")
     flags = {"SGLANG_PLUGINS": "none", "SGLANG_FLASHINFER_WORKSPACE_SIZE": str(64 * 1024 * 1024)}
     if args.verify_parity:
         flags.update(SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1", AX_NVFP4_PARITY_ROWS="0")
@@ -89,16 +98,21 @@ def launch_config(args, lane):
     custom_dflash = tree or lane == "chain8"
     algorithm = "FC1_DFLASH_TREE" if custom_dflash else "DFLASH"
     draft_block = "16" if tree or lane in ("stock16", "replay16") else "8"
+    draft = args.ax_draft if lane == "axdraft8" else args.draft
     command += ["--speculative-algorithm", algorithm, "--speculative-draft-model-path",
-                str(args.draft.resolve()), "--speculative-num-draft-tokens", draft_block]
+                str(draft.resolve()), "--speculative-num-draft-tokens", draft_block]
     if not custom_dflash:
-        command += ["--mamba-ssm-dtype", "float32", "--linear-attn-verify-backend", "triton"]
+        if not ax_parity:
+            command += ["--mamba-ssm-dtype", "float32"]
+        command += ["--linear-attn-verify-backend", "triton"]
     if lane in REPLAY_LANES:
         flags.update(SGLANG_PLUGINS="ax-engine", AX_GDN_CHAIN_REPLAY="1", AX_FI_OFFSET_FIX="0",
                      AX_DFLASH_BENCH_ACTIVITY="1")
         _, flag = HOTPATHS[lane]
         if flag:
             flags[flag] = "1"
+        if lane == "axdraft8":
+            flags["AX_DRAFT_MODEL"] = str(draft.resolve())
     if custom_dflash:
         flags.update(
             SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1" if args.verify_parity else "0",
@@ -131,7 +145,7 @@ def wait_for_server(process, base_url, model_path, algorithm):
     raise TimeoutError("SGLang startup timed out")
 
 
-def generate(base_url, input_ids, length, speculative):
+def request_generation(base_url, input_ids, length):
     body = {"input_ids": input_ids, "sampling_params": {
         "temperature": 0, "max_new_tokens": length, "ignore_eos": True,
     }}
@@ -140,7 +154,12 @@ def generate(base_url, input_ids, length, speculative):
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=240 + length) as response:
         result = json.load(response)
-    return generation_row(result, time.perf_counter() - started, length, speculative)
+    return result, time.perf_counter() - started
+
+
+def generate(base_url, input_ids, length, speculative):
+    result, elapsed = request_generation(base_url, input_ids, length)
+    return generation_row(result, elapsed, length, speculative)
 
 
 def generation_row(result, wall_s, length, speculative):
@@ -161,6 +180,22 @@ def run_pass(base_url, prompts, concurrency, length, speculative):
         rows = list(pool.map(lambda ids: generate(base_url, ids, length, speculative), prompts))
         wall_s = time.perf_counter() - start
     return summarize_pass(rows, wall_s, concurrency, length, speculative)
+
+
+def run_fixed_pass(base_url, prompts, concurrency, length, speculative):
+    """Submit fixed request groups in order through SGLang's batch API."""
+    start = time.perf_counter()
+    rows = []
+    for offset in range(0, len(prompts), concurrency):
+        batch = prompts[offset:offset + concurrency]
+        result, elapsed = request_generation(base_url, batch, length)
+        if not isinstance(result, list) or len(result) != len(batch):
+            raise ValueError(f"SGLang returned the wrong shape for {len(batch)} requests")
+        rows.extend(generation_row(item, elapsed, length, speculative) for item in result)
+    summary = summarize_pass(rows, time.perf_counter() - start, concurrency, length, speculative)
+    summary["median_batch_s"] = summary.pop("median_request_s")
+    summary["p95_batch_s"] = summary.pop("p95_request_s")
+    return summary
 
 
 def summarize_pass(rows, wall_s, concurrency, length, speculative):
@@ -247,11 +282,13 @@ def run_lane(args, lane, prompts):
     out.mkdir(parents=True, exist_ok=True)
     (out / "passes.json").unlink(missing_ok=True)
     command, flags, algorithm = launch_config(args, lane)
-    write_json(out / "launch.json", {"command": command, "flags": flags, "prompt_sha256": PROMPT_SHA256})
+    write_json(out / "launch.json", {"command": command, "flags": flags,
+                                    "prompt_sha256": getattr(args, "prompt_sha256", PROMPT_SHA256)})
     env = {key: value for key, value in os.environ.items() if not key.startswith(("FC1_", "AX_", "SGLANG_"))}
     env.update(flags, HF_HUB_OFFLINE="1")
     base_url = f"http://127.0.0.1:{args.port}"
     speculative = algorithm is not None
+    measure = run_fixed_pass if getattr(args, "ax_draft_parity", False) else run_pass
     log_path = out / "server.log"
     with log_path.open("w") as log:
         process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -259,16 +296,16 @@ def run_lane(args, lane, prompts):
             info = wait_for_server(process, base_url, args.target, algorithm)
             if bool(info.get("enable_linear_replayssm_spec")) != (lane in REPLAY_LANES):
                 raise RuntimeError(f"Unexpected ReplaySSM setting for {lane}")
-            run_pass(base_url, [max(prompts, key=len)], 1, 32, speculative)
-            run_pass(base_url, prompts[:args.slots], args.slots, 32, speculative)
+            measure(base_url, [max(prompts, key=len)], 1, 32, speculative)
+            measure(base_url, prompts[:args.slots], args.slots, 32, speculative)
             passes = []
             for concurrency, repeat in ((1, 1), *args.concurrent_passes, (1, 1)):
                 if lane in HOTPATHS:
-                    result = hotpath_pass(base_url, HOTPATHS[lane][0], concurrency, lambda: run_pass(
+                    result = hotpath_pass(base_url, HOTPATHS[lane][0], concurrency, lambda: measure(
                         base_url, prompts * repeat, concurrency, args.output_tokens, speculative,
                     ))
                 else:
-                    result = run_pass(base_url, prompts * repeat, concurrency, args.output_tokens, speculative)
+                    result = measure(base_url, prompts * repeat, concurrency, args.output_tokens, speculative)
                 passes.append(result)
                 print(f"{lane} C{concurrency}: {result['output_tokens'] / result['wall_s']:.2f} output tok/s",
                       flush=True)
@@ -282,11 +319,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--draft", type=Path, required=True)
+    parser.add_argument("--ax-draft", type=Path, help="AX Draft depth-seven checkpoint for axdraft8")
     parser.add_argument("--input-ids", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--lanes", nargs="+", choices=LANES)
     parser.add_argument("--verify-parity", action="store_true",
                         help="enable AX NVFP4 parity for AR, tree, and chain lanes")
+    parser.add_argument("--ax-draft-parity", action="store_true",
+                        help="compare fixed request groups against target-only greedy output in each pass")
+    parser.add_argument("--overlap", action="store_true",
+                        help="enable overlap in the AX Draft parity comparison")
+    parser.add_argument("--eager-decode", action="store_true",
+                        help="disable decode CUDA graphs in the AX Draft parity comparison")
     parser.add_argument("--verified-profile", action="store_true",
                         help="launch the ar and chain8 lanes with AX_QUALITY_PROFILE=verified alone")
     parser.add_argument("--slots", type=int, choices=(2, 4, 8), default=2)
@@ -305,10 +349,17 @@ def main():
     args.concurrent_passes = [(value, args.repeat) for value in args.concurrency or (args.slots, args.slots)]
     if args.verify_parity and args.verified_profile:
         parser.error("--verify-parity and --verified-profile are separate runs")
+    if args.ax_draft_parity and (args.verify_parity or args.verified_profile):
+        parser.error("--ax-draft-parity is a separate comparison")
+    if (args.overlap or args.eager_decode) and not args.ax_draft_parity:
+        parser.error("--overlap and --eager-decode require --ax-draft-parity")
     args.verify_parity = args.verify_parity or args.verified_profile   # the same lanes and comparison
     if args.lanes is None:
         args.lanes = (VERIFIED_LANES if args.verified_profile else PARITY_LANES if args.verify_parity
-                      else DEFAULT_LANES)
+                      else AX_DRAFT_PARITY_LANES if args.ax_draft_parity else DEFAULT_LANES)
+    if args.ax_draft_parity and (set(args.lanes) != set(AX_DRAFT_PARITY_LANES)
+                                or len(args.lanes) != len(AX_DRAFT_PARITY_LANES)):
+        parser.error("--ax-draft-parity requires ar, replay8, and axdraft8")
     if args.verified_profile and any(lane not in VERIFIED_LANES for lane in args.lanes):
         parser.error("--verified-profile supports the ar and chain8 lanes: the profile refuses the tree route")
     if args.verified_profile and "ar" not in args.lanes:
@@ -317,10 +368,22 @@ def main():
         parser.error("--verify-parity supports the ar, tree16, and chain8 lanes")
     if not args.verify_parity and "chain8" in args.lanes:
         parser.error("chain8 requires --verify-parity or --verified-profile")
+    if "axdraft8" in args.lanes and args.ax_draft is None:
+        parser.error("axdraft8 requires --ax-draft")
     raw_prompts = args.input_ids.read_bytes()
-    if hashlib.sha256(raw_prompts).hexdigest() != PROMPT_SHA256:
+    args.prompt_sha256 = hashlib.sha256(raw_prompts).hexdigest()
+    if not args.ax_draft_parity and args.prompt_sha256 != PROMPT_SHA256:
         parser.error("--input-ids must be the published parity-expanded-ids.json asset")
     prompts = json.loads(raw_prompts)
+    if not isinstance(prompts, list) or not prompts or any(
+        not isinstance(prompt, list) or not prompt
+        or any(type(token) is not int or token < 0 for token in prompt) for prompt in prompts
+    ):
+        parser.error("--input-ids must contain a nonempty JSON array of nonempty token arrays")
+    if args.ax_draft_parity and (
+        args.repeat < 1 or any(len(prompts) * repeat % size for size, repeat in args.concurrent_passes)
+    ):
+        parser.error("AX Draft parity requires full fixed-size groups in each concurrent pass")
     lengths = sorted((len(prompt) for prompt in prompts), reverse=True)
     if lengths[0] + args.output_tokens > args.context_length:
         parser.error(f"--context-length must cover the longest prompt and its output "
@@ -332,6 +395,22 @@ def main():
         parser.error(f"--kv-tokens must be at least {needed} for {widest} concurrent requests "
                      f"of {args.output_tokens} output tokens")
     runs = {lane: run_lane(args, lane, prompts) for lane in args.lanes}
+    if args.ax_draft_parity:
+        failed = False
+        # First check whether the batched target agrees with the serial target.
+        serial = [row["output_ids"] for row in runs["ar"][0]["rows"]]
+        for target, replay, ax_draft in zip(*(runs[lane] for lane in AX_DRAFT_PARITY_LANES), strict=True):
+            concurrency = target["concurrency"]
+            canonical = [row["output_ids"] for row in target["rows"]]
+            failed |= report_matches(f"ar C{concurrency} against ar C1",
+                                     (serial[i % len(serial)] for i in range(len(canonical))),
+                                     target["rows"]) != len(canonical)
+            for lane, result in (("replay8", replay), ("axdraft8", ax_draft)):
+                failed |= report_matches(f"{lane} C{concurrency} against ar C{concurrency}",
+                                         canonical, result["rows"]) != len(canonical)
+        if failed:
+            raise SystemExit("Greedy token sequences differ; see the saved passes for each lane")
+        return
     comparisons = (("stock8", "replay8"), ("stock16", "replay16"),
                    *(("replay8", lane) for lane in REPLAY_LANES if lane not in ("replay8", "replay16")))
     for control, candidate in comparisons:

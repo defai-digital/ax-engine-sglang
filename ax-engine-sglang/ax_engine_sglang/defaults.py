@@ -178,11 +178,21 @@ def _plan_gdn_chain_replay(result, args, environ, target, drafter, capability):
         raise LaunchConfigError(f"{feature} requires --speculative-algorithm DFLASH")
     # Width eight is the validated route. Width sixteen is experimental: the KV graph, direct
     # writer and plan reuse options check for eight themselves and leave a wider block to SGLang.
-    if (getattr(args, "speculative_num_draft_tokens", None) not in REPLAY_WIDTHS
-            or getattr(args, "speculative_eagle_topk", None) not in (None, 1)
-            or drafter_kind(drafter) != "dflash2"):
+    width = getattr(args, "speculative_num_draft_tokens", None)
+    if environ.get("AX_DRAFT_MODEL"):
+        path = getattr(args, "speculative_draft_model_path", None)
+        if (not path or Path(path).resolve() != Path(environ["AX_DRAFT_MODEL"]).resolve()
+                or width != 8 or (drafter or {}).get("model_type") != "ax_draft"
+                or (drafter or {}).get("version") != 1
+                or (drafter or {}).get("depth") != 7
+                or getattr(args, "enable_mixed_chunk", False)):
+            raise LaunchConfigError("AX_DRAFT_MODEL requires its own version 1 depth-seven model as "
+                                    "--speculative-draft-model-path, width 8 and standard prefill")
+    elif width not in REPLAY_WIDTHS or drafter_kind(drafter) != "dflash2":
         raise LaunchConfigError(f"{feature} requires a DFlash2 drafter with --speculative-num-draft-tokens 8 "
                                 "(or 16, experimental)")
+    if getattr(args, "speculative_eagle_topk", None) not in (None, 1):
+        raise LaunchConfigError(f"{feature} requires chain verification (top-k 1)")
     if (gdn_shape(target or {}) != (48, 48)
             or "Qwen3_5ForConditionalGeneration" not in (target or {}).get("architectures", ())):
         raise LaunchConfigError(f"{feature} requires the dense Qwen3.8-27B GDN target")

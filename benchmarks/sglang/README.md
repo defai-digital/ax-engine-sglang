@@ -58,6 +58,25 @@ The regression runner can compare a current checkout with an older checkout
 that still stores its validation scripts under `track_l/`.
 [Regression runner](../../scripts/check_model_regression.py)
 
+### AX Draft greedy parity
+
+```sh
+python benchmarks/sglang/bench_27b_nvfp4.py --ax-draft-parity --eager-decode \
+  --target "$target" --draft "$dflash2" --ax-draft "$ax_draft" \
+  --input-ids "$holdout_ids" --out "$out/eager" --slots 8 --concurrency 8 8 \
+  --repeat 4 --output-tokens 64 --kv-tokens 16384
+```
+
+Supply a JSON array of token-ID arrays. Each concurrent pass must contain
+whole batches. The harness sends one ordered batch at a time, compares
+target-only greedy at C8 with the serialized target, and compares each
+speculative path with target-only at the same batch size. It exits
+nonzero on any divergent token and saves the raw outputs. Rerun in a
+separate output directory without `--eager-decode` to isolate decode CUDA
+graphs, then add `--overlap` to measure overlap. This measures client
+wall time and batch latency. CUDA phase attribution requires a separate
+profiling run.
+
 `--verified-profile` requires `ar` when selecting lanes explicitly. A
 timed replay pass requires at least one optimized round and zero fallbacks
 at the requested live batch size. The results also record smaller batches.

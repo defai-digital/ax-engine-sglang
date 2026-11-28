@@ -43,6 +43,26 @@ That check is a startup record for the installed wheel, not a 0.5.1
 throughput result.
 [Smoke test and exact launch flags](https://github.com/defai-digital/ax-engine-sglang/blob/main/docs/README.md#installed-wheel-smoke-on-jetson-thor-v021)
 
+## Experimental AX Draft checkpoint
+
+SGLang 0.5.23 can run a seven-token AX Draft checkpoint with the same
+width-eight verifier and accepted-prefix GDN replay. In this mode the
+proposal model uses the target's last committed normalized hidden row. It
+loads AX Draft weights and keeps one feature row per request without a
+separate draft KV cache.
+
+```bash
+AX_DRAFT_MODEL="$draft_dir" AX_GDN_CHAIN_REPLAY=1 ax-engine-sglang serve "$target_dir" \
+  --speculative-algorithm DFLASH --speculative-draft-model-path "$draft_dir" \
+  --speculative-num-draft-tokens 8 --disable-radix-cache \
+  --max-running-requests 8 --cuda-graph-max-bs-decode 8
+```
+
+Use a version 1 AX Draft checkpoint with `model_type: ax_draft` and
+`depth: 7`. The `DFLASH` flag selects the native verifier and scheduler.
+The experimental route uses a single GPU, standard prefill and the
+dense Qwen 3.8 27B target.
+
 ## Experimental GDN replay for DFlash2 chains
 
 On SGLang 0.5.23, AX can keep the recurrent GDN verifier and replay just the

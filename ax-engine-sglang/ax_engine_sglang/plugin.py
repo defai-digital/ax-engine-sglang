@@ -65,6 +65,9 @@ def _install_fixes(config):
     if config.gdn_chain_replay:
         from . import ax_gdn_chain_replay
         ax_gdn_chain_replay.install()
+    if config.ax_draft_model:
+        from . import ax_draft
+        ax_draft.install(config.ax_draft_model)
     if config.dflash_kv_graph:
         from . import ax_dflash_kv_graph
         ax_dflash_kv_graph.install()

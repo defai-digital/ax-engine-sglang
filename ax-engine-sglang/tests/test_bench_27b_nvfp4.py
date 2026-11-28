@@ -115,8 +115,33 @@ class ArgumentTests(unittest.TestCase):
         with patch.object(bench, "PROMPT_SHA256", "0" * 64):
             self.assertIn("published parity-expanded-ids.json", self.run_main()[1])
 
+    def test_ax_draft_parity_runs_all_three_lanes_on_the_same_settings(self):
+        self.base[-1:] = list(bench.AX_DRAFT_PARITY_LANES)
+        with patch.object(bench, "PROMPT_SHA256", "0" * 64):
+            self.assertEqual(self.run_main("--ax-draft-parity", "--ax-draft", "ax", "--eager-decode")[0], 0)
+        for lane in bench.AX_DRAFT_PARITY_LANES:
+            command, _, _ = bench.launch_config(self.lanes[0], lane)
+            self.assertIn("--disable-overlap-schedule", command)
+            self.assertIn("--disable-cuda-graph", command)
+            self.assertEqual(command[command.index("--mamba-ssm-dtype") + 1], "float32")
+            self.assertEqual(command[command.index("--kv-cache-dtype") + 1], "fp8_e4m3")
+        code, message = self.run_main("--ax-draft-parity", "--ax-draft", "ax", "--slots", "8",
+                                      "--repeat", "1", "--kv-tokens", "8192")
+        self.assertEqual(code, 2)
+        self.assertIn("full fixed-size groups", message)
+
 
 class HotpathPassTests(unittest.TestCase):
+    def test_fixed_pass_submits_ordered_groups(self):
+        prompts = [[1], [2], [3], [4]]
+        def reply(_url, batch, _length):
+            return [{"output_ids": tokens, "meta_info": {"finish_reason": {"type": "length"}}}
+                    for tokens in batch], 0.1
+        with patch.object(bench, "request_generation", side_effect=reply) as send:
+            result = bench.run_fixed_pass("http://mock", prompts, 2, 1, False)
+        self.assertEqual([call.args[1] for call in send.call_args_list], [prompts[:2], prompts[2:]])
+        self.assertEqual([row["output_ids"] for row in result["rows"]], prompts)
+
     def test_parity_report_identifies_the_earliest_divergent_token(self):
         reference = [[1, 2], [3, 4], [5, 6]]
         rows = [{"output_ids": [1, 9]}, {"output_ids": [8, 4]}, {"output_ids": [5, 6]}]

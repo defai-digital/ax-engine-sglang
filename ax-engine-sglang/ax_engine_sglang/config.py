@@ -45,6 +45,7 @@ class PluginConfig:
     gdn_unpacked_decode: bool = False
     gdn_recurrent_verify: bool = False
     gdn_chain_replay: bool = False
+    ax_draft_model: str | None = None
     dflash_kv_graph: bool = False
     dflash_kv_direct: bool = False
     dflash_plan_reuse: bool = False
@@ -160,6 +161,7 @@ class PluginConfig:
             gdn_unpacked_decode=flag("AX_GDN_UNPACKED_DECODE"),
             gdn_recurrent_verify=flag("AX_GDN_RECURRENT_VERIFY"),
             gdn_chain_replay=flag("AX_GDN_CHAIN_REPLAY"),
+            ax_draft_model=env.get("AX_DRAFT_MODEL") or None,
             dflash_kv_graph=flag("AX_DFLASH_KV_GRAPH"),
             dflash_kv_direct=flag("AX_DFLASH_KV_DIRECT"),
             dflash_plan_reuse=flag("AX_DFLASH_PLAN_REUSE"),
@@ -259,6 +261,10 @@ class PluginConfig:
             raise ValueError("AX_DFLASH_PLAN_REUSE requires AX_GDN_CHAIN_REPLAY=1")
         if self.dflash_draft_vocab and not self.gdn_chain_replay:
             raise ValueError("AX_DFLASH_DRAFT_VOCAB requires AX_GDN_CHAIN_REPLAY=1")
+        if self.ax_draft_model and (not self.gdn_chain_replay or self.dflash_kv_graph
+                                    or self.dflash_kv_direct or self.dflash_plan_reuse
+                                    or self.dflash_draft_vocab):
+            raise ValueError("AX_DRAFT_MODEL requires standalone AX_GDN_CHAIN_REPLAY=1")
         if self.gdn_chain_replay and (self.tree_requested or self.gdn_recurrent_verify
                                       or self.nvfp4_verify_parity or self.gdn_unpacked_decode):
             raise ValueError("AX_GDN_CHAIN_REPLAY uses the stock width-eight DFLASH worker without AX tree or parity options")

@@ -36,6 +36,7 @@ SERVER_FLAGS = (
     ("--max-running-requests", "max_running_requests", int, None),
     ("--cuda-graph-max-bs-decode", "cuda_graph_max_bs_decode", int, None),
     ("--disable-radix-cache", "disable_radix_cache", None, False),
+    ("--enable-mixed-chunk", "enable_mixed_chunk", None, False),
     ("--disable-flashinfer-autotune", "disable_flashinfer_autotune", None, False),
     ("--disable-prefill-cuda-graph", "disable_prefill_cuda_graph", None, False),
     ("--chunked-prefill-size", "chunked_prefill_size", int, None),
