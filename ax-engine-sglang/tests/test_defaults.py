@@ -184,6 +184,30 @@ class StockRouteDefaultsTests(unittest.TestCase):
         result = plan(launch, {"AX_GDN_CHAIN_REPLAY": "1"}, QWEN38_27B, DFLASH2, capability=(12, 0))
         self.assertEqual(result.args["enable_linear_replayssm_spec"][0], True)
 
+    def test_dflash_at_eight_slots_admits_each_prefill(self):
+        why = "DFlash at 8 slots"
+        for route, environ in ((args("DFLASH", speculative_num_draft_tokens=8, max_running_requests=8), {}),
+                               (args(max_running_requests=8), {}),
+                               (args("DFLASH", speculative_num_draft_tokens=8, max_running_requests=8,
+                                     disable_radix_cache=True), {"AX_GDN_CHAIN_REPLAY": "1"})):
+            value, reason = plan(route, environ, QWEN38_27B, DFLASH2, capability=(9, 0)).args["min_free_slots_delay"]
+            self.assertEqual(value, 1)
+            self.assertIn(why, reason)
+        untouched = (
+            (args("DFLASH", max_running_requests=16), {}),
+            (args("DFLASH", max_running_requests=8, min_free_slots_delay=3), {}),
+            (args("EAGLE", max_running_requests=8), {}),
+            (args("DFLASH", max_running_requests=8), {"AX_AUTO_DEFAULTS": "0"}),
+            (args("DFLASH", max_running_requests=8), {"AX_NVFP4_VERIFY_PARITY": "1"}),
+        )
+        for route, environ in untouched:
+            with self.subTest(route=vars(route), environ=environ):
+                try:
+                    result = plan(route, environ, QWEN38_27B, DFLASH2, capability=(9, 0))
+                except LaunchConfigError:
+                    continue
+                self.assertNotIn("min_free_slots_delay", result.args)
+
     def test_b12x_down128_is_scoped_to_the_measured_replay_launch(self):
         launch = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True)
         environ = {"AX_GDN_CHAIN_REPLAY": "1", "AX_NVFP4_B12X_DOWN128": "1"}

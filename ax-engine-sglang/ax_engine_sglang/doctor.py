@@ -34,6 +34,7 @@ SERVER_FLAGS = (
     ("--speculative-eagle-topk", "speculative_eagle_topk", int, None),
     ("--speculative-adaptive", "speculative_adaptive", None, False),
     ("--max-running-requests", "max_running_requests", int, None),
+    ("--min-free-slots-delay", "min_free_slots_delay", int, None),
     ("--cuda-graph-max-bs-decode", "cuda_graph_max_bs_decode", int, None),
     ("--disable-radix-cache", "disable_radix_cache", None, False),
     ("--enable-mixed-chunk", "enable_mixed_chunk", None, False),

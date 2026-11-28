@@ -249,6 +249,23 @@ def _plan_nvfp4_humming(result: Plan, args, environ: Mapping[str, str], target: 
     result.args["fp4_gemm_runner_backend"] = ("marlin", feature)
 
 
+def _plan_dflash_admission(result: Plan, args, environ: Mapping[str, str]) -> None:
+    """Admit DFlash prefills one at a time at eight slots.
+
+    SGLang 0.5.23 holds new DFlash prefills until two of eight running slots are free
+    (resolve_min_free_slots: min(4, max(2, (8 + 5) // 6))). With eight clients a finished request
+    frees one slot, so the next one queued for another request to finish: the server ran seven
+    requests and the 27B chat TTFT tail reached 0.3-0.6 s against vLLM's 0.12-0.18 s. Admitting
+    each prefill raised the eight-client 27B NVFP4 replay8 throughput on B200 by 2-9% and, with
+    AX_NVFP4_HUMMING, put H200 ahead of vLLM on chat (results/h200_humming)."""
+    algorithm = (getattr(args, "speculative_algorithm", None) or "").upper()
+    if (algorithm not in ("DFLASH", TREE_ALGORITHM) or getattr(args, "max_running_requests", None) != 8
+            or getattr(args, "min_free_slots_delay", None) is not None or parity_requested(environ)):
+        return
+    result.args["min_free_slots_delay"] = (
+        1, "DFlash at 8 slots: SGLang otherwise holds each new prefill until 2 slots are free")
+
+
 def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapping | None,
          target_quant: Mapping | None = None, capability: tuple[int, int] | None = None) -> Plan:
     """Decide defaults for one launch. `args` is the raw (unresolved) ServerArgs."""
@@ -274,6 +291,8 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                             "this cost 16-45% of the 4- and 8-client throughput measured on B200 and RTX PRO "
                             "6000. Drop the flag unless the parity path needs it")
     _plan_nvfp4_humming(result, args, environ, target, target_quant, capability)
+    if environ.get("AX_AUTO_DEFAULTS", "1") != "0":
+        _plan_dflash_admission(result, args, environ)
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         _plan_b12x_down128(result, args, environ, target, target_quant, capability)
