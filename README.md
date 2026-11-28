@@ -259,24 +259,26 @@ over SGLang's CUTLASS choice.
 
 #### Qwen3.8-27B NVFP4
 
-On a 32 GB RTX 5090 the checkpoint used two slots and a pooled
-ten-prompt mix. Tree 32 reached 135.18 tok/s at one request (2.35× stock
-AR, 8.1% above stock DFlash2). At two requests the SGLang speculative
-routes finished within 0.6%. Stock vLLM DFlash2, run later on the same
-inputs, reached 168.5 and 279.6 tok/s. TensorRT-LLM DFlash2 ran out of
+The 128-token retest on one 32 GB RTX 5090 with two request slots, with
+stock vLLM on the same pod. SGLang used its default prefill CUDA graphs and
+FlashInfer cute-dsl FP4 GEMMs, the add-on's SM12x default. The 32-node tree
+led every workload at one and two requests. TensorRT-LLM DFlash2 ran out of
 memory creating the target and drafter on the 32 GB card.
 
-With FlashInfer cute-dsl NVFP4 GEMMs (now the add-on's default on SM12x)
-in place of SGLang's CUTLASS choice, a later 5090 pod ran tree 32
-at 333.3 / 281.0 / 177.9 tok/s at one request against 321.2 / 269.9 /
-169.7. That is 4–5% faster at one request and 8–10% at two. Stock DFlash2
-ran 9–14% faster. Greedy outputs matched on all 96 one-request requests
-of each route. These runs used 128-token outputs on the retest prompts.
-[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090)
+![RTX 5090 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and two requests.](docs/figures/rtx-5090-27b-nvfp4-prefill-graph.svg)
 
-![GeForce RTX 5090 Qwen3.8-27B NVFP4 output throughput. The AX tree leads at one request. Stock DFlash2 and the add-on finish within 0.6% at two requests.](docs/figures/rtx-5090-27b-nvfp4-throughput.svg)
+| Requests | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 328.6 / 268.9 / 162.6 | 291.5 / 253.1 / 179.6 | **422.5 / 343.6 / 205.7** | 339.5 / 277.4 / 168.2 |
+| 2 | 442.9 / 439.1 / 264.4 | 421.0 / 402.9 / 268.6 | **464.0 / 461.1 / 271.0** | 457.2 / 451.0 / **271.0** |
 
-[RTX 5090](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
+The tree led vLLM by 14.5–44.9% at one request and 0.9–14.4% at two.
+Eager prefills, as in the earlier 5090 rows, cost SGLang 9–27% at one
+request and 18–28% at two; the prefill graphs took 0.73 GB of the 32 GB
+card. cute-dsl GEMMs add 4–14% over SGLang's CUTLASS choice.
+[5090 prefill-graph report](results/rtx_5090_prefill_graph/REPORT.md) ·
+[FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090) ·
+[Earlier 5090 studies](docs/performance.md#geforce-rtx-5090-qwen38-27b-nvfp4)
 
 ### Jetson Thor
 

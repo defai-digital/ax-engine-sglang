@@ -104,6 +104,28 @@ def main():
     )
 
     bar_chart(
+        OUT / "rtx-5090-27b-nvfp4-prefill-graph.svg",
+        title="RTX 5090 · Qwen3.8-27B NVFP4 · one pod",
+        subtitle="128 greedy output tokens per request · 8 prompts at one request, 24 at two per workload · "
+                 "two servers per lane · cute-dsl FP4 GEMMs",
+        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
+                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        panels=[
+            {"title": "1 concurrent request", "categories": WORKLOADS,
+             "values": split("271.5 / 229.4 / 149.0", "328.6 / 268.9 / 162.6", "291.5 / 253.1 / 179.6",
+                             "422.5 / 343.6 / 205.7", "339.5 / 277.4 / 168.2")},
+            {"title": "2 concurrent requests", "categories": WORKLOADS,
+             "values": split("352.5 / 354.1 / 223.8", "442.9 / 439.1 / 264.4", "421.0 / 402.9 / 268.6",
+                             "464.0 / 461.1 / 271.0", "457.2 / 451.0 / 271.0")},
+        ],
+        xlabel="End-to-end output tokens per second · same scale in both panels",
+        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. The other SGLang lanes use "
+             "SGLang's default prefill CUDA graphs.",
+        description="On one RTX 5090, with prefill CUDA graphs the AX tree leads stock vLLM DFlash2 on every "
+                    "workload at one and two requests.",
+    )
+
+    bar_chart(
         OUT / "rtx-pro-6000-27b-nvfp4-prefill-graph.svg",
         title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · one pod",
         subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · "

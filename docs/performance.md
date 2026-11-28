@@ -493,7 +493,44 @@ two-request tree requests and 272/288 two-request stock requests. Both backends 
 pass-to-pass spread was at most 3.6% per cell.
 [FP4 backend report](../results/rtx_pro_6000_fp4_backend/REPORT.md#rtx-5090)
 
+### RTX 5090 prefill CUDA graphs
+
+The same pod shape (two slots, cute-dsl GEMMs) alternated eager and prefill-graph servers route by
+route, then ran stock vLLM DFlash2 (2 sequences, FP8 KV cache). Output tok/s, code / math / chat:
+
+| Route | Requests | Eager prefill | Prefill graphs | Stock vLLM DFlash2 |
+|---|---:|---:|---:|---:|
+| Stock DFlash2 width 8 | 1 | 271.5 / 229.4 / 149.0 | 328.6 / 268.9 / 162.6 | 291.5 / 253.1 / 179.6 |
+| Stock DFlash2 width 8 | 2 | 352.5 / 354.1 / 223.8 | 442.9 / 439.1 / 264.4 | 421.0 / 402.9 / 268.6 |
+| AX tree 32 | 1 | 333.7 / 280.4 / 177.1 | **422.5 / 343.6 / 205.7** | |
+| AX tree 32 | 2 | 376.3 / 361.5 / 229.7 | **464.0 / 461.1 / 271.0** | |
+| AX GDN replay 8 | 1 | 278.7 / 235.1 / 153.4 | 339.5 / 277.4 / 168.2 | |
+| AX GDN replay 8 | 2 | 358.0 / 357.7 / 229.6 | 457.2 / 451.0 / 271.0 | |
+
+Tokens per verify were unchanged; the prefill graphs took 0.73 GB. Greedy outputs matched across the
+modes on 51-54 of 72 one-request requests per route.
+[5090 prefill-graph report](../results/rtx_5090_prefill_graph/REPORT.md)
+
 ## H200 · Qwen3.8-27B
+
+### H200 prefill CUDA graphs
+
+A later H200 pod reran the NVFP4 (Marlin W4A16) routes with eager and prefill-graph servers
+alternating, then stock vLLM DFlash2 on the same pod. Output tok/s, code / math / chat:
+
+| Route | Clients | Eager prefill | Prefill graphs | Stock vLLM DFlash2 |
+|---|---:|---:|---:|---:|
+| Stock DFlash2 width 8 | 1 | 346.5 / 307.9 / 206.3 | 438.0 / 370.0 / 232.5 | 470.3 / 426.6 / **286.5** |
+| Stock DFlash2 width 8 | 8 | 1,081.8 / 884.4 / 628.3 | 1,382.1 / 1,283.0 / 805.2 | 1,382.8 / **1,338.0 / 989.4** |
+| AX tree 32 | 1 | 409.8 / 354.2 / 236.3 | **548.2 / 443.1** / 271.7 | |
+| AX tree 32 | 8 | 1,091.2 / 886.9 / 615.5 | 1,413.1 / 1,322.5 / 825.8 | |
+| AX GDN replay 8 | 1 | 325.0 / 289.5 / 193.5 | 412.3 / 349.5 / 218.7 | |
+| AX GDN replay 8 | 8 | 1,077.8 / 908.3 / 629.1 | **1,421.1** / 1,281.8 / 833.6 | |
+
+The tables below ran with eager prefills.
+[H200 prefill-graph report](../results/h200_prefill_graph/REPORT.md)
+
+### Cross-engine retest
 
 One H200 (SM90, 141 GB, driver 595.112.07) ran the 128-token serving
 retest: the first 8 (C1) and 24 (C8) prompts per workload, exactly 128
