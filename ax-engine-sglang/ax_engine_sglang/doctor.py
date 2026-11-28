@@ -168,6 +168,7 @@ def diagnose(options, environ: Mapping[str, str], *, load: Callable = read_json,
         ("AX_DFLASH_KV_DIRECT=1", bool(config and config.dflash_kv_direct)),
         ("AX_DFLASH_PLAN_REUSE=1", bool(config and config.dflash_plan_reuse)),
         ("AX_NVFP4_B12X_DOWN128=1", bool(config and config.nvfp4_b12x_down128)),
+        ("AX_NVFP4_HUMMING=1", bool(config and config.nvfp4_humming)),
         ("AX_POLICY_MODE=adaptive", bool(config and config.policy_mode == "adaptive")),
     ) if on]
     if errors:

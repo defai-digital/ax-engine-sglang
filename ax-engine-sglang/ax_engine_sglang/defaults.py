@@ -232,6 +232,23 @@ def _plan_b12x_down128(result: Plan, args, environ: Mapping[str, str], target: M
     result.args["fp4_gemm_runner_backend"] = (CUTEDSL, feature)
 
 
+def _plan_nvfp4_humming(result: Plan, args, environ: Mapping[str, str], target: Mapping | None,
+                        target_quant: Mapping | None, capability: tuple[int, int] | None) -> None:
+    feature = "AX_NVFP4_HUMMING"
+    if environ.get(feature) != "1":
+        return
+    if parity_requested(environ):
+        raise LaunchConfigError(f"ax-engine-sglang: {feature} is not measured with the parity or verified profiles")
+    if capability is None or capability[0] != 9:
+        raise LaunchConfigError(f"ax-engine-sglang: {feature} requires an SM90 GPU")
+    if not is_nvfp4(target or {}, target_quant):
+        raise LaunchConfigError(f"ax-engine-sglang: {feature} requires a ModelOpt NVFP4 target")
+    if getattr(args, "fp4_gemm_runner_backend", None) not in (None, "auto", "marlin"):
+        raise LaunchConfigError(f"ax-engine-sglang: {feature} replaces the Marlin FP4 backend: "
+                                "drop --fp4-gemm-backend or set it to marlin")
+    result.args["fp4_gemm_runner_backend"] = ("marlin", feature)
+
+
 def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapping | None,
          target_quant: Mapping | None = None, capability: tuple[int, int] | None = None) -> Plan:
     """Decide defaults for one launch. `args` is the raw (unresolved) ServerArgs."""
@@ -256,6 +273,7 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         result.notes.append("--disable-prefill-cuda-graph: prefills run eagerly and stall the decode batch; "
                             "this cost 16-45% of the 4- and 8-client throughput measured on B200 and RTX PRO "
                             "6000. Drop the flag unless the parity path needs it")
+    _plan_nvfp4_humming(result, args, environ, target, target_quant, capability)
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         _plan_b12x_down128(result, args, environ, target, target_quant, capability)
