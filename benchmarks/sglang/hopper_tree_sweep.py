@@ -113,6 +113,15 @@ def launch(model, lane, target):
         if flags.get("AX_GDN_CHAIN_REPLAY") == "1":   # replay refuses tree settings such as AX_SSM_POSITIONS
             extra.pop("AX_SSM_POSITIONS", None)
         flags = dict(flags, **extra)
+    # AX_SWEEP_SERVER_ARGS (JSON object) overrides server options: {"--chunked-prefill-size": "8192"} sets a
+    # value, {"--disable-flashinfer-autotune": null} drops a flag, {"--enable-x": ""} adds a bare flag.
+    for option, value in json.loads(os.environ.get("AX_SWEEP_SERVER_ARGS", "{}")).items():
+        if option in command:
+            index = command.index(option)
+            has_value = index + 1 < len(command) and not command[index + 1].startswith("--")
+            del command[index:index + (2 if has_value else 1)]
+        if value is not None:
+            command += [option] + ([value] if value != "" else [])
     index = command.index("--fp4-gemm-backend")
     del command[index:index + 2]
     if "nvfp4" in model:
