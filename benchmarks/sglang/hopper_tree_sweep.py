@@ -109,7 +109,10 @@ def launch(model, lane, target):
                      verified_profile=False)
     command, flags, algorithm = launch_config(args, lane.removeprefix("prof-"))
     if algorithm and os.environ.get("AX_SWEEP_FLAGS"):
-        flags = dict(flags, **json.loads(os.environ["AX_SWEEP_FLAGS"]))
+        extra = json.loads(os.environ["AX_SWEEP_FLAGS"])
+        if flags.get("AX_GDN_CHAIN_REPLAY") == "1":   # replay refuses tree settings such as AX_SSM_POSITIONS
+            extra.pop("AX_SSM_POSITIONS", None)
+        flags = dict(flags, **extra)
     index = command.index("--fp4-gemm-backend")
     del command[index:index + 2]
     if "nvfp4" in model:

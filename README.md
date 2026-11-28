@@ -192,25 +192,26 @@ both.
 
 #### Qwen3.8-27B NVFP4
 
-The same 128-token retest on one H200 (SM90, 141 GB). NVFP4 runs through
-Marlin W4A16, since Hopper has no FP4 tensor cores, and TensorRT-LLM NVFP4
-needs Blackwell. Stock vLLM served the same token IDs with the same DFlash2
-drafter. The SGLang lanes ran with eager prefills.
+The 128-token retest on one H200 (SM90, 141 GB), with stock vLLM on the
+same pod. NVFP4 runs through Marlin W4A16, since Hopper has no FP4 tensor
+cores, and TensorRT-LLM NVFP4 needs Blackwell. SGLang used its default
+prefill CUDA graphs. The tree led code at one client; at eight clients the
+AX routes were level with vLLM on code and math, and vLLM led chat.
 
-![H200 Qwen3.8-27B NVFP4 at one and eight clients: stock SGLang AR and DFlash2, stock vLLM DFlash2 and the AX tree/chain.](docs/figures/h200-27b-nvfp4-throughput.svg)
+![H200 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/h200-27b-nvfp4-throughput.svg)
 
-| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree/chain |
-|---:|---:|---:|---:|
-| 1 | 342.7 / 304.5 / 204.2 | **465.7 / 429.9 / 282.2** | 409.5 / 336.3 / 221.3 |
-| 8 | 1,063.8 / 873.5 / 609.4 | **1,357.3 / 1,382.4 / 971.8** | 1,071.7 / 913.2 / 619.9 |
+| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 438.0 / 370.0 / 232.5 | 470.3 / 426.6 / **286.5** | **548.2 / 443.1** / 271.7 | 412.3 / 349.5 / 218.7 |
+| 8 | 1,382.1 / 1,283.0 / 805.2 | 1,382.8 / **1,338.0 / 989.4** | 1,413.1 / 1,322.5 / 825.8 | **1,421.1** / 1,281.8 / 833.6 |
 
-Stock vLLM led every workload. The tree accepted more tokens per verify at
-one client (10.3–11.4 on code against vLLM's 6.5–7.1 across the H200
-precisions), so the gap is per-step cost, not draft quality: Marlin W4A16 alone is 44–50% of a verify round, and no
-faster bit-identical Marlin tile exists for these shapes. A second H200 pod
-with package 0.5.1 (`AX_TREE_TEMP=1.55`) ran tree 32 at 448.5 / 379.9 /
-248.8 tok/s at one client against 368.5 / 324.9 / 214.7 for stock DFlash2.
-[H200 report](results/cross_engine_2026-11-25/REPORT.md#h200-qwen38-27b-bf16-fp8-and-nvfp4) ·
+Eager prefills, as in the earlier H200 rows, cost SGLang 13–34% at one
+client and 28–49% at eight; every SGLang route then trailed vLLM by 13–38%.
+Tokens per verify did not change. The tree accepts more per verify than
+vLLM at one client (11.5 against 7.1 on code), so the remaining gap is
+per-step cost: Marlin W4A16 alone is 44–50% of a verify round, and no
+faster bit-identical Marlin tile exists for these shapes.
+[H200 prefill-graph report](results/h200_prefill_graph/REPORT.md) ·
 [H200 tree sweep](results/h200_tree_sweep/REPORT.md)
 
 ### RTX PRO 6000

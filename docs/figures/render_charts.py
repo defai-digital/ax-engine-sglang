@@ -282,19 +282,25 @@ def main():
                         "for BF16, FP8 and NVFP4.",
         )
 
-    # README: NVFP4 only (TensorRT-LLM has no SM90 NVFP4 path).
-    h200_nvfp4 = [row for row in h200 if row[2][2] is not None]
+    # README: NVFP4 only, the same-pod prefill-graph run (results/h200_prefill_graph).
     bar_chart(
         OUT / "h200-27b-nvfp4-throughput.svg",
-        title="H200 · Qwen3.8-27B NVFP4 · Marlin W4A16",
-        subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",
-        series=[(name, color) for name, color, *_ in h200_nvfp4],
-        panels=[{"title": clients, "categories": WORKLOADS, "values": split(*[row[col][2] for row in h200_nvfp4])}
-                for clients, col in (("1 concurrent client", 2), ("8 concurrent clients", 3))],
+        title="H200 · Qwen3.8-27B NVFP4 · Marlin W4A16 · one pod",
+        subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · two servers per lane",
+        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
+                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("346.5 / 307.9 / 206.3", "438.0 / 370.0 / 232.5", "470.3 / 426.6 / 286.5",
+                             "548.2 / 443.1 / 271.7", "412.3 / 349.5 / 218.7")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("1,081.8 / 884.4 / 628.3", "1,382.1 / 1,283.0 / 805.2", "1,382.8 / 1,338.0 / 989.4",
+                             "1,413.1 / 1,322.5 / 825.8", "1,421.1 / 1,281.8 / 833.6")},
+        ],
         xlabel="End-to-end output tokens per second · same scale in both panels",
-        note="TensorRT-LLM NVFP4 needs Blackwell. SGLang lanes ran with eager prefills.",
-        description="Stock SGLang AR and DFlash2, stock vLLM DFlash2 and the AX tree/chain on one H200 for NVFP4 "
-                    "at one and eight clients. Stock vLLM leads; the tree is second at one client.",
+        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. TensorRT-LLM NVFP4 needs Blackwell.",
+        description="On one H200, prefill CUDA graphs bring the AX routes level with stock vLLM DFlash2 on code and "
+                    "math at eight clients; the tree leads code at one client and vLLM leads chat.",
     )
 
     bar_chart(
