@@ -171,9 +171,23 @@ clients GDN replay came within 2–7% of vLLM.
 | 1 | 692.7 / 581.7 / 370.2 | 838.4 / 695.6 / 451.6 | **945.6 / 766.5 / 459.1** | 717.1 / 645.7 / 406.2 |
 | 8 | 2,271.3 / 1,976.9 / 1,329.0 | **2,660.1 / 2,851.6 / 1,819.6** | 2,634.3 / 2,551.6 / 1,538.8 | 2,613.2 / 2,656.8 / 1,707.0 |
 
-Against vLLM the tree ran +12.8 / +10.2 / +1.7% at one client and replay
-−1.8 / −6.8 / −6.2% at eight. FlashInfer prefill alone added 9–11% to
-replay at eight clients. Tokens per verify match vLLM, so the rest of the
+Against stock vLLM on the same pod (code / math / chat):
+
+| Clients | Stock SGLang DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | −17.4% / −16.4% / −18.0% | +12.8% / +10.2% / +1.7% | −14.5% / −7.2% / −10.1% |
+| 8 | −14.6% / −30.7% / −27.0% | −1.0% / −10.5% / −15.4% | −1.8% / −6.8% / −6.2% |
+
+Change from the previous run:
+
+| Clients | AX tree 32 | AX GDN replay |
+|---:|---:|---:|
+| 1 | +10.1% / +4.8% / +1.6% | −0.8% / +6.0% / +4.0% |
+| 8 | +8.5% / +23.0% / +14.7% | +8.1% / +17.2% / +16.5% |
+
+Previous run: the same pod and harness before the two defaults (admission, FlashInfer GDN prefill).
+
+FlashInfer prefill alone added 9–11% to replay at eight clients. Tokens per verify match vLLM, so the rest of the
 eight-client gap is per-round cost: the replay fold, the verify conv
 window writes, and RMSNorm + quantization that vLLM fuses.
 [Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#b200) ·
@@ -214,8 +228,23 @@ the tree led at one.
 | 1 | 485.4 / 407.4 / 259.9 | 486.3 / 431.5 / 282.8 | **587.0 / 483.6 / 294.2** | 463.2 / 396.0 / 252.0 |
 | 8 | 1,514.0 / 1,387.4 / 876.1 | 1,570.1 / 1,574.0 / 1,063.5 | **1,714.0 / 1,720.7** / 1,074.9 | 1,658.4 / 1,687.0 / **1,075.7** |
 
-Against vLLM the tree ran +20.7 / +12.1 / +4.0% at one client and
-+9.2 / +9.3 / +1.1% at eight; replay +5.6 / +7.2 / +1.1% at eight. With
+Against stock vLLM on the same pod (code / math / chat):
+
+| Clients | Stock SGLang DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | −0.2% / −5.6% / −8.1% | +20.7% / +12.1% / +4.0% | −4.8% / −8.2% / −10.9% |
+| 8 | −3.6% / −11.9% / −17.6% | +9.2% / +9.3% / +1.1% | +5.6% / +7.2% / +1.1% |
+
+Change from the previous run:
+
+| Clients | AX tree 32 | AX GDN replay |
+|---:|---:|---:|
+| 1 | −0.7% / +0.2% / −1.5% | +1.7% / +3.7% / +3.7% |
+| 8 | +12.4% / +21.3% / +17.3% | +7.9% / +19.1% / +18.1% |
+
+Previous run: the same pod and harness with Marlin and SGLang's admission rule.
+
+With
 Marlin both AX routes trailed vLLM by 10–14% on math and chat at eight
 clients. AX cells pool five servers, vLLM the faster two of three (the
 third ran 12–27% slower at eight clients; with it the tree leads by
@@ -254,9 +283,22 @@ workload at eight.
 | 1 | 318.4 / 258.6 / 168.8 | 294.1 / 283.4 / 179.5 | **431.4 / 363.4 / 209.5** | 329.4 / 267.1 / 174.9 |
 | 8 | 1,236.8 / 1,127.7 / 678.8 | 897.9 / 926.7 / 690.1 | 1,151.8 / 1,216.0 / 684.9 | **1,194.8 / 1,313.8 / 790.1** |
 
-Against vLLM the tree ran +46.7 / +28.2 / +16.8% at one client and replay
-+33.1 / +41.8 / +14.5% at eight. Eight-client code varied by up to 13%
-between servers of the same lane (replay 1,079–1,338 tok/s).
+Against stock vLLM on the same pod (code / math / chat):
+
+| Clients | Stock SGLang DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | +8.3% / −8.8% / −6.0% | +46.7% / +28.2% / +16.7% | +12.0% / −5.8% / −2.6% |
+| 8 | +37.7% / +21.7% / −1.6% | +28.3% / +31.2% / −0.8% | +33.1% / +41.8% / +14.5% |
+
+Change from the previous run:
+
+| Clients | AX tree 32 | AX GDN replay |
+|---:|---:|---:|
+| 1 | −0.4% / −0.0% / −0.3% | +0.5% / −0.1% / +0.2% |
+| 8 | −1.3% / +6.8% / +4.9% | −13.1% / +3.6% / +2.7% |
+
+Previous run: the same pod and harness with SGLang's admission rule. Eight-client code varied by up to 13% between servers of one lane (replay 1,079–1,338 tok/s).
+
 [Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#rtx-pro-6000) ·
 [Prefill-graph report](results/rtx_pro_6000_prefill_graph/REPORT.md) ·
 [FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md) ·
@@ -279,8 +321,14 @@ and drafter on the 32 GB card.
 | 1 | 294.9 / 237.2 / 155.1 | 245.3 / 213.6 / 173.1 | **389.4 / 318.0 / 186.4** | 317.0 / 259.4 / 160.3 |
 | 2 | 378.0 / 393.3 / 234.9 | 316.2 / 345.9 / 231.2 | **418.2 / 421.8** / 243.7 | 402.9 / 405.5 / **255.7** |
 
-Against vLLM the tree ran +58.8 / +48.9 / +7.7% at one request and
-+32.3 / +21.9 / +5.4% at two. vLLM's first-token median was 0.16–0.20 s
+Against stock vLLM on the same pod (code / math / chat):
+
+| Requests | Stock SGLang DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|
+| 1 | +20.2% / +11.0% / −10.4% | +58.7% / +48.9% / +7.7% | +29.2% / +21.4% / −7.4% |
+| 2 | +19.5% / +13.7% / +1.6% | +32.3% / +21.9% / +5.4% | +27.4% / +17.2% / +10.6% |
+
+vLLM's first-token median was 0.16–0.20 s
 against 0.07–0.10 s for SGLang.
 [Cross-engine rerun](results/cross_engine_2026-11-28/REPORT.md#rtx-5090) ·
 [5090 prefill-graph report](results/rtx_5090_prefill_graph/REPORT.md) ·

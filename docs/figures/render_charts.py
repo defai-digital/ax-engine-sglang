@@ -37,6 +37,16 @@ def split(*cells):
     return [[None] * 3 if cell is None else [float(x.replace(",", "")) for x in cell.split(" / ")] for cell in cells]
 
 
+def against(values, ref=1):
+    """Bar-label suffixes: each series' change against series `ref` (stock vLLM), none on `ref` itself."""
+    return [[None if s == ref or v is None else percent((v / values[ref][c] - 1) * 100, 1)
+             for c, v in enumerate(row)] for s, row in enumerate(values)]
+
+
+def vs_vllm(panel):
+    return {**panel, "suffix": against(panel["values"])}
+
+
 def main():
     bar_chart(
         OUT / "b300-flash-next-bf16-throughput.svg",
@@ -111,14 +121,15 @@ def main():
         series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
                 ("AX GDN replay", AX_DARK)],
         panels=[
-            {"title": "1 concurrent request", "categories": WORKLOADS,
+            vs_vllm({"title": "1 concurrent request", "categories": WORKLOADS,
              "values": split("294.9 / 237.2 / 155.1", "245.3 / 213.6 / 173.1", "389.4 / 318.0 / 186.4",
-                             "317.0 / 259.4 / 160.3")},
-            {"title": "2 concurrent requests", "categories": WORKLOADS,
+                             "317.0 / 259.4 / 160.3")}),
+            vs_vllm({"title": "2 concurrent requests", "categories": WORKLOADS,
              "values": split("378.0 / 393.3 / 234.9", "316.2 / 345.9 / 231.2", "418.2 / 421.8 / 243.7",
-                             "402.9 / 405.5 / 255.7")},
+                             "402.9 / 405.5 / 255.7")}),
         ],
-        xlabel="End-to-end output tokens per second · same scale in both panels",
+        xlabel="End-to-end output tokens per second · labels: change against stock vLLM · same scale in both panels",
+        headroom=0.34,
         note="SGLang lanes use prefill CUDA graphs. First sweep of every server dropped (both engines).",
         description="On one RTX 5090 the AX tree leads stock vLLM DFlash2 on every workload at one and two "
                     "requests (+59/+49/+8% and +32/+22/+5%).",
@@ -132,14 +143,15 @@ def main():
         series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
                 ("AX GDN replay", AX_DARK)],
         panels=[
-            {"title": "1 concurrent client", "categories": WORKLOADS,
+            vs_vllm({"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("318.4 / 258.6 / 168.8", "294.1 / 283.4 / 179.5", "431.4 / 363.4 / 209.5",
-                             "329.4 / 267.1 / 174.9")},
-            {"title": "8 concurrent clients", "categories": WORKLOADS,
+                             "329.4 / 267.1 / 174.9")}),
+            vs_vllm({"title": "8 concurrent clients", "categories": WORKLOADS,
              "values": split("1,236.8 / 1,127.7 / 678.8", "897.9 / 926.7 / 690.1", "1,151.8 / 1,216.0 / 684.9",
-                             "1,194.8 / 1,313.8 / 790.1")},
+                             "1,194.8 / 1,313.8 / 790.1")}),
         ],
-        xlabel="End-to-end output tokens per second · same scale in both panels",
+        xlabel="End-to-end output tokens per second · labels: change against stock vLLM · same scale in both panels",
+        headroom=0.34,
         note="AX lanes admit one DFlash prefill at a time (launch default at 8 slots). First sweep of every "
              "server dropped (both engines).",
         description="On one RTX PRO 6000 the AX tree leads stock vLLM DFlash2 on every workload at one client "
@@ -154,14 +166,15 @@ def main():
         series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
                 ("AX GDN replay", AX_DARK)],
         panels=[
-            {"title": "1 concurrent client", "categories": WORKLOADS,
+            vs_vllm({"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("692.7 / 581.7 / 370.2", "838.4 / 695.6 / 451.6", "945.6 / 766.5 / 459.1",
-                             "717.1 / 645.7 / 406.2")},
-            {"title": "8 concurrent clients", "categories": WORKLOADS,
+                             "717.1 / 645.7 / 406.2")}),
+            vs_vllm({"title": "8 concurrent clients", "categories": WORKLOADS,
              "values": split("2,271.3 / 1,976.9 / 1,329.0", "2,660.1 / 2,851.6 / 1,819.6",
-                             "2,634.3 / 2,551.6 / 1,538.8", "2,613.2 / 2,656.8 / 1,707.0")},
+                             "2,634.3 / 2,551.6 / 1,538.8", "2,613.2 / 2,656.8 / 1,707.0")}),
         ],
-        xlabel="End-to-end output tokens per second",
+        xlabel="End-to-end output tokens per second · labels: change against stock vLLM",
+        headroom=0.34,
         note="AX lanes: launch defaults (one DFlash prefill admitted at a time, FlashInfer GDN prefill). "
              "First sweep of every server dropped (both engines).",
         share_scale=False,
@@ -335,14 +348,15 @@ def main():
         series=[("Stock SGLang DFlash2 (Marlin)", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
                 ("AX GDN replay", AX_DARK)],
         panels=[
-            {"title": "1 concurrent client", "categories": WORKLOADS,
+            vs_vllm({"title": "1 concurrent client", "categories": WORKLOADS,
              "values": split("485.4 / 407.4 / 259.9", "486.3 / 431.5 / 282.8", "587.0 / 483.6 / 294.2",
-                             "463.2 / 396.0 / 252.0")},
-            {"title": "8 concurrent clients", "categories": WORKLOADS,
+                             "463.2 / 396.0 / 252.0")}),
+            vs_vllm({"title": "8 concurrent clients", "categories": WORKLOADS,
              "values": split("1,514.0 / 1,387.4 / 876.1", "1,570.1 / 1,574.0 / 1,063.5",
-                             "1,714.0 / 1,720.7 / 1,074.9", "1,658.4 / 1,687.0 / 1,075.7")},
+                             "1,714.0 / 1,720.7 / 1,074.9", "1,658.4 / 1,687.0 / 1,075.7")}),
         ],
-        xlabel="End-to-end output tokens per second · same scale in both panels",
+        xlabel="End-to-end output tokens per second · labels: change against stock vLLM · same scale in both panels",
+        headroom=0.34,
         note="AX lanes run the NVFP4 linears on Humming and admit one DFlash prefill at a time (launch defaults). "
              "TensorRT-LLM NVFP4 needs Blackwell.",
         description="On one H200 both AX routes lead stock vLLM DFlash2 on every workload at eight clients, and "

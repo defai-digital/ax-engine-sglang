@@ -43,12 +43,12 @@ def percent(value, digits=2):
 
 
 def bar_chart(path, *, title, subtitle, series, panels, xlabel, note=None, description=None,
-              fmt=number, share_scale=True, xmax=None, legend_columns=4, tick_suffix=""):
+              fmt=number, share_scale=True, xmax=None, legend_columns=4, tick_suffix="", headroom=0.16):
     """series: [(label, color)]; panels: [{"title", "categories", "values": [[per series]], "suffix"}].
 
     values[s][c] is the value of series s in category c, or None when the route did not run;
     "missing" gives the text shown for a None bar, "suffix" an optional text appended to each label
-    (same shape as values).
+    (same shape as values). headroom: room past the longest bar, as a fraction of the axis span.
     """
     n_series = len(series)
     n_cat = max(len(p["categories"]) for p in panels)
@@ -90,7 +90,7 @@ def bar_chart(path, *, title, subtitle, series, panels, xlabel, note=None, descr
         p_lo = lo if share_scale else min(0.0, min(pv))
         p_hi = hi if share_scale else max(pv)
         p_span = (p_hi - p_lo) or 1.0
-        ax.set_xlim(p_lo - (0.12 * p_span if p_lo < 0 else 0), p_hi + 0.16 * p_span)
+        ax.set_xlim(p_lo - (0.12 * p_span if p_lo < 0 else 0), p_hi + headroom * p_span)
         ax.set_ylim(plot_h, 0)
         cats = p["categories"]
         for c, cat in enumerate(cats):
