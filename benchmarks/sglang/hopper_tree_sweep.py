@@ -9,7 +9,8 @@ stage.log with a "ready <model>" line per staged model; results go to <work dir>
 
 Lanes come from benchmarks/sglang/bench_27b_nvfp4.py (stock8, tree16 / tree32 / tree64, chain8,
 replay8). A `prof-<lane>` lane launches <lane>, warms it up, and records a torch-profiler trace of C1 code
-requests (compare two with benchmarks/sglang/trace_kernels.py); it reports no throughput.
+requests (compare two with benchmarks/sglang/trace_kernels.py); it reports no throughput. AX_SWEEP_PROFILE
+("<clients>:<workload>", default "1:code") profiles that many concurrent requests of that workload instead.
 AX_SWEEP_FP4_BACKEND picks the NVFP4 GEMM backend (default marlin; on Blackwell e.g. flashinfer_cutlass or
 flashinfer_cutedsl). NVFP4 has no SM90 tensor-core path, so on Hopper NVFP4 targets use SGLang's Marlin W4A16 fallback, which needs
 SGLANG_DISABLE_SILU_FP4_QUANT_FUSION=1 (SGLang 0.5.23 otherwise hands Marlin an (fp4, scale) tuple)."""
@@ -140,12 +141,17 @@ def post(path, body=None):
 
 
 def profile(out, ids, speculative):
-    """Torch-profiler trace of PROFILE_REQUESTS C1 code requests, stopped explicitly afterwards (a
+    """Torch-profiler trace of PROFILE_REQUESTS C1 code requests (or AX_SWEEP_PROFILE), stopped explicitly afterwards (a
     step count would outlast short speculative requests and never flush the trace)."""
     trace = out / "torch_profile"
     trace.mkdir(exist_ok=True)
+    clients, _, family = os.environ.get("AX_SWEEP_PROFILE", "1:code").partition(":")
+    clients = int(clients)
     post("/start_profile", {"output_dir": str(trace), "activities": ["CPU", "GPU"]})
-    rows = [run_pass(ids["code"][i:i + 1], 1, LENGTH, speculative) for i in range(PROFILE_REQUESTS)]
+    if clients == 1:
+        rows = [run_pass(ids[family][i:i + 1], 1, LENGTH, speculative) for i in range(PROFILE_REQUESTS)]
+    else:
+        rows = [run_pass(ids[family][:clients], clients, LENGTH, speculative)]
     post("/stop_profile")
     deadline = time.monotonic() + 300
     while not list(trace.rglob("*.json.gz")) + list(trace.rglob("*.trace.json")):
