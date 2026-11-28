@@ -43,6 +43,8 @@ FAMILIES = ("chat", "code", "math")
 LENGTH = 128
 # Smaller GPUs: AX_SWEEP_SLOTS / AX_SWEEP_KV_TOKENS / AX_SWEEP_MEM set the server shape, AX_SWEEP_CONCURRENCY
 # the two client counts ("1,2" on a 32 GB RTX 5090), AX_SWEEP_FLAGS (JSON) extra lane environment.
+# Prefill CUDA graphs stay on; AX_BENCH_EAGER_PREFILL=1 adds --disable-prefill-cuda-graph, as the reports
+# before results/rtx_pro_6000_prefill_graph ran.
 SLOTS = int(os.environ.get("AX_SWEEP_SLOTS", "8"))
 LOW, HIGH = (int(c) for c in os.environ.get("AX_SWEEP_CONCURRENCY", "1,8").split(","))
 PROMPTS = {str(LOW): 8, str(HIGH): 24}

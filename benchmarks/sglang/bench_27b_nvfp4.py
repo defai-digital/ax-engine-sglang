@@ -73,9 +73,13 @@ def launch_config(args, lane):
         "--cuda-graph-max-bs-decode", str(args.slots), "--context-length", str(args.context_length),
         "--max-total-tokens", str(args.kv_tokens), "--mem-fraction-static", str(args.mem_fraction_static),
         "--chunked-prefill-size", prefill_size, "--skip-server-warmup",
-        "--disable-radix-cache", "--disable-flashinfer-autotune", "--disable-prefill-cuda-graph",
-        "--random-seed", "42",
+        "--disable-radix-cache", "--disable-flashinfer-autotune", "--random-seed", "42",
     ]
+    # The parity lanes were matched with eager prefills. Speed lanes keep SGLang's prefill CUDA graphs:
+    # eager prefills cost the 27B routes 7-16% at one client and 16-34% at eight on an RTX PRO 6000
+    # (results/rtx_pro_6000_prefill_graph); reports before it ran with the flag.
+    if args.verify_parity or os.environ.get("AX_BENCH_EAGER_PREFILL") == "1":
+        command.append("--disable-prefill-cuda-graph")
     flags = {"SGLANG_PLUGINS": "none", "SGLANG_FLASHINFER_WORKSPACE_SIZE": str(64 * 1024 * 1024)}
     if args.verify_parity:
         flags.update(SGLANG_PLUGINS="ax-engine", AX_NVFP4_VERIFY_PARITY="1", AX_NVFP4_PARITY_ROWS="0")

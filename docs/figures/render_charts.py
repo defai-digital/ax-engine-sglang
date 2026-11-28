@@ -104,6 +104,28 @@ def main():
     )
 
     bar_chart(
+        OUT / "rtx-pro-6000-27b-nvfp4-prefill-graph.svg",
+        title="RTX PRO 6000 · Qwen3.8-27B NVFP4 · one pod",
+        subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · "
+                 "two servers per lane · cute-dsl FP4 GEMMs",
+        series=[("Stock SGLang DFlash2, eager prefill", SGLANG_LIGHT), ("Stock SGLang DFlash2", SGLANG),
+                ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX), ("AX GDN replay", AX_DARK)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("299.8 / 248.5 / 165.6", "337.5 / 273.6 / 177.9", "317.2 / 292.0 / 182.9",
+                             "464.8 / 389.5 / 222.0", "349.9 / 284.6 / 184.8")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("1,080.9 / 977.7 / 624.4", "1,310.4 / 1,226.2 / 725.7", "1,144.9 / 1,157.5 / 775.5",
+                             "1,349.4 / 1,281.5 / 714.5", "1,464.4 / 1,389.7 / 835.2")},
+        ],
+        xlabel="End-to-end output tokens per second · same scale in both panels",
+        note="Eager prefill: the earlier launch with --disable-prefill-cuda-graph. The other SGLang lanes use "
+             "SGLang's default prefill CUDA graphs.",
+        description="On one pod, prefill CUDA graphs put stock SGLang DFlash2 and both AX routes ahead of stock "
+                    "vLLM DFlash2 on code and math at eight clients; the AX tree leads every workload at one client.",
+    )
+
+    bar_chart(
         OUT / "b200-27b-nvfp4-serving-retest.svg",
         title="B200 · Qwen3.8-27B NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",

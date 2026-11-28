@@ -356,6 +356,30 @@ outputs matched across the backends on 24/24 one-client requests per route. The 
 cute-dsl for dense NVFP4 targets on SM12x unless the backend is set or parity is requested.
 [FP4 backend report](../results/rtx_pro_6000_fp4_backend/REPORT.md)
 
+### RTX PRO 6000 prefill CUDA graphs
+
+The SGLang lanes above (and the 27B lanes on other GPUs) ran with `--disable-prefill-cuda-graph`. A
+later RTX PRO 6000 Workstation Edition pod alternated eager and prefill-graph servers route by route,
+two servers per lane, with cute-dsl GEMMs, then ran stock vLLM DFlash2 (7 speculative tokens) on the
+same workload. Cells pool every sweep except the first sweep of each lane's first server, where kernels
+compile:
+
+| Route | Clients | Eager prefill | Prefill graphs | Stock vLLM DFlash2 |
+|---|---:|---:|---:|---:|
+| Stock DFlash2 width 8 | 1 | 299.8 / 248.5 / 165.6 | 337.5 / 273.6 / 177.9 | 317.2 / 292.0 / 182.9 |
+| Stock DFlash2 width 8 | 8 | 1,080.9 / 977.7 / 624.4 | 1,310.4 / 1,226.2 / 725.7 | 1,144.9 / 1,157.5 / 775.5 |
+| AX tree 32 | 1 | 401.2 / 340.1 / 204.8 | **464.8 / 389.5 / 222.0** | |
+| AX tree 32 | 8 | 1,097.4 / 980.7 / 602.7 | 1,349.4 / 1,281.5 / 714.5 | |
+| AX GDN replay 8 | 1 | 311.8 / 257.3 / 172.3 | 349.9 / 284.6 / 184.8 | |
+| AX GDN replay 8 | 8 | 1,130.4 / 1,038.0 / 699.7 | **1,464.4 / 1,389.7 / 835.2** | |
+
+Tokens per verify were unchanged and first-token time halved (0.084-0.088 → 0.038-0.041 s at one
+client, 0.165-0.170 → 0.071-0.079 s at eight). With eager prefill every SGLang route trailed vLLM on
+math and chat at eight clients; with prefill graphs replay led all three workloads there. Greedy outputs
+matched across the modes on 72/72 one-client requests of stock and replay and 69/72 of the tree. The
+27B harnesses now keep prefill graphs for speed lanes.
+[Prefill-graph report](../results/rtx_pro_6000_prefill_graph/REPORT.md)
+
 ## GeForce RTX 5090 · Qwen3.8-27B NVFP4
 
 Stock AR, stock DFlash2 and AX Engine ran on one 32 GB RTX 5090 with
@@ -691,8 +715,9 @@ First-token time at one and four clients fell from 0.20-0.33 s to 0.08-0.11 s. E
 the running decode batch, so eager prefills cost most at four and sixteen clients. AX MTP7's pooled
 C16 code cell includes a first pass that compiled kernels (1,362.5 tok/s); its other passes ran at
 2,040.7-2,507.5. This pod was slower than the first for both engines, and pass-to-pass spread reached
-25-45% in some cells. The launcher now notes the cost when a speculative Qwen4-Exp launch passes
-`--disable-prefill-cuda-graph`.
+25-45% in some cells. The launcher now notes the cost when a speculative launch outside the parity
+path passes `--disable-prefill-cuda-graph`; the 27B routes on an RTX PRO 6000 lost 16-34% at eight
+clients to it ([27B prefill graphs](#rtx-pro-6000-prefill-cuda-graphs)).
 [Prefill-graph report](../results/b200x2_flash_next_prefill_graph/REPORT.md)
 
 An earlier two-B300 TP2 run used package 0.2.0, the same prompt file, and

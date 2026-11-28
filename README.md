@@ -309,6 +309,19 @@ The plugin now selects cute-dsl for dense NVFP4 targets on SM12x unless the
 backend is set explicitly or parity is requested.
 [FP4 backend report](results/rtx_pro_6000_fp4_backend/REPORT.md)
 
+The SGLang rows above ran with `--disable-prefill-cuda-graph`, which the
+27B harness passed. On a later RTX PRO 6000 (Workstation Edition, cute-dsl
+GEMMs), SGLang's default prefill CUDA graphs raised every route by 7–16% at
+one client and 16–34% at eight, with unchanged tokens per verify. Stock vLLM
+DFlash2 ran on the same pod. With prefill graphs, AX GDN replay led it on
+every workload at eight clients (1,464.4 / 1,389.7 / 835.2 against 1,144.9 /
+1,157.5 / 775.5 tok/s), and the tree led every workload at one client
+(464.8 / 389.5 / 222.0 against 317.2 / 292.0 / 182.9).
+
+![RTX PRO 6000 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2 with eager prefill, stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/rtx-pro-6000-27b-nvfp4-prefill-graph.svg)
+
+[Prefill-graph report](results/rtx_pro_6000_prefill_graph/REPORT.md)
+
 ### RTX 5090
 
 #### Qwen3.8-27B NVFP4

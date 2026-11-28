@@ -220,6 +220,15 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
                                 "(AX_AUTO_DEFAULTS=0 skips the qualification check)")
     if environ.get("AX_QUALITY_PROFILE") == "fast":
         result.notes.append("fast profile: this launch makes no exact-output claim")
+    if (getattr(args, "speculative_algorithm", None) and getattr(args, "disable_prefill_cuda_graph", False)
+            and not parity_requested(environ)):
+        # Eager prefills take 2-3x as long and each one stalls the running decode batch: on two B200s
+        # (Flash Next TP2, MTP3 and MTP7) they cost 26-45% at four clients, on an RTX PRO 6000 (27B NVFP4
+        # stock, tree and replay) 7-16% at one client and 16-34% at eight
+        # (results/b200x2_flash_next_prefill_graph, results/rtx_pro_6000_prefill_graph).
+        result.notes.append("--disable-prefill-cuda-graph: prefills run eagerly and stall the decode batch; "
+                            "this cost 16-45% of the 4- and 8-client throughput measured on B200 and RTX PRO "
+                            "6000. Drop the flag unless the parity path needs it")
     if environ.get("AX_GDN_CHAIN_REPLAY") == "1":
         _plan_gdn_chain_replay(result, args, environ, target, drafter, capability)
         return result
@@ -257,12 +266,6 @@ def plan(args, environ: Mapping[str, str], target: Mapping | None, drafter: Mapp
         # verify window crosses a 4-token group (MTP 1-3 included) and refuses windows above 4.
         result.default_env(environ, "AX_QSA_RING", QSA_RING,
                            "Qwen4-Exp QSA with speculative decoding: fixes the 4-slot pending ring")
-        if getattr(args, "disable_prefill_cuda_graph", False) and not verified:
-            # Measured on two B200s (TP2, BF16, MTP3 and MTP7): eager prefills took 2-3x as long, and each
-            # one stalls the running decode batch (results/b200x2_flash_next_prefill_graph).
-            result.notes.append("--disable-prefill-cuda-graph: Qwen4-Exp prefills run eagerly and stall the "
-                                "decode batch; on two B200s this cost 26-45% of the 4-client throughput. "
-                                "Drop the flag unless the verified profile needs it")
 
     parity = parity_requested(environ)
     if parity:

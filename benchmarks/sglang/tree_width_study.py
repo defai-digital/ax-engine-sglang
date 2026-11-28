@@ -181,7 +181,8 @@ def main():
     parser.add_argument("--mem-fraction", type=float, help="static memory fraction (default 0.82, AR and replay 0.90)")
     parser.add_argument("--shape-env", nargs="*", default=[], metavar="KEY=VALUE",
                         help="lanes: tree-shape settings of the lanes whose name ends in s (e.g. tree16s)")
-    parser.add_argument("--server-args", default="--disable-radix-cache --disable-prefill-cuda-graph "
+    # Before results/rtx_pro_6000_prefill_graph the default also passed --disable-prefill-cuda-graph.
+    parser.add_argument("--server-args", default="--disable-radix-cache "
                         "--attention-backend flashinfer --fp4-gemm-backend flashinfer_cutlass")
     args = parser.parse_args()
     try:

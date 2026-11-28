@@ -252,14 +252,21 @@ class StockRouteDefaultsTests(unittest.TestCase):
                                                     FLASH_NEXT, None)))
         self.assertNotIn("AX_QSA_RING", env_of(plan(args(None), {}, FLASH_NEXT, None)))
 
-    def test_eager_prefill_on_flash_next_speculation_is_flagged(self):
-        def notes(launch, environ=None, target=FLASH_NEXT):
-            return [n for n in plan(launch, environ or {}, target, None).notes if "prefill-cuda-graph" in n]
+    def test_eager_prefill_on_speculation_is_flagged(self):
+        def notes(launch, environ=None, target=FLASH_NEXT, drafter=None):
+            return [n for n in plan(launch, environ or {}, target, drafter, capability=(12, 0)).notes
+                    if "prefill-cuda-graph" in n]
         mtp = dict(speculative_num_draft_tokens=None)
-        self.assertEqual(len(notes(args("EAGLE", disable_prefill_cuda_graph=True, **mtp))), 1)
+        eager = dict(disable_prefill_cuda_graph=True)
+        self.assertEqual(len(notes(args("EAGLE", **eager, **mtp))), 1)
         self.assertEqual(notes(args("EAGLE", **mtp)), [])
-        self.assertEqual(notes(args(None, disable_prefill_cuda_graph=True)), [])          # no speculation
-        self.assertEqual(notes(args("EAGLE", disable_prefill_cuda_graph=True, **mtp), target=QWEN38_27B), [])
+        self.assertEqual(notes(args(None, **eager)), [])                                    # no speculation
+        self.assertEqual(len(notes(args("DFLASH", **eager), target=QWEN38_27B_NVFP4, drafter=DFLASH2)), 1)
+        replay = args("DFLASH", speculative_num_draft_tokens=8, disable_radix_cache=True, **eager)
+        self.assertEqual(len(notes(replay, {"AX_GDN_CHAIN_REPLAY": "1"},   # replay returns before the other defaults
+                                   target=QWEN38_27B_NVFP4, drafter=DFLASH2)), 1)
+        self.assertEqual(notes(args(**eager), {"AX_NVFP4_VERIFY_PARITY": "1"},              # parity path needs it
+                               target=QWEN38_27B_NVFP4, drafter=DFLASH2), [])
 
     def test_nvfp4_moe_uses_cutlass_on_sm110_and_sm120_only(self):
         for capability in ((11, 0), (12, 0)):
