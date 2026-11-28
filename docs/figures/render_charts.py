@@ -148,6 +148,29 @@ def main():
     )
 
     bar_chart(
+        OUT / "b200-27b-nvfp4-prefill-graph.svg",
+        title="B200 · Qwen3.8-27B NVFP4 · one pod",
+        subtitle="128 greedy output tokens per request · 8 prompts at C1, 24 at C8 per workload · "
+                 "two servers per lane · cute-dsl FP4 GEMMs",
+        series=[("Stock SGLang DFlash2", SGLANG), ("Stock vLLM DFlash2", VLLM), ("AX tree 32", AX),
+                ("AX GDN replay", AX_DARK)],
+        panels=[
+            {"title": "1 concurrent client", "categories": WORKLOADS,
+             "values": split("490.3 / 428.3 / 286.6", "750.8 / 627.5 / 417.3", "654.7 / 565.2 / 360.7",
+                             "500.5 / 440.2 / 295.7")},
+            {"title": "8 concurrent clients", "categories": WORKLOADS,
+             "values": split("1,534.7 / 1,510.2 / 1,012.7", "2,034.3 / 2,179.9 / 1,531.6",
+                             "1,617.4 / 1,507.3 / 1,033.7", "1,591.8 / 1,522.0 / 1,016.5")},
+        ],
+        xlabel="End-to-end output tokens per second",
+        note="SGLang lanes use SGLang's default prefill CUDA graphs. cute-dsl is not the SM100 default; "
+             "CUTLASS with prefill graphs was not measured.",
+        share_scale=False,
+        description="On one B200, stock vLLM DFlash2 leads stock SGLang DFlash2 and both AX routes at one and "
+                    "eight clients.",
+    )
+
+    bar_chart(
         OUT / "b200-27b-nvfp4-serving-retest.svg",
         title="B200 · Qwen3.8-27B NVFP4",
         subtitle="128 greedy output tokens per request · two passes per route · 8 prompts at C1, 24 at C8 per workload",

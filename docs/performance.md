@@ -27,6 +27,25 @@ that produced that gate.
 
 ## B200 · Qwen3.8-27B
 
+### B200 prefill CUDA graphs
+
+A later B200 pod ran the routes with prefill CUDA graphs and cute-dsl FP4 GEMMs, then stock vLLM
+DFlash2 on the same pod. Output tok/s, code / math / chat:
+
+| Route | Clients | Prefill graphs | Stock vLLM DFlash2 |
+|---|---:|---:|---:|
+| Stock DFlash2 width 8 | 1 | 490.3 / 428.3 / 286.6 | **750.8 / 627.5 / 417.3** |
+| Stock DFlash2 width 8 | 8 | 1,534.7 / 1,510.2 / 1,012.7 | **2,034.3 / 2,179.9 / 1,531.6** |
+| AX tree 32 | 1 | 654.7 / 565.2 / 360.7 | |
+| AX tree 32 | 8 | 1,617.4 / 1,507.3 / 1,033.7 | |
+| AX GDN replay 8 | 1 | 500.5 / 440.2 / 295.7 | |
+| AX GDN replay 8 | 8 | 1,591.8 / 1,522.0 / 1,016.5 | |
+
+The eager-prefill lanes of that run spread up to 48% between passes with cute-dsl and are not used as a
+baseline. CUTLASS with prefill graphs has not been measured on SM100. The tables below ran with eager
+prefills and CUTLASS.
+[B200 prefill-graph report](../results/b200_prefill_graph/REPORT.md)
+
 ### Serving retest
 
 Each route ran two streamed passes with the same inputs and exactly 128

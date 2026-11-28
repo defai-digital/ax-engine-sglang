@@ -157,20 +157,25 @@ Chat stayed with a three-step MTP window.
 
 #### Qwen3.8-27B NVFP4
 
-The add-on used a 32-node tree at one client and a width-eight chain when
-requests were grouped. GDN replay is the experimental accepted-prefix path
-on that chain. These are speed-profile runs with package 0.5.1.
+The 128-token retest on one B200 with stock vLLM on the same pod. SGLang used
+its default prefill CUDA graphs and FlashInfer cute-dsl FP4 GEMMs. Stock vLLM
+DFlash2 led every workload: the AX tree trailed it by 10–14% at one client
+and 21–33% at eight. vLLM verified about as many tokens per round as stock
+SGLang, and the tree more at one client, so the gap is per-step cost.
 
-![B200 Qwen3.8-27B NVFP4 serving retest at one and eight clients, with stock AR, stock DFlash2, AX tree/chain, and AX GDN replay.](docs/figures/b200-27b-nvfp4-serving-retest.svg)
+![B200 Qwen3.8-27B NVFP4 on one pod: stock SGLang DFlash2, stock vLLM DFlash2, AX tree 32 and AX GDN replay at one and eight clients.](docs/figures/b200-27b-nvfp4-prefill-graph.svg)
 
-| Clients | Stock DFlash2 | AX tree/chain | AX GDN replay |
-|---:|---:|---:|---:|
-| 1 | 448.5 / 408.1 / 281.3 | **632.5 / 516.5 / 333.8** | 456.6 / 415.3 / 286.6 |
-| 8 | 1,438.4 / 1,172.9 / 903.2 | 1,503.0 / 1,206.6 / 790.1 | **1,599.5 / 1,428.3 / 949.6** |
+| Clients | Stock SGLang DFlash2 | Stock vLLM DFlash2 | AX tree 32 | AX GDN replay |
+|---:|---:|---:|---:|---:|
+| 1 | 490.3 / 428.3 / 286.6 | **750.8 / 627.5 / 417.3** | 654.7 / 565.2 / 360.7 | 500.5 / 440.2 / 295.7 |
+| 8 | 1,534.7 / 1,510.2 / 1,012.7 | **2,034.3 / 2,179.9 / 1,531.6** | 1,617.4 / 1,507.3 / 1,033.7 | 1,591.8 / 1,522.0 / 1,016.5 |
 
-At one client the tree led. At eight clients, GDN replay led stock
-DFlash2 by 11.2% / 21.8% / 5.1%.
-[B200 per-pass results](docs/performance.md#b200-qwen38-27b)
+cute-dsl is not the add-on's SM100 default, and CUTLASS with prefill graphs
+has not been measured on the B200, so part of the gap may be the GEMM
+backend. Against the earlier B200 retest (eager prefill, CUTLASS), these
+rows ran −0.5% to +31%.
+[B200 prefill-graph report](results/b200_prefill_graph/REPORT.md) ·
+[Earlier B200 results](docs/performance.md#b200-qwen38-27b)
 
 ### H200
 
